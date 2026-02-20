@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Embeddy</string>
+    <string name="select_media">Select Media</string>
+    <string name="select_media_desc">Pick a video, GIF, or animation to convert</string>
+    <string name="convert">Convert to WebP</string>
+    <string name="converting">Converting…</string>
+    <string name="share">Share</string>
+    <string name="save">Save</string>
+    <string name="settings">Settings</string>
+    <string name="preset">Preset</string>
+    <string name="max_dimension">Max Dimension</string>
+    <string name="frame_rate">Frame Rate</string>
+    <string name="quality">Quality</string>
+    <string name="target_size">Target Size</string>
+    <string name="sharpen">Sharpen Text</string>
+    <string name="conversion_complete">Conversion complete</string>
+    <string name="conversion_failed">Conversion failed</string>
+    <string name="attempt_quality">Attempt at quality %1$d…</string>
+    <string name="output_size">%1$s · quality %2$d</string>
+    <string name="pick_file">Tap to pick a file</string>
+    <string name="or_share">or share a file to Embeddy</string>
+    <string name="new_conversion">New Conversion</string>
+</resources>

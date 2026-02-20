@@ -1,0 +1,108 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+env:
+  JAVA_VERSION: '21'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Read version
+        id: version
+        run: |
+          source version.properties
+          BUILD_NUM=${{ github.run_number }}
+          echo "major=${VERSION_MAJOR}" >> "$GITHUB_OUTPUT"
+          echo "minor=${VERSION_MINOR}" >> "$GITHUB_OUTPUT"
+          echo "patch=${BUILD_NUM}" >> "$GITHUB_OUTPUT"
+          echo "version_name=${VERSION_MAJOR}.${VERSION_MINOR}.${BUILD_NUM}" >> "$GITHUB_OUTPUT"
+          echo "version_code=$((VERSION_MAJOR * 10000 + VERSION_MINOR * 100 + BUILD_NUM))" >> "$GITHUB_OUTPUT"
+
+      - name: Build Release APK
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+          VERSION_MAJOR: ${{ steps.version.outputs.major }}
+          VERSION_MINOR: ${{ steps.version.outputs.minor }}
+        run: ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Rename APKs
+        id: apks
+        run: |
+          VERSION="${{ steps.version.outputs.version_name }}"
+          APK_DIR="app/build/outputs/apk/release"
+          mkdir -p final_apks
+
+          for apk in "${APK_DIR}"/*.apk; do
+            filename=$(basename "$apk")
+            if echo "$filename" | grep -q "universal"; then
+              new_name="Embeddy-v${VERSION}-universal.apk"
+            elif echo "$filename" | grep -q "arm64"; then
+              new_name="Embeddy-v${VERSION}-arm64-v8a.apk"
+            elif echo "$filename" | grep -q "armeabi"; then
+              new_name="Embeddy-v${VERSION}-armeabi-v7a.apk"
+            elif echo "$filename" | grep -q "x86_64"; then
+              new_name="Embeddy-v${VERSION}-x86_64.apk"
+            else
+              new_name="Embeddy-v${VERSION}-${filename}"
+            fi
+            cp "$apk" "final_apks/${new_name}"
+            echo "Renamed: ${filename} -> ${new_name}"
+          done
+
+          echo "apk_dir=final_apks" >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: embeddy-v${{ steps.version.outputs.version_name }}
+          path: final_apks/*.apk
+          retention-days: 30
+
+      - name: Create GitHub Release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version_name }}
+          name: Embeddy v${{ steps.version.outputs.version_name }}
+          body: |
+            ## Embeddy v${{ steps.version.outputs.version_name }}
+
+            Automated release from commit ${{ github.sha }}
+
+            | ABI | File |
+            |-----|------|
+            | Universal | `Embeddy-v${{ steps.version.outputs.version_name }}-universal.apk` |
+            | arm64-v8a | `Embeddy-v${{ steps.version.outputs.version_name }}-arm64-v8a.apk` |
+            | armeabi-v7a | `Embeddy-v${{ steps.version.outputs.version_name }}-armeabi-v7a.apk` |
+            | x86_64 | `Embeddy-v${{ steps.version.outputs.version_name }}-x86_64.apk` |
+
+            **Version Code:** ${{ steps.version.outputs.version_code }}
+          files: final_apks/*.apk
+          draft: false
+          prerelease: false
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

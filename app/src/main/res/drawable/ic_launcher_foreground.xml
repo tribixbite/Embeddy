@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Film frame outline -->
+    <path
+        android:fillColor="#B388FF"
+        android:pathData="M30,36 L78,36 Q80,36 80,38 L80,70 Q80,72 78,72 L30,72 Q28,72 28,70 L28,38 Q28,36 30,36 Z
+                          M32,40 L32,44 L28,44 L28,40 Z
+                          M32,48 L32,52 L28,52 L28,48 Z
+                          M32,56 L32,60 L28,60 L28,56 Z
+                          M32,64 L32,68 L28,68 L28,64 Z
+                          M76,40 L76,44 L80,44 L80,40 Z
+                          M76,48 L76,52 L80,52 L80,48 Z
+                          M76,56 L76,60 L80,60 L80,56 Z
+                          M76,64 L76,68 L80,68 L80,64 Z"
+        android:fillType="evenOdd" />
+
+    <!-- Arrow pointing right (conversion) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M44,50 L56,50 L56,46 L64,54 L56,62 L56,58 L44,58 Z" />
+</vector>
