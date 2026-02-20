@@ -29,6 +29,10 @@
     <string name="pick_file">Tap to pick a file</string>
     <string name="or_share">or share a file to Embeddy</string>
     <string name="new_conversion">New Conversion</string>
+    <string name="size_warning_title">Exceeds target size</string>
+    <string name="size_warning_body">Output is %1$s but target was %2$s (%3$s over). You can use it anyway or go back to trim/adjust settings.</string>
+    <string name="use_anyway">Use anyway</string>
+    <string name="trim_and_retry">Adjust &amp; retry</string>
 
     <!-- Inspect tab -->
     <string name="enter_url">Enter URL to inspect</string>

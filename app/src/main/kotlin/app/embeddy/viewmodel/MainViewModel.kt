@@ -125,12 +125,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         )
                     }
 
+                    is ConversionProgress.CompletedOversize -> {
+                        _state.value = ConversionState.SizeWarning(
+                            outputPath = progress.outputPath,
+                            outputSizeBytes = progress.fileSizeBytes,
+                            targetSizeBytes = progress.targetSizeBytes,
+                            qualityUsed = progress.qualityUsed,
+                            inputFileName = ready.fileName,
+                        )
+                    }
+
                     is ConversionProgress.Failed -> {
                         _state.value = ConversionState.Error(progress.message)
                     }
                 }
             }
         }
+    }
+
+    /** Accept the oversize output as-is. */
+    fun acceptOversize() {
+        val warning = _state.value as? ConversionState.SizeWarning ?: return
+        _state.value = ConversionState.Done(
+            outputPath = warning.outputPath,
+            outputSizeBytes = warning.outputSizeBytes,
+            qualityUsed = warning.qualityUsed,
+            inputFileName = warning.inputFileName,
+        )
+    }
+
+    /** Set trim points (in milliseconds from start of video). */
+    fun setTrim(startMs: Long, endMs: Long) {
+        _config.update { it.copy(trimStartMs = startMs, trimEndMs = endMs, preset = Preset.CUSTOM) }
     }
 
     /** Cancel an in-progress conversion. */

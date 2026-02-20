@@ -14,6 +14,8 @@ data class ConversionConfig(
     val loop: Int = 0,              // 0 = infinite loop
     val compressionLevel: Int = 4,  // WebP compression (0-6)
     val preset: Preset = Preset.DISCORD,
+    val trimStartMs: Long = 0,      // 0 = no trim
+    val trimEndMs: Long = 0,        // 0 = use full duration
 ) {
     companion object {
         fun fromPreset(preset: Preset): ConversionConfig = ConversionConfig(
@@ -54,6 +56,15 @@ sealed interface ConversionState {
     data class Done(
         val outputPath: String,
         val outputSizeBytes: Long,
+        val qualityUsed: Int,
+        val inputFileName: String,
+    ) : ConversionState
+
+    /** Output was produced but exceeds target size — user decides to keep or retry. */
+    data class SizeWarning(
+        val outputPath: String,
+        val outputSizeBytes: Long,
+        val targetSizeBytes: Long,
         val qualityUsed: Int,
         val inputFileName: String,
     ) : ConversionState

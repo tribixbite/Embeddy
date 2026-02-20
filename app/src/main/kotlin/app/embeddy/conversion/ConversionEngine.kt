@@ -132,21 +132,22 @@ class ConversionEngine(private val context: Context) {
                 attempt++
             }
 
-            // Exhausted all quality levels
+            // Exhausted all quality levels — produce result anyway as a warning
             if (tempOutput.exists()) {
-                // Use last attempt anyway
                 tempOutput.copyTo(finalOutput, overwrite = true)
                 tempOutput.delete()
                 inputFile.delete()
+                val finalQuality = quality + config.qualityStep
                 send(
-                    ConversionProgress.Complete(
+                    ConversionProgress.CompletedOversize(
                         outputPath = finalOutput.absolutePath,
                         fileSizeBytes = finalOutput.length(),
-                        qualityUsed = quality + config.qualityStep,
+                        targetSizeBytes = config.targetSizeBytes,
+                        qualityUsed = finalQuality,
                     )
                 )
             } else {
-                send(ConversionProgress.Failed("Could not meet target size at minimum quality"))
+                send(ConversionProgress.Failed("FFmpeg failed at all quality levels"))
             }
         } catch (e: Exception) {
             send(ConversionProgress.Failed(e.message ?: "Unknown error"))
@@ -181,7 +182,18 @@ class ConversionEngine(private val context: Context) {
 
         return buildString {
             append("-y ")                               // Overwrite output
+            // Trim: seek to start before input for fast seek, use -to for end
+            if (config.trimStartMs > 0) {
+                val ss = String.format("%.3f", config.trimStartMs / 1000.0)
+                append("-ss $ss ")
+            }
             append("-i \"$inputPath\" ")                // Input file
+            if (config.trimEndMs > 0) {
+                // -to is relative to -ss when -ss is before -i
+                val endSec = (config.trimEndMs - config.trimStartMs) / 1000.0
+                val to = String.format("%.3f", endSec)
+                append("-to $to ")
+            }
             append("-vf \"$filters\" ")                 // Video filters
             append("-c:v libwebp_anim ")                // Animated WebP encoder
             append("-quality $quality ")                // WebP quality
@@ -258,6 +270,13 @@ sealed interface ConversionProgress {
     data class Complete(
         val outputPath: String,
         val fileSizeBytes: Long,
+        val qualityUsed: Int,
+    ) : ConversionProgress
+    /** Conversion produced output but it exceeds the target size. */
+    data class CompletedOversize(
+        val outputPath: String,
+        val fileSizeBytes: Long,
+        val targetSizeBytes: Long,
         val qualityUsed: Int,
     ) : ConversionProgress
     data class Failed(val message: String) : ConversionProgress

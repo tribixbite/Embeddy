@@ -120,6 +120,8 @@ dependencies {
     // Media processing
     implementation(libs.ffmpeg.kit)
     implementation(libs.avif.coder)
+    implementation(libs.media3.exoplayer)
+    implementation(libs.media3.ui)
 
     // Image loading (thumbnails, previews, animated WebP playback)
     implementation(libs.coil.compose)

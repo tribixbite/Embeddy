@@ -29,6 +29,7 @@ import app.embeddy.conversion.ConversionState
 @Composable
 fun ConversionProgressCard(
     state: ConversionState.Converting,
+    targetSizeBytes: Long = 0,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -56,8 +57,12 @@ fun ConversionProgressCard(
 
             Spacer(Modifier.height(4.dp))
 
+            val targetLabel = if (targetSizeBytes > 0) {
+                val mb = String.format("%.1f MB", targetSizeBytes / 1_000_000.0)
+                " · target $mb"
+            } else ""
             Text(
-                text = stringResource(R.string.attempt_quality, state.currentQuality),
+                text = stringResource(R.string.attempt_quality, state.currentQuality) + targetLabel,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

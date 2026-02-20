@@ -20,11 +20,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.RocketLaunch
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -41,6 +44,7 @@ import app.embeddy.ui.components.ConversionProgressCard
 import app.embeddy.ui.components.MediaPickerCard
 import app.embeddy.ui.components.OutputPreviewCard
 import app.embeddy.ui.components.SettingsPanel
+import app.embeddy.ui.components.VideoTrimPlayer
 import app.embeddy.viewmodel.MainViewModel
 
 @Composable
@@ -84,17 +88,35 @@ fun ConvertScreen(viewModel: MainViewModel = viewModel()) {
             }
 
             is ConversionState.Ready -> {
+                // File info card
                 ReadyCard(
                     state = s,
                     onChangePick = {
                         filePicker.launch(arrayOf("video/*", "image/gif"))
                     },
                 )
+
+                // Video preview with trim controls
+                if (s.durationMs > 0) {
+                    VideoTrimPlayer(
+                        uri = Uri.parse(s.inputUri),
+                        durationMs = s.durationMs,
+                        inputSizeBytes = s.fileSize,
+                        targetSizeBytes = config.targetSizeBytes,
+                        trimStartMs = config.trimStartMs,
+                        trimEndMs = config.trimEndMs,
+                        onTrimChanged = viewModel::setTrim,
+                    )
+                }
+
                 SettingsPanel(
                     config = config,
                     onPresetSelected = viewModel::setPreset,
                     onConfigChanged = viewModel::updateConfig,
                 )
+
+                // Convert button with target size shown
+                val targetMb = String.format("%.1f MB", config.targetSizeBytes / 1_000_000.0)
                 Button(
                     onClick = viewModel::startConversion,
                     modifier = Modifier
@@ -109,7 +131,7 @@ fun ConvertScreen(viewModel: MainViewModel = viewModel()) {
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        text = stringResource(R.string.convert),
+                        text = "${stringResource(R.string.convert)} ($targetMb target)",
                         style = MaterialTheme.typography.titleMedium,
                     )
                 }
@@ -118,6 +140,7 @@ fun ConvertScreen(viewModel: MainViewModel = viewModel()) {
             is ConversionState.Converting -> {
                 ConversionProgressCard(
                     state = s,
+                    targetSizeBytes = config.targetSizeBytes,
                     onCancel = viewModel::cancelConversion,
                 )
             }
@@ -126,6 +149,14 @@ fun ConvertScreen(viewModel: MainViewModel = viewModel()) {
                 OutputPreviewCard(
                     state = s,
                     onNewConversion = viewModel::reset,
+                )
+            }
+
+            is ConversionState.SizeWarning -> {
+                SizeWarningCard(
+                    state = s,
+                    onAccept = viewModel::acceptOversize,
+                    onRetry = viewModel::reset,
                 )
             }
 
@@ -189,6 +220,85 @@ private fun ReadyCard(
 
             TextButton(onClick = onChangePick) {
                 Text("Change file")
+            }
+        }
+    }
+}
+
+/** Shown when conversion completed but output exceeds the target size. */
+@Composable
+private fun SizeWarningCard(
+    state: ConversionState.SizeWarning,
+    onAccept: () -> Unit,
+    onRetry: () -> Unit,
+) {
+    val actualMb = String.format("%.2f MB", state.outputSizeBytes / 1_000_000.0)
+    val targetMb = String.format("%.1f MB", state.targetSizeBytes / 1_000_000.0)
+    val overBy = String.format(
+        "%.1f%%",
+        (state.outputSizeBytes - state.targetSizeBytes).toFloat() / state.targetSizeBytes * 100,
+    )
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+        ),
+        shape = RoundedCornerShape(16.dp),
+    ) {
+        Column(modifier = Modifier.padding(20.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Outlined.Warning,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.tertiary,
+                    modifier = Modifier.size(24.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = stringResource(R.string.size_warning_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                )
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            Text(
+                text = stringResource(R.string.size_warning_body, actualMb, targetMb, overBy),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.85f),
+            )
+
+            Spacer(Modifier.height(4.dp))
+
+            Text(
+                text = "Quality: ${state.qualityUsed} (lowest tried)",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.7f),
+            )
+
+            Spacer(Modifier.height(16.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                // Accept the result as-is
+                FilledTonalButton(
+                    onClick = onAccept,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(stringResource(R.string.use_anyway))
+                }
+
+                // Go back and adjust settings / trim
+                OutlinedButton(
+                    onClick = onRetry,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(stringResource(R.string.trim_and_retry))
+                }
             }
         }
     }
