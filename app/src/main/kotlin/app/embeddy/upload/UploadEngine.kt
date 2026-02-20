@@ -14,17 +14,22 @@ import java.net.URL
 /**
  * Uploads files to anonymous hosting services (0x0.st, catbox.moe).
  * Optionally strips EXIF metadata before upload.
+ * Emits progress via callback for determinate progress UI.
  */
 class UploadEngine(private val context: Context) {
 
     private val tempDir: File
         get() = File(context.cacheDir, "upload_temp").also { it.mkdirs() }
 
-    /** Upload a file to the selected host, optionally stripping metadata. */
+    /**
+     * Upload a file to the selected host, optionally stripping metadata.
+     * @param onProgress callback with fraction 0f..1f of bytes written
+     */
     suspend fun upload(
         uri: Uri,
         host: UploadHost,
         stripMetadata: Boolean,
+        onProgress: (Float) -> Unit = {},
     ): UploadResult = withContext(Dispatchers.IO) {
         try {
             val fileName = queryFileName(uri) ?: "file"
@@ -37,16 +42,18 @@ class UploadEngine(private val context: Context) {
             }
 
             val resultUrl = when (host) {
-                UploadHost.ZER0X0 -> uploadTo0x0(tempFile, fileName, mimeType)
-                UploadHost.CATBOX -> uploadToCatbox(tempFile, fileName, mimeType)
+                UploadHost.ZER0X0 -> uploadTo0x0(tempFile, fileName, mimeType, onProgress)
+                UploadHost.CATBOX -> uploadToCatbox(tempFile, fileName, mimeType, onProgress)
             }
 
+            val fileSize = tempFile.length()
             tempFile.delete()
 
             UploadResult(
                 url = resultUrl,
                 fileName = fileName,
                 host = host,
+                fileSizeBytes = fileSize,
             )
         } catch (e: Exception) {
             throw UploadException("Upload failed: ${e.message}", e)
@@ -54,7 +61,12 @@ class UploadEngine(private val context: Context) {
     }
 
     /** POST to https://0x0.st with multipart/form-data. */
-    private fun uploadTo0x0(file: File, fileName: String, mimeType: String): String {
+    private fun uploadTo0x0(
+        file: File,
+        fileName: String,
+        mimeType: String,
+        onProgress: (Float) -> Unit,
+    ): String {
         val boundary = "----Embeddy${System.currentTimeMillis()}"
         val url = URL("https://0x0.st")
         val connection = (url.openConnection() as HttpURLConnection).apply {
@@ -64,11 +76,16 @@ class UploadEngine(private val context: Context) {
             readTimeout = 60_000
             setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
             setRequestProperty("User-Agent", "Embeddy/1.0")
+            // Enable chunked streaming to avoid buffering entire request in memory
+            setChunkedStreamingMode(8192)
         }
 
-        connection.outputStream.use { output ->
-            writeMultipartFile(output, boundary, "file", fileName, mimeType, file)
-            output.write("--$boundary--\r\n".toByteArray())
+        val totalBytes = file.length()
+
+        connection.outputStream.use { rawOutput ->
+            val progressOutput = ProgressOutputStream(rawOutput, totalBytes, onProgress)
+            writeMultipartFile(progressOutput, boundary, "file", fileName, mimeType, file)
+            progressOutput.write("--$boundary--\r\n".toByteArray())
         }
 
         val responseCode = connection.responseCode
@@ -83,7 +100,12 @@ class UploadEngine(private val context: Context) {
     }
 
     /** POST to https://catbox.moe/user/api.php with multipart/form-data. */
-    private fun uploadToCatbox(file: File, fileName: String, mimeType: String): String {
+    private fun uploadToCatbox(
+        file: File,
+        fileName: String,
+        mimeType: String,
+        onProgress: (Float) -> Unit,
+    ): String {
         val boundary = "----Embeddy${System.currentTimeMillis()}"
         val url = URL("https://catbox.moe/user/api.php")
         val connection = (url.openConnection() as HttpURLConnection).apply {
@@ -93,13 +115,17 @@ class UploadEngine(private val context: Context) {
             readTimeout = 60_000
             setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
             setRequestProperty("User-Agent", "Embeddy/1.0")
+            setChunkedStreamingMode(8192)
         }
 
-        connection.outputStream.use { output ->
+        val totalBytes = file.length()
+
+        connection.outputStream.use { rawOutput ->
+            val progressOutput = ProgressOutputStream(rawOutput, totalBytes, onProgress)
             // Catbox requires a "reqtype" field
-            writeMultipartField(output, boundary, "reqtype", "fileupload")
-            writeMultipartFile(output, boundary, "fileToUpload", fileName, mimeType, file)
-            output.write("--$boundary--\r\n".toByteArray())
+            writeMultipartField(progressOutput, boundary, "reqtype", "fileupload")
+            writeMultipartFile(progressOutput, boundary, "fileToUpload", fileName, mimeType, file)
+            progressOutput.write("--$boundary--\r\n".toByteArray())
         }
 
         val responseCode = connection.responseCode
@@ -147,7 +173,6 @@ class UploadEngine(private val context: Context) {
     private fun stripExifData(file: File) {
         try {
             val exif = ExifInterface(file)
-            // Clear all standard EXIF tags that may contain PII
             EXIF_TAGS_TO_STRIP.forEach { tag ->
                 exif.setAttribute(tag, null)
             }
@@ -206,6 +231,53 @@ class UploadEngine(private val context: Context) {
     }
 }
 
+/**
+ * OutputStream wrapper that tracks bytes written and reports progress.
+ * Throttles callbacks to avoid excessive UI updates (max every 50ms).
+ */
+class ProgressOutputStream(
+    private val wrapped: OutputStream,
+    private val totalBytes: Long,
+    private val onProgress: (Float) -> Unit,
+) : OutputStream() {
+
+    private var bytesWritten: Long = 0
+    private var lastCallbackTime: Long = 0
+
+    override fun write(b: Int) {
+        wrapped.write(b)
+        bytesWritten++
+        reportProgress()
+    }
+
+    override fun write(b: ByteArray) {
+        wrapped.write(b)
+        bytesWritten += b.size
+        reportProgress()
+    }
+
+    override fun write(b: ByteArray, off: Int, len: Int) {
+        wrapped.write(b, off, len)
+        bytesWritten += len
+        reportProgress()
+    }
+
+    override fun flush() = wrapped.flush()
+    override fun close() = wrapped.close()
+
+    private fun reportProgress() {
+        val now = System.currentTimeMillis()
+        // Throttle to max ~20 callbacks/sec to avoid UI stutter
+        if (now - lastCallbackTime < 50 && bytesWritten < totalBytes) return
+        lastCallbackTime = now
+
+        val fraction = if (totalBytes > 0) {
+            (bytesWritten.toFloat() / totalBytes).coerceIn(0f, 1f)
+        } else 0f
+        onProgress(fraction)
+    }
+}
+
 /** Supported upload hosts. */
 enum class UploadHost(val label: String, val maxSizeMb: Int) {
     ZER0X0("0x0.st", 512),
@@ -217,6 +289,7 @@ data class UploadResult(
     val url: String,
     val fileName: String,
     val host: UploadHost,
+    val fileSizeBytes: Long = 0,
 )
 
 class UploadException(message: String, cause: Throwable? = null) : Exception(message, cause)
@@ -225,7 +298,7 @@ class UploadException(message: String, cause: Throwable? = null) : Exception(mes
 sealed interface UploadState {
     data object Idle : UploadState
     data class Ready(val fileName: String, val fileSize: Long, val uri: String) : UploadState
-    data class Uploading(val fileName: String) : UploadState
+    data class Uploading(val fileName: String, val progress: Float = 0f) : UploadState
     data class Done(val result: UploadResult) : UploadState
     data class Error(val message: String) : UploadState
 }

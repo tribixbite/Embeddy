@@ -11,6 +11,7 @@ import app.embeddy.upload.UploadState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 class UploadViewModel(application: Application) : AndroidViewModel(application) {
@@ -53,18 +54,25 @@ class UploadViewModel(application: Application) : AndroidViewModel(application) 
         )
     }
 
-    /** Start the upload process. */
+    /** Start the upload process with progress tracking. */
     fun startUpload() {
         val ready = _state.value as? UploadState.Ready ?: return
         val uri = Uri.parse(ready.uri)
 
-        _state.value = UploadState.Uploading(ready.fileName)
+        _state.value = UploadState.Uploading(ready.fileName, progress = 0f)
         viewModelScope.launch {
             try {
                 val result = engine.upload(
                     uri = uri,
                     host = _host.value,
                     stripMetadata = _stripMetadata.value,
+                    onProgress = { fraction ->
+                        _state.update { current ->
+                            if (current is UploadState.Uploading) {
+                                current.copy(progress = fraction)
+                            } else current
+                        }
+                    },
                 )
                 _state.value = UploadState.Done(result)
             } catch (e: Exception) {

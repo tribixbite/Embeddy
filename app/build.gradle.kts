@@ -106,6 +106,7 @@ dependencies {
     implementation(libs.androidx.splashscreen)
     implementation(libs.androidx.documentfile)
     implementation(libs.androidx.exifinterface)
+    implementation(libs.jsoup)
 
     // Compose
     implementation(platform(libs.compose.bom))

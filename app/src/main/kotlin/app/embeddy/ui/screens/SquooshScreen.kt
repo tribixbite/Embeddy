@@ -89,47 +89,35 @@ fun SquooshScreen(viewModel: SquooshViewModel = viewModel()) {
     ) {
         when (val s = state) {
             is SquooshState.Idle -> {
-                // Image picker
                 ImagePickerCard(onClick = { imagePicker.launch(arrayOf("image/*")) })
-
-                // Settings
                 SquooshSettings(
                     format = config.format,
                     quality = config.quality,
-                    effort = config.effort,
                     lossless = config.lossless,
                     maxDimension = config.maxDimension,
                     onFormatChanged = viewModel::setFormat,
                     onQualityChanged = viewModel::setQuality,
-                    onEffortChanged = viewModel::setEffort,
                     onLosslessChanged = viewModel::setLossless,
                     onMaxDimensionChanged = viewModel::setMaxDimension,
                 )
             }
 
             is SquooshState.Ready -> {
-                // File info
                 FileInfoCard(
                     fileName = s.fileName,
                     fileSize = s.fileSize,
                     onChangePick = { imagePicker.launch(arrayOf("image/*")) },
                 )
-
-                // Settings
                 SquooshSettings(
                     format = config.format,
                     quality = config.quality,
-                    effort = config.effort,
                     lossless = config.lossless,
                     maxDimension = config.maxDimension,
                     onFormatChanged = viewModel::setFormat,
                     onQualityChanged = viewModel::setQuality,
-                    onEffortChanged = viewModel::setEffort,
                     onLosslessChanged = viewModel::setLossless,
                     onMaxDimensionChanged = viewModel::setMaxDimension,
                 )
-
-                // Compress button
                 Button(
                     onClick = viewModel::compress,
                     modifier = Modifier
@@ -173,7 +161,6 @@ fun SquooshScreen(viewModel: SquooshViewModel = viewModel()) {
             is SquooshState.Done -> {
                 CompressionResultCard(
                     result = s.result,
-                    inputFileName = s.inputFileName,
                     onReset = viewModel::reset,
                 )
             }
@@ -292,12 +279,10 @@ private fun FileInfoCard(fileName: String, fileSize: Long, onChangePick: () -> U
 private fun SquooshSettings(
     format: OutputFormat,
     quality: Int,
-    effort: Int,
     lossless: Boolean,
     maxDimension: Int,
     onFormatChanged: (OutputFormat) -> Unit,
     onQualityChanged: (Int) -> Unit,
-    onEffortChanged: (Int) -> Unit,
     onLosslessChanged: (Boolean) -> Unit,
     onMaxDimensionChanged: (Int) -> Unit,
 ) {
@@ -335,18 +320,6 @@ private fun SquooshSettings(
                     valueRange = 1f..100f,
                     valueLabel = "$quality",
                     onValueChange = { onQualityChanged(it.roundToInt()) },
-                )
-            }
-
-            // Effort slider (WebP compression_level)
-            if (format == OutputFormat.WEBP) {
-                SettingSliderRow(
-                    label = stringResource(R.string.effort),
-                    value = effort.toFloat(),
-                    valueRange = 0f..6f,
-                    steps = 5,
-                    valueLabel = "$effort",
-                    onValueChange = { onEffortChanged(it.roundToInt()) },
                 )
             }
 
@@ -416,7 +389,6 @@ private fun SettingSliderRow(
 @Composable
 private fun CompressionResultCard(
     result: SquooshResult,
-    inputFileName: String,
     onReset: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -429,7 +401,6 @@ private fun CompressionResultCard(
         shape = RoundedCornerShape(16.dp),
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
-            // Success header
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     Icons.Outlined.CheckCircle,
@@ -464,13 +435,16 @@ private fun CompressionResultCard(
             Spacer(Modifier.height(12.dp))
 
             // Size comparison
+            val dims = if (result.outputWidth != result.originalWidth || result.outputHeight != result.originalHeight) {
+                " (${result.outputWidth}x${result.outputHeight})"
+            } else ""
             Text(
                 text = stringResource(R.string.original_size, formatFileSize(result.originalSizeBytes)),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                text = stringResource(R.string.compressed_size, formatFileSize(result.compressedSizeBytes)),
+                text = stringResource(R.string.compressed_size, formatFileSize(result.compressedSizeBytes)) + dims,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -488,7 +462,6 @@ private fun CompressionResultCard(
 
             Spacer(Modifier.height(16.dp))
 
-            // Actions
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -501,7 +474,6 @@ private fun CompressionResultCard(
                     Spacer(Modifier.width(6.dp))
                     Text(stringResource(R.string.share))
                 }
-
                 FilledTonalButton(
                     onClick = { saveToDownloads(context, result.outputPath) },
                     modifier = Modifier.weight(1f),

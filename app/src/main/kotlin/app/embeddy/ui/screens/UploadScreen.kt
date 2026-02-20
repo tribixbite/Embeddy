@@ -38,7 +38,10 @@ import androidx.compose.material.icons.outlined.UploadFile
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -135,27 +138,10 @@ fun UploadScreen(viewModel: UploadViewModel = viewModel()) {
             }
 
             is UploadState.Uploading -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(160.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator(modifier = Modifier.size(40.dp))
-                        Spacer(Modifier.height(16.dp))
-                        Text(
-                            text = stringResource(R.string.uploading),
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            text = s.fileName,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
+                UploadProgressCard(
+                    fileName = s.fileName,
+                    progress = s.progress,
+                )
             }
 
             is UploadState.Done -> {
@@ -462,6 +448,56 @@ private fun shareUrl(context: Context, url: String) {
         putExtra(Intent.EXTRA_TEXT, url)
     }
     context.startActivity(Intent.createChooser(intent, "Share URL"))
+}
+
+@Composable
+private fun UploadProgressCard(fileName: String, progress: Float) {
+    val animatedProgress by animateFloatAsState(
+        targetValue = progress,
+        animationSpec = tween(300),
+        label = "upload_progress",
+    )
+    val pct = (animatedProgress * 100).toInt()
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        ),
+        shape = RoundedCornerShape(16.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = stringResource(R.string.uploading),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = fileName,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+            Spacer(Modifier.height(16.dp))
+            LinearProgressIndicator(
+                progress = { animatedProgress },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(8.dp)
+                    .clip(RoundedCornerShape(4.dp)),
+                trackColor = MaterialTheme.colorScheme.surfaceVariant,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "$pct%",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+    }
 }
 
 private fun formatSize(bytes: Long): String {

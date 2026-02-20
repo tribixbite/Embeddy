@@ -75,10 +75,6 @@ class SquooshViewModel(application: Application) : AndroidViewModel(application)
         _config.update { it.copy(quality = quality) }
     }
 
-    fun setEffort(effort: Int) {
-        _config.update { it.copy(effort = effort) }
-    }
-
     fun setLossless(lossless: Boolean) {
         _config.update { it.copy(lossless = lossless) }
     }

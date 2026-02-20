@@ -56,8 +56,7 @@
     <!-- Squoosh tab -->
     <string name="pick_image">Pick an image to compress</string>
     <string name="output_format">Output Format</string>
-    <string name="effort">Effort</string>
-    <string name="lossless">Lossless</string>
+<string name="lossless">Lossless</string>
     <string name="compress">Compress</string>
     <string name="compressing">Compressing…</string>
     <string name="original_size">Original: %1$s</string>

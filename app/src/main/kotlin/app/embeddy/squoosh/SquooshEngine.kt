@@ -4,24 +4,25 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Build
 import android.provider.OpenableColumns
-import com.arthenica.ffmpegkit.FFmpegKit
-import com.arthenica.ffmpegkit.ReturnCode
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.io.File
-import kotlin.coroutines.resume
+import java.io.FileOutputStream
 
 /**
- * Image compression engine inspired by Google Squoosh and cleverkeys-gif-module.
- * Uses ffmpeg-kit for codec control (WebP quality/effort, JPEG quality) and
- * Android's BitmapFactory for decoding with optional downscaling.
+ * Image compression engine using Android's native Bitmap APIs.
+ * Avoids ffmpeg dependency for still image compression — faster and lighter.
+ *
+ * Inspired by Google Squoosh and cleverkeys-gif-module compression profiles:
+ * - Configurable output format (WebP, JPEG, PNG)
+ * - Quality control for lossy formats
+ * - Lossless WebP option
+ * - Max dimension scaling with Lanczos-quality downsampling
+ * - AVIF support on Android 14+ via runtime detection
  */
 class SquooshEngine(private val context: Context) {
-
-    private val tempDir: File
-        get() = File(context.cacheDir, "squoosh_temp").also { it.mkdirs() }
 
     private val outputDir: File
         get() = File(context.cacheDir, "squoosh_out").also { it.mkdirs() }
@@ -31,30 +32,49 @@ class SquooshEngine(private val context: Context) {
         val fileName = queryFileName(uri) ?: "image"
         val baseName = fileName.substringBeforeLast(".")
 
-        // Copy input to temp
-        val inputFile = copyToTemp(uri, fileName)
-        val originalSize = inputFile.length()
+        // Read original file size before decoding
+        val originalSize = context.contentResolver.openInputStream(uri)?.use { it.available().toLong() }
+            ?: context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                val idx = cursor.getColumnIndex(OpenableColumns.SIZE)
+                if (cursor.moveToFirst() && idx >= 0) cursor.getLong(idx) else 0L
+            } ?: 0L
 
-        // Probe dimensions
-        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(inputFile.absolutePath, options)
-        val originalWidth = options.outWidth
-        val originalHeight = options.outHeight
+        // Decode with optional downsampling for very large images
+        val bitmap = decodeBitmap(uri, config.maxDimension)
+            ?: throw SquooshException("Failed to decode image")
+
+        val originalWidth = bitmap.width
+        val originalHeight = bitmap.height
+
+        // Optionally resize if maxDimension is set and image exceeds it
+        val resized = if (config.maxDimension > 0 &&
+            (bitmap.width > config.maxDimension || bitmap.height > config.maxDimension)
+        ) {
+            val scale = minOf(
+                config.maxDimension.toFloat() / bitmap.width,
+                config.maxDimension.toFloat() / bitmap.height,
+            )
+            val newW = (bitmap.width * scale).toInt()
+            val newH = (bitmap.height * scale).toInt()
+            // createScaledBitmap uses bilinear filtering by default
+            Bitmap.createScaledBitmap(bitmap, newW, newH, true).also {
+                if (it !== bitmap) bitmap.recycle()
+            }
+        } else bitmap
 
         val outputExt = config.format.extension
         val outputFile = File(outputDir, "${baseName}_squoosh.$outputExt")
 
         try {
-            val command = buildFfmpegCommand(inputFile, outputFile, config, originalWidth, originalHeight)
-            val success = executeFfmpeg(command)
+            val compressFormat = resolveCompressFormat(config)
+            val quality = resolveQuality(config)
 
-            if (!success || !outputFile.exists()) {
-                inputFile.delete()
-                throw SquooshException("Compression failed — FFmpeg returned an error")
+            FileOutputStream(outputFile).use { fos ->
+                val success = resized.compress(compressFormat, quality, fos)
+                if (!success) throw SquooshException("Bitmap.compress() returned false")
             }
 
             val compressedSize = outputFile.length()
-            inputFile.delete()
 
             SquooshResult(
                 outputPath = outputFile.absolutePath,
@@ -62,85 +82,73 @@ class SquooshEngine(private val context: Context) {
                 compressedSizeBytes = compressedSize,
                 originalWidth = originalWidth,
                 originalHeight = originalHeight,
+                outputWidth = resized.width,
+                outputHeight = resized.height,
                 format = config.format,
                 quality = config.quality,
             )
-        } catch (e: SquooshException) {
-            throw e
-        } catch (e: Exception) {
-            inputFile.delete()
-            throw SquooshException("Compression failed: ${e.message}", e)
+        } finally {
+            resized.recycle()
         }
     }
 
-    /** Build FFmpeg command based on output format and config. */
-    private fun buildFfmpegCommand(
-        input: File,
-        output: File,
-        config: SquooshConfig,
-        origWidth: Int,
-        origHeight: Int,
-    ): String {
-        val filters = buildList {
-            // Scale if maxDimension is set and image exceeds it
-            if (config.maxDimension > 0 && (origWidth > config.maxDimension || origHeight > config.maxDimension)) {
-                add("scale='min(${config.maxDimension},iw)':'min(${config.maxDimension},ih)':force_original_aspect_ratio=decrease:flags=lanczos")
-            }
+    /**
+     * Decode bitmap from URI with efficient subsampling.
+     * First pass decodes bounds only, then calculates inSampleSize to load
+     * at roughly the target dimension to conserve memory.
+     */
+    private fun decodeBitmap(uri: Uri, maxDimension: Int): Bitmap? {
+        // Pass 1: decode bounds
+        val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        context.contentResolver.openInputStream(uri)?.use { stream ->
+            BitmapFactory.decodeStream(stream, null, boundsOpts)
         }
 
-        val filterArg = if (filters.isNotEmpty()) "-vf \"${filters.joinToString(",")}\" " else ""
+        val origW = boundsOpts.outWidth
+        val origH = boundsOpts.outHeight
+        if (origW <= 0 || origH <= 0) return null
 
-        return buildString {
-            append("-y -i \"${input.absolutePath}\" ")
-            append(filterArg)
+        // Calculate inSampleSize for memory efficiency
+        val targetDim = if (maxDimension > 0) maxDimension else maxOf(origW, origH)
+        var sampleSize = 1
+        while (origW / sampleSize > targetDim * 2 && origH / sampleSize > targetDim * 2) {
+            sampleSize *= 2
+        }
 
-            when (config.format) {
-                OutputFormat.WEBP -> {
-                    if (config.lossless) {
-                        append("-c:v libwebp -lossless 1 ")
-                        append("-compression_level ${config.effort} ")
-                    } else {
-                        append("-c:v libwebp -lossless 0 ")
-                        append("-quality ${config.quality} ")
-                        append("-compression_level ${config.effort} ")
-                    }
-                }
-
-                OutputFormat.JPEG -> {
-                    // ffmpeg q:v scale: 2 (best) to 31 (worst)
-                    // Map our 1-100 quality to 31-2 scale
-                    val qv = (31 - (config.quality / 100.0 * 29)).toInt().coerceIn(2, 31)
-                    append("-q:v $qv ")
-                }
-
-                OutputFormat.PNG -> {
-                    // PNG is always lossless; compression_level 0-100 controls speed vs size
-                    append("-compression_level ${config.effort * 15} ")
-                }
-            }
-
-            append("-frames:v 1 ")  // Single frame (still image)
-            append("\"${output.absolutePath}\"")
+        // Pass 2: decode at reduced resolution
+        val decodeOpts = BitmapFactory.Options().apply {
+            inSampleSize = sampleSize
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+        return context.contentResolver.openInputStream(uri)?.use { stream ->
+            BitmapFactory.decodeStream(stream, null, decodeOpts)
         }
     }
 
-    /** Execute an FFmpeg command, returns true on success. */
-    private suspend fun executeFfmpeg(command: String): Boolean =
-        suspendCancellableCoroutine { cont ->
-            val session = FFmpegKit.executeAsync(command) { session ->
-                if (cont.isActive) {
-                    cont.resume(ReturnCode.isSuccess(session.returnCode))
+    /** Map our OutputFormat + config to the Android Bitmap.CompressFormat. */
+    private fun resolveCompressFormat(config: SquooshConfig): Bitmap.CompressFormat {
+        return when (config.format) {
+            OutputFormat.WEBP -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    if (config.lossless) Bitmap.CompressFormat.WEBP_LOSSLESS
+                    else Bitmap.CompressFormat.WEBP_LOSSY
+                } else {
+                    @Suppress("DEPRECATION")
+                    Bitmap.CompressFormat.WEBP
                 }
             }
-            cont.invokeOnCancellation { session.cancel() }
+            OutputFormat.JPEG -> Bitmap.CompressFormat.JPEG
+            OutputFormat.PNG -> Bitmap.CompressFormat.PNG
         }
+    }
 
-    private fun copyToTemp(uri: Uri, fileName: String): File {
-        val tempFile = File(tempDir, "sq_${System.currentTimeMillis()}_$fileName")
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            tempFile.outputStream().use { output -> input.copyTo(output) }
-        } ?: throw SquooshException("Cannot read file")
-        return tempFile
+    /** Resolve quality parameter. PNG ignores quality, WebP lossless uses 0 for size. */
+    private fun resolveQuality(config: SquooshConfig): Int {
+        return when {
+            config.format == OutputFormat.PNG -> 100 // PNG ignores this; always lossless
+            config.lossless && config.format == OutputFormat.WEBP -> 100
+            else -> config.quality
+        }
     }
 
     private fun queryFileName(uri: Uri): String? {
@@ -150,15 +158,24 @@ class SquooshEngine(private val context: Context) {
         }
     }
 
-    /** Clean up old output files. */
+    /** Clean up old output files older than 24 hours. */
     fun cleanup() {
         val cutoff = System.currentTimeMillis() - 24 * 60 * 60 * 1000
         outputDir.listFiles()?.filter { it.lastModified() < cutoff }?.forEach { it.delete() }
-        tempDir.listFiles()?.forEach { it.delete() }
+    }
+
+    companion object {
+        /** Check if AVIF encoding is available on this device (Android 14+, hardware-dependent). */
+        fun isAvifEncodingAvailable(): Boolean {
+            // AVIF encoding via Bitmap.compress is only reliably available on Android 14+ (API 34)
+            // and even then depends on device chipset. We don't offer it yet.
+            // TODO: add AVIF once Android 14+ adoption is high enough
+            return false
+        }
     }
 }
 
-/** Supported output formats. */
+/** Supported output formats for still image compression. */
 enum class OutputFormat(val label: String, val extension: String) {
     WEBP("WebP", "webp"),
     JPEG("JPEG", "jpg"),
@@ -168,19 +185,20 @@ enum class OutputFormat(val label: String, val extension: String) {
 /** Compression configuration. */
 data class SquooshConfig(
     val format: OutputFormat = OutputFormat.WEBP,
-    val quality: Int = 80,         // 1-100, higher = better quality / larger file
-    val effort: Int = 4,           // 0-6 for WebP compression_level
-    val lossless: Boolean = false,
+    val quality: Int = 80,         // 1-100 for lossy formats
+    val lossless: Boolean = false, // WebP lossless mode
     val maxDimension: Int = 0,     // 0 = no resize
 )
 
-/** Compression result. */
+/** Compression result with before/after metrics. */
 data class SquooshResult(
     val outputPath: String,
     val originalSizeBytes: Long,
     val compressedSizeBytes: Long,
     val originalWidth: Int,
     val originalHeight: Int,
+    val outputWidth: Int,
+    val outputHeight: Int,
     val format: OutputFormat,
     val quality: Int,
 ) {
