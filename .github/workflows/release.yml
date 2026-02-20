@@ -66,7 +66,9 @@ jobs:
             elif echo "$filename" | grep -q "x86_64"; then
               new_name="Embeddy-v${VERSION}-x86_64.apk"
             else
-              new_name="Embeddy-v${VERSION}-${filename}"
+              # Skip unexpected ABIs (mips, riscv64, x86-only, etc.)
+              echo "Skipped: ${filename}"
+              continue
             fi
             cp "$apk" "final_apks/${new_name}"
             echo "Renamed: ${filename} -> ${new_name}"
