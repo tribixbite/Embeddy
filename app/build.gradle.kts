@@ -105,6 +105,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.splashscreen)
     implementation(libs.androidx.documentfile)
+    implementation(libs.androidx.exifinterface)
 
     // Compose
     implementation(platform(libs.compose.bom))

@@ -3,9 +3,7 @@ package app.embeddy.ui.screens
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -25,14 +23,10 @@ import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -40,8 +34,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import app.embeddy.R
-import app.embeddy.conversion.ConversionConfig
 import app.embeddy.conversion.ConversionState
 import app.embeddy.ui.components.ConversionProgressCard
 import app.embeddy.ui.components.MediaPickerCard
@@ -49,9 +43,8 @@ import app.embeddy.ui.components.OutputPreviewCard
 import app.embeddy.ui.components.SettingsPanel
 import app.embeddy.viewmodel.MainViewModel
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(viewModel: MainViewModel) {
+fun ConvertScreen(viewModel: MainViewModel = viewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val config by viewModel.config.collectAsStateWithLifecycle()
 
@@ -61,108 +54,90 @@ fun HomeScreen(viewModel: MainViewModel) {
         uri?.let { viewModel.onFilePicked(it) }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        when (val s = state) {
+            is ConversionState.Idle -> {
+                MediaPickerCard(
+                    onClick = {
+                        filePicker.launch(arrayOf("video/*", "image/gif"))
+                    },
+                )
+                SettingsPanel(
+                    config = config,
+                    onPresetSelected = viewModel::setPreset,
+                    onConfigChanged = viewModel::updateConfig,
+                )
+            }
+
+            is ConversionState.Picking -> {
+                MediaPickerCard(
+                    onClick = {
+                        filePicker.launch(arrayOf("video/*", "image/gif"))
+                    },
+                )
+            }
+
+            is ConversionState.Ready -> {
+                ReadyCard(
+                    state = s,
+                    onChangePick = {
+                        filePicker.launch(arrayOf("video/*", "image/gif"))
+                    },
+                )
+                SettingsPanel(
+                    config = config,
+                    onPresetSelected = viewModel::setPreset,
+                    onConfigChanged = viewModel::updateConfig,
+                )
+                Button(
+                    onClick = viewModel::startConversion,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    shape = RoundedCornerShape(16.dp),
+                ) {
+                    Icon(
+                        Icons.Default.RocketLaunch,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
                     Text(
-                        text = stringResource(R.string.app_name),
-                        style = MaterialTheme.typography.headlineMedium,
-                    )
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                ),
-            )
-        },
-        containerColor = MaterialTheme.colorScheme.background,
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = 16.dp)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            when (val s = state) {
-                is ConversionState.Idle -> {
-                    MediaPickerCard(
-                        onClick = {
-                            filePicker.launch(arrayOf("video/*", "image/gif"))
-                        },
-                    )
-                    SettingsPanel(
-                        config = config,
-                        onPresetSelected = viewModel::setPreset,
-                        onConfigChanged = viewModel::updateConfig,
-                    )
-                }
-
-                is ConversionState.Picking -> {
-                    MediaPickerCard(
-                        onClick = {
-                            filePicker.launch(arrayOf("video/*", "image/gif"))
-                        },
-                    )
-                }
-
-                is ConversionState.Ready -> {
-                    ReadyCard(
-                        state = s,
-                        onChangePick = {
-                            filePicker.launch(arrayOf("video/*", "image/gif"))
-                        },
-                    )
-                    SettingsPanel(
-                        config = config,
-                        onPresetSelected = viewModel::setPreset,
-                        onConfigChanged = viewModel::updateConfig,
-                    )
-                    Button(
-                        onClick = viewModel::startConversion,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(56.dp),
-                        shape = RoundedCornerShape(16.dp),
-                    ) {
-                        Icon(
-                            Icons.Default.RocketLaunch,
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp),
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = stringResource(R.string.convert),
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                    }
-                }
-
-                is ConversionState.Converting -> {
-                    ConversionProgressCard(
-                        state = s,
-                        onCancel = viewModel::cancelConversion,
-                    )
-                }
-
-                is ConversionState.Done -> {
-                    OutputPreviewCard(
-                        state = s,
-                        onNewConversion = viewModel::reset,
-                    )
-                }
-
-                is ConversionState.Error -> {
-                    ErrorCard(
-                        message = s.message,
-                        onRetry = viewModel::reset,
+                        text = stringResource(R.string.convert),
+                        style = MaterialTheme.typography.titleMedium,
                     )
                 }
             }
 
-            Spacer(Modifier.height(32.dp))
+            is ConversionState.Converting -> {
+                ConversionProgressCard(
+                    state = s,
+                    onCancel = viewModel::cancelConversion,
+                )
+            }
+
+            is ConversionState.Done -> {
+                OutputPreviewCard(
+                    state = s,
+                    onNewConversion = viewModel::reset,
+                )
+            }
+
+            is ConversionState.Error -> {
+                ErrorCard(
+                    message = s.message,
+                    onRetry = viewModel::reset,
+                )
+            }
         }
+
+        Spacer(Modifier.height(32.dp))
     }
 }
 

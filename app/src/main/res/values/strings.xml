@@ -1,6 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Embeddy</string>
+
+    <!-- Tabs -->
+    <string name="tab_convert">Convert</string>
+    <string name="tab_inspect">Inspect</string>
+    <string name="tab_upload">Upload</string>
+    <string name="tab_squoosh">Squoosh</string>
+
+    <!-- Convert tab -->
     <string name="select_media">Select Media</string>
     <string name="select_media_desc">Pick a video, GIF, or animation to convert</string>
     <string name="convert">Convert to WebP</string>
@@ -21,4 +29,39 @@
     <string name="pick_file">Tap to pick a file</string>
     <string name="or_share">or share a file to Embeddy</string>
     <string name="new_conversion">New Conversion</string>
+
+    <!-- Inspect tab -->
+    <string name="enter_url">Enter URL to inspect</string>
+    <string name="fetch">Fetch</string>
+    <string name="fetching">Fetching…</string>
+    <string name="open_graph">Open Graph</string>
+    <string name="twitter_card">Twitter Card</string>
+    <string name="general_meta">General</string>
+    <string name="social_previews">Social Previews</string>
+    <string name="no_metadata">No metadata found</string>
+    <string name="copy_tag">Copy tag</string>
+    <string name="embed_code">Embed Code</string>
+
+    <!-- Upload tab -->
+    <string name="pick_to_upload">Pick a file to upload</string>
+    <string name="strip_metadata">Strip Metadata</string>
+    <string name="strip_metadata_desc">Remove EXIF, GPS, and camera info</string>
+    <string name="uploading">Uploading…</string>
+    <string name="upload_complete">Upload complete</string>
+    <string name="upload_failed">Upload failed</string>
+    <string name="copy_url">Copy URL</string>
+    <string name="public_url">Public URL</string>
+    <string name="host_service">Host</string>
+
+    <!-- Squoosh tab -->
+    <string name="pick_image">Pick an image to compress</string>
+    <string name="output_format">Output Format</string>
+    <string name="effort">Effort</string>
+    <string name="lossless">Lossless</string>
+    <string name="compress">Compress</string>
+    <string name="compressing">Compressing…</string>
+    <string name="original_size">Original: %1$s</string>
+    <string name="compressed_size">Compressed: %1$s</string>
+    <string name="savings">Savings: %1$s</string>
+    <string name="compression_complete">Compression complete</string>
 </resources>

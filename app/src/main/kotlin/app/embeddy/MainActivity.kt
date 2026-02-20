@@ -6,7 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
-import app.embeddy.ui.screens.HomeScreen
+import app.embeddy.navigation.AppScaffold
 import app.embeddy.ui.theme.EmbeddyTheme
 import app.embeddy.viewmodel.MainViewModel
 
@@ -19,14 +19,14 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
-        // Handle incoming share/view intents
+        // Handle incoming share/view intents — routes to Convert tab
         if (savedInstanceState == null) {
             intent?.let { viewModel.onSharedIntent(it) }
         }
 
         setContent {
             EmbeddyTheme {
-                HomeScreen(viewModel = viewModel)
+                AppScaffold()
             }
         }
     }
