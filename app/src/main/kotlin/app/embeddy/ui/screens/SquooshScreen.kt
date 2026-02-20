@@ -333,8 +333,8 @@ private fun SquooshSettings(
                 onValueChange = { onMaxDimensionChanged(it.roundToInt()) },
             )
 
-            // Lossless toggle (only for WebP)
-            if (format == OutputFormat.WEBP) {
+            // Lossless toggle (WebP and AVIF support lossless mode)
+            if (format == OutputFormat.WEBP || format == OutputFormat.AVIF) {
                 Spacer(Modifier.height(8.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -498,14 +498,14 @@ private fun CompressionResultCard(
     }
 }
 
+private fun mimeForFile(file: File): String {
+    return OutputFormat.entries.firstOrNull { it.extension == file.extension.lowercase() }?.mimeType
+        ?: "application/octet-stream"
+}
+
 private fun shareFile(context: Context, path: String) {
     val file = File(path)
-    val mimeType = when (file.extension.lowercase()) {
-        "webp" -> "image/webp"
-        "jpg", "jpeg" -> "image/jpeg"
-        "png" -> "image/png"
-        else -> "application/octet-stream"
-    }
+    val mimeType = mimeForFile(file)
     val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", file)
     val intent = Intent(Intent.ACTION_SEND).apply {
         type = mimeType
@@ -517,12 +517,7 @@ private fun shareFile(context: Context, path: String) {
 
 private fun saveToDownloads(context: Context, path: String) {
     val file = File(path)
-    val mimeType = when (file.extension.lowercase()) {
-        "webp" -> "image/webp"
-        "jpg", "jpeg" -> "image/jpeg"
-        "png" -> "image/png"
-        else -> "application/octet-stream"
-    }
+    val mimeType = mimeForFile(file)
     val contentValues = android.content.ContentValues().apply {
         put(android.provider.MediaStore.Downloads.DISPLAY_NAME, file.name)
         put(android.provider.MediaStore.Downloads.MIME_TYPE, mimeType)

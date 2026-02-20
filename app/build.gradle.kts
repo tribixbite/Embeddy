@@ -119,6 +119,7 @@ dependencies {
 
     // Media processing
     implementation(libs.ffmpeg.kit)
+    implementation(libs.avif.coder)
 
     // Image loading (thumbnails, previews, animated WebP playback)
     implementation(libs.coil.compose)

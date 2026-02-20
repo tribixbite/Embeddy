@@ -6,6 +6,9 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.provider.OpenableColumns
+import com.radzivon.bartoshyk.avif.coder.AvifSpeed
+import com.radzivon.bartoshyk.avif.coder.HeifCoder
+import com.radzivon.bartoshyk.avif.coder.PreciseMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -20,7 +23,7 @@ import java.io.FileOutputStream
  * - Quality control for lossy formats
  * - Lossless WebP option
  * - Max dimension scaling with Lanczos-quality downsampling
- * - AVIF support on Android 14+ via runtime detection
+ * - AVIF support via awxkee/avif-coder (libaom-based, all API levels)
  */
 class SquooshEngine(private val context: Context) {
 
@@ -66,12 +69,26 @@ class SquooshEngine(private val context: Context) {
         val outputFile = File(outputDir, "${baseName}_squoosh.$outputExt")
 
         try {
-            val compressFormat = resolveCompressFormat(config)
-            val quality = resolveQuality(config)
-
-            FileOutputStream(outputFile).use { fos ->
-                val success = resized.compress(compressFormat, quality, fos)
-                if (!success) throw SquooshException("Bitmap.compress() returned false")
+            if (config.format == OutputFormat.AVIF) {
+                // AVIF encoding via libaom through avif-coder JNI bindings.
+                // Speed SIX is the Squoosh.app-equivalent sweet spot for mobile:
+                // reasonable encode time without sacrificing compression density.
+                val preciseMode = if (config.lossless) PreciseMode.LOSSLESS else PreciseMode.LOSSY
+                val encoded = HeifCoder().encodeAvif(
+                    bitmap = resized,
+                    quality = config.quality,
+                    speed = AvifSpeed.SIX,
+                    preciseMode = preciseMode,
+                )
+                FileOutputStream(outputFile).use { fos -> fos.write(encoded) }
+            } else {
+                // Native Android compression for WebP, JPEG, PNG
+                val compressFormat = resolveCompressFormat(config)
+                val quality = resolveQuality(config)
+                FileOutputStream(outputFile).use { fos ->
+                    val success = resized.compress(compressFormat, quality, fos)
+                    if (!success) throw SquooshException("Bitmap.compress() returned false")
+                }
             }
 
             val compressedSize = outputFile.length()
@@ -139,6 +156,7 @@ class SquooshEngine(private val context: Context) {
             }
             OutputFormat.JPEG -> Bitmap.CompressFormat.JPEG
             OutputFormat.PNG -> Bitmap.CompressFormat.PNG
+            OutputFormat.AVIF -> throw IllegalStateException("AVIF uses HeifCoder, not Bitmap.compress")
         }
     }
 
@@ -165,21 +183,17 @@ class SquooshEngine(private val context: Context) {
     }
 
     companion object {
-        /** Check if AVIF encoding is available on this device (Android 14+, hardware-dependent). */
-        fun isAvifEncodingAvailable(): Boolean {
-            // AVIF encoding via Bitmap.compress is only reliably available on Android 14+ (API 34)
-            // and even then depends on device chipset. We don't offer it yet.
-            // TODO: add AVIF once Android 14+ adoption is high enough
-            return false
-        }
+        /** AVIF encoding is always available via bundled libaom native library. */
+        fun isAvifEncodingAvailable(): Boolean = true
     }
 }
 
 /** Supported output formats for still image compression. */
-enum class OutputFormat(val label: String, val extension: String) {
-    WEBP("WebP", "webp"),
-    JPEG("JPEG", "jpg"),
-    PNG("PNG", "png"),
+enum class OutputFormat(val label: String, val extension: String, val mimeType: String) {
+    WEBP("WebP", "webp", "image/webp"),
+    JPEG("JPEG", "jpg", "image/jpeg"),
+    PNG("PNG", "png", "image/png"),
+    AVIF("AVIF", "avif", "image/avif"),
 }
 
 /** Compression configuration. */

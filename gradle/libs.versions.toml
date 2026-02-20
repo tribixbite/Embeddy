@@ -19,6 +19,7 @@ jsoup = "1.18.3"
 # Media
 ffmpegKit = "6.1.0"
 coil = "2.7.0"
+avifCoder = "2.1.4"
 
 # DI — none for v1 (manual DI to keep it lean)
 
@@ -44,6 +45,7 @@ compose-material-icons-extended = { group = "androidx.compose.material", name = 
 
 # Media processing
 ffmpeg-kit = { group = "com.moizhassan.ffmpeg", name = "ffmpeg-kit-16kb", version.ref = "ffmpegKit" }
+avif-coder = { group = "com.github.awxkee", name = "avif-coder", version.ref = "avifCoder" }
 
 # Image loading
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
