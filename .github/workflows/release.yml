@@ -41,7 +41,7 @@ jobs:
           echo "version_name=${VERSION_MAJOR}.${VERSION_MINOR}.${BUILD_NUM}" >> "$GITHUB_OUTPUT"
           echo "version_code=$((VERSION_MAJOR * 10000 + VERSION_MINOR * 100 + BUILD_NUM))" >> "$GITHUB_OUTPUT"
 
-      - name: Build Release APK
+      - name: Build Release APKs
         env:
           BUILD_NUMBER: ${{ github.run_number }}
           VERSION_MAJOR: ${{ steps.version.outputs.major }}
@@ -72,8 +72,6 @@ jobs:
             echo "Renamed: ${filename} -> ${new_name}"
           done
 
-          echo "apk_dir=final_apks" >> "$GITHUB_OUTPUT"
-
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -81,25 +79,51 @@ jobs:
           path: final_apks/*.apk
           retention-days: 30
 
+      - name: Generate release notes
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: notes
+        run: |
+          # Find the previous release tag (if any)
+          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          VERSION="v${{ steps.version.outputs.version_name }}"
+
+          {
+            echo "body<<RELEASE_NOTES_EOF"
+            echo "## Embeddy ${VERSION}"
+            echo ""
+
+            # Changelog from commits since last tag
+            echo "### Changes"
+            echo ""
+            if [ -n "$PREV_TAG" ]; then
+              git log "${PREV_TAG}..HEAD" --pretty=format:"- %s" --no-merges
+            else
+              git log --pretty=format:"- %s" --no-merges -20
+            fi
+            echo ""
+            echo ""
+
+            # APK table
+            echo "### Downloads"
+            echo ""
+            echo "| ABI | File |"
+            echo "|-----|------|"
+            echo "| arm64-v8a | \`Embeddy-${VERSION}-arm64-v8a.apk\` |"
+            echo "| armeabi-v7a | \`Embeddy-${VERSION}-armeabi-v7a.apk\` |"
+            echo "| x86_64 | \`Embeddy-${VERSION}-x86_64.apk\` |"
+            echo "| Universal | \`Embeddy-${VERSION}-universal.apk\` |"
+            echo ""
+            echo "**Version Code:** ${{ steps.version.outputs.version_code }}"
+            echo "RELEASE_NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub Release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.version_name }}
           name: Embeddy v${{ steps.version.outputs.version_name }}
-          body: |
-            ## Embeddy v${{ steps.version.outputs.version_name }}
-
-            Automated release from commit ${{ github.sha }}
-
-            | ABI | File |
-            |-----|------|
-            | Universal | `Embeddy-v${{ steps.version.outputs.version_name }}-universal.apk` |
-            | arm64-v8a | `Embeddy-v${{ steps.version.outputs.version_name }}-arm64-v8a.apk` |
-            | armeabi-v7a | `Embeddy-v${{ steps.version.outputs.version_name }}-armeabi-v7a.apk` |
-            | x86_64 | `Embeddy-v${{ steps.version.outputs.version_name }}-x86_64.apk` |
-
-            **Version Code:** ${{ steps.version.outputs.version_code }}
+          body: ${{ steps.notes.outputs.body }}
           files: final_apks/*.apk
           draft: false
           prerelease: false
