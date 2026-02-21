@@ -77,6 +77,12 @@ class ConversionEngine(private val context: Context) {
         }
 
         try {
+            // Track the best (smallest) successful output across all attempts.
+            // If a later attempt fails, we still have a usable result.
+            var bestOutputSize = Long.MAX_VALUE
+            var bestQuality = config.startQuality
+            var hasAnyOutput = false
+
             while (quality >= config.minQuality) {
                 send(ConversionProgress.Attempt(quality, attempt))
 
@@ -104,14 +110,22 @@ class ConversionEngine(private val context: Context) {
                 }
 
                 if (!success) {
-                    send(ConversionProgress.Failed("FFmpeg returned error at quality $quality"))
+                    // FFmpeg failed at this quality — don't send Failed yet,
+                    // we may still have output from a prior successful attempt
                     break
                 }
 
                 val fileSize = tempOutput.length()
-                if (fileSize <= config.targetSizeBytes) {
-                    // Fits! Move to final location
+                if (fileSize > 0) {
+                    // Save best output so far (smallest file = lowest quality)
                     tempOutput.copyTo(finalOutput, overwrite = true)
+                    bestOutputSize = fileSize
+                    bestQuality = quality
+                    hasAnyOutput = true
+                }
+
+                if (fileSize <= config.targetSizeBytes) {
+                    // Fits the target — done
                     tempOutput.delete()
                     inputFile.delete()
                     send(
@@ -132,22 +146,21 @@ class ConversionEngine(private val context: Context) {
                 attempt++
             }
 
-            // Exhausted all quality levels — produce result anyway as a warning
-            if (tempOutput.exists()) {
-                tempOutput.copyTo(finalOutput, overwrite = true)
-                tempOutput.delete()
-                inputFile.delete()
-                val finalQuality = quality + config.qualityStep
+            // Loop ended: either exhausted quality range or FFmpeg error.
+            // Always offer the best output we managed to produce.
+            tempOutput.delete()
+            inputFile.delete()
+            if (hasAnyOutput) {
                 send(
                     ConversionProgress.CompletedOversize(
                         outputPath = finalOutput.absolutePath,
-                        fileSizeBytes = finalOutput.length(),
+                        fileSizeBytes = bestOutputSize,
                         targetSizeBytes = config.targetSizeBytes,
-                        qualityUsed = finalQuality,
+                        qualityUsed = bestQuality,
                     )
                 )
             } else {
-                send(ConversionProgress.Failed("FFmpeg failed at all quality levels"))
+                send(ConversionProgress.Failed("FFmpeg could not produce output — try a different file or shorter trim"))
             }
         } catch (e: Exception) {
             send(ConversionProgress.Failed(e.message ?: "Unknown error"))
