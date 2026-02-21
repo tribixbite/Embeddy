@@ -8,6 +8,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,11 +20,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Compress
@@ -42,18 +45,28 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -62,6 +75,7 @@ import app.embeddy.R
 import app.embeddy.squoosh.OutputFormat
 import app.embeddy.squoosh.SquooshResult
 import app.embeddy.squoosh.SquooshState
+import app.embeddy.util.FileInfoUtils
 import app.embeddy.viewmodel.SquooshViewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -95,10 +109,14 @@ fun SquooshScreen(viewModel: SquooshViewModel = viewModel()) {
                     quality = config.quality,
                     lossless = config.lossless,
                     maxDimension = config.maxDimension,
+                    exactWidth = config.exactWidth,
+                    exactHeight = config.exactHeight,
                     onFormatChanged = viewModel::setFormat,
                     onQualityChanged = viewModel::setQuality,
                     onLosslessChanged = viewModel::setLossless,
                     onMaxDimensionChanged = viewModel::setMaxDimension,
+                    onExactWidthChanged = viewModel::setExactWidth,
+                    onExactHeightChanged = viewModel::setExactHeight,
                 )
             }
 
@@ -113,10 +131,14 @@ fun SquooshScreen(viewModel: SquooshViewModel = viewModel()) {
                     quality = config.quality,
                     lossless = config.lossless,
                     maxDimension = config.maxDimension,
+                    exactWidth = config.exactWidth,
+                    exactHeight = config.exactHeight,
                     onFormatChanged = viewModel::setFormat,
                     onQualityChanged = viewModel::setQuality,
                     onLosslessChanged = viewModel::setLossless,
                     onMaxDimensionChanged = viewModel::setMaxDimension,
+                    onExactWidthChanged = viewModel::setExactWidth,
+                    onExactHeightChanged = viewModel::setExactHeight,
                 )
                 Button(
                     onClick = viewModel::compress,
@@ -161,6 +183,7 @@ fun SquooshScreen(viewModel: SquooshViewModel = viewModel()) {
             is SquooshState.Done -> {
                 CompressionResultCard(
                     result = s.result,
+                    inputUri = if (s.inputUri.isNotBlank()) Uri.parse(s.inputUri) else null,
                     onReset = viewModel::reset,
                 )
             }
@@ -183,7 +206,7 @@ fun SquooshScreen(viewModel: SquooshViewModel = viewModel()) {
                             )
                             Spacer(Modifier.width(8.dp))
                             Text(
-                                text = "Compression failed",
+                                text = stringResource(R.string.compression_failed),
                                 style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.onErrorContainer,
                             )
@@ -195,7 +218,9 @@ fun SquooshScreen(viewModel: SquooshViewModel = viewModel()) {
                             color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f),
                         )
                         Spacer(Modifier.height(12.dp))
-                        TextButton(onClick = viewModel::reset) { Text("Try again") }
+                        TextButton(onClick = viewModel::reset) {
+                            Text(stringResource(R.string.try_again))
+                        }
                     }
                 }
             }
@@ -264,12 +289,12 @@ private fun FileInfoCard(fileName: String, fileSize: Long, onChangePick: () -> U
             }
             Spacer(Modifier.height(4.dp))
             Text(
-                text = formatFileSize(fileSize),
+                text = FileInfoUtils.formatFileSize(fileSize),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(8.dp))
-            TextButton(onClick = onChangePick) { Text("Change image") }
+            TextButton(onClick = onChangePick) { Text(stringResource(R.string.change_image)) }
         }
     }
 }
@@ -281,10 +306,14 @@ private fun SquooshSettings(
     quality: Int,
     lossless: Boolean,
     maxDimension: Int,
+    exactWidth: Int,
+    exactHeight: Int,
     onFormatChanged: (OutputFormat) -> Unit,
     onQualityChanged: (Int) -> Unit,
     onLosslessChanged: (Boolean) -> Unit,
     onMaxDimensionChanged: (Int) -> Unit,
+    onExactWidthChanged: (Int) -> Unit,
+    onExactHeightChanged: (Int) -> Unit,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -332,6 +361,50 @@ private fun SquooshSettings(
                 valueLabel = if (maxDimension == 0) "Original" else "${maxDimension}px",
                 onValueChange = { onMaxDimensionChanged(it.roundToInt()) },
             )
+
+            Spacer(Modifier.height(8.dp))
+
+            // Exact dimensions: Width x Height text fields
+            Text(
+                text = stringResource(R.string.exact_dimensions),
+                style = MaterialTheme.typography.titleSmall,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "Set exact output size (overrides max dimension)",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                OutlinedTextField(
+                    value = if (exactWidth > 0) exactWidth.toString() else "",
+                    onValueChange = { text ->
+                        onExactWidthChanged(text.toIntOrNull() ?: 0)
+                    },
+                    modifier = Modifier.weight(1f),
+                    label = { Text(stringResource(R.string.width_hint)) },
+                    placeholder = { Text("0") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    shape = RoundedCornerShape(12.dp),
+                )
+                OutlinedTextField(
+                    value = if (exactHeight > 0) exactHeight.toString() else "",
+                    onValueChange = { text ->
+                        onExactHeightChanged(text.toIntOrNull() ?: 0)
+                    },
+                    modifier = Modifier.weight(1f),
+                    label = { Text(stringResource(R.string.height_hint)) },
+                    placeholder = { Text("0") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    shape = RoundedCornerShape(12.dp),
+                )
+            }
 
             // Lossless toggle (WebP and AVIF support lossless mode)
             if (format == OutputFormat.WEBP || format == OutputFormat.AVIF) {
@@ -386,9 +459,124 @@ private fun SettingSliderRow(
     }
 }
 
+/**
+ * Before/after comparison slider inspired by squoosh.app.
+ * Displays original and compressed images stacked with a draggable divider
+ * that reveals original on the left and compressed on the right.
+ */
+@Composable
+private fun BeforeAfterSlider(
+    originalUri: Uri?,
+    compressedPath: String,
+    modifier: Modifier = Modifier,
+) {
+    if (originalUri == null) return
+
+    val context = LocalContext.current
+    var dividerFraction by remember { mutableFloatStateOf(0.5f) }
+    var containerWidthPx by remember { mutableFloatStateOf(1f) }
+    val density = LocalDensity.current
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(max = 300.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .onSizeChanged { containerWidthPx = it.width.toFloat() }
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures { change, _ ->
+                    val newFraction = change.position.x / containerWidthPx
+                    dividerFraction = newFraction.coerceIn(0.02f, 0.98f)
+                }
+            },
+    ) {
+        // Compressed image (full, underneath)
+        AsyncImage(
+            model = ImageRequest.Builder(context)
+                .data(File(compressedPath))
+                .crossfade(false)
+                .build(),
+            contentDescription = "Compressed",
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Fit,
+        )
+
+        // Original image (clipped to left portion by divider)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clipToBounds(),
+        ) {
+            AsyncImage(
+                model = ImageRequest.Builder(context)
+                    .data(originalUri)
+                    .crossfade(false)
+                    .build(),
+                contentDescription = "Original",
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clipToBounds(),
+                contentScale = ContentScale.Fit,
+            )
+            // Mask: cover the right portion to reveal compressed underneath
+            val offsetPx = (containerWidthPx * dividerFraction).toInt()
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .offset { IntOffset(offsetPx, 0) }
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+            )
+        }
+
+        // Divider line
+        val dividerOffsetDp = with(density) { (containerWidthPx * dividerFraction).toDp() }
+        Box(
+            modifier = Modifier
+                .offset(x = dividerOffsetDp - 1.dp)
+                .width(2.dp)
+                .height(300.dp)
+                .background(MaterialTheme.colorScheme.primary),
+        )
+
+        // Labels
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.BottomCenter)
+                .padding(8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                text = "Original",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier
+                    .background(
+                        MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
+                        RoundedCornerShape(4.dp),
+                    )
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+            Text(
+                text = "Compressed",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier
+                    .background(
+                        MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
+                        RoundedCornerShape(4.dp),
+                    )
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+        }
+    }
+}
+
 @Composable
 private fun CompressionResultCard(
     result: SquooshResult,
+    inputUri: Uri?,
     onReset: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -417,20 +605,28 @@ private fun CompressionResultCard(
 
             Spacer(Modifier.height(12.dp))
 
-            // Preview
-            AsyncImage(
-                model = ImageRequest.Builder(context)
-                    .data(File(result.outputPath))
-                    .crossfade(true)
-                    .build(),
-                contentDescription = "Compressed image preview",
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 250.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                contentScale = ContentScale.Fit,
-            )
+            // Before/after slider comparison or simple preview
+            if (inputUri != null) {
+                BeforeAfterSlider(
+                    originalUri = inputUri,
+                    compressedPath = result.outputPath,
+                )
+            } else {
+                // Fallback: show compressed preview only
+                AsyncImage(
+                    model = ImageRequest.Builder(context)
+                        .data(File(result.outputPath))
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = "Compressed image preview",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 250.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                    contentScale = ContentScale.Fit,
+                )
+            }
 
             Spacer(Modifier.height(12.dp))
 
@@ -439,12 +635,12 @@ private fun CompressionResultCard(
                 " (${result.outputWidth}x${result.outputHeight})"
             } else ""
             Text(
-                text = stringResource(R.string.original_size, formatFileSize(result.originalSizeBytes)),
+                text = stringResource(R.string.original_size, FileInfoUtils.formatFileSize(result.originalSizeBytes)),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                text = stringResource(R.string.compressed_size, formatFileSize(result.compressedSizeBytes)) + dims,
+                text = stringResource(R.string.compressed_size, FileInfoUtils.formatFileSize(result.compressedSizeBytes)) + dims,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -492,7 +688,7 @@ private fun CompressionResultCard(
             ) {
                 Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("Compress another")
+                Text(stringResource(R.string.compress_another))
             }
         }
     }
@@ -534,12 +730,4 @@ private fun saveToDownloads(context: Context, path: String) {
     contentValues.clear()
     contentValues.put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
     resolver.update(uri, contentValues, null, null)
-}
-
-private fun formatFileSize(bytes: Long): String {
-    return when {
-        bytes >= 1_000_000 -> String.format("%.1f MB", bytes / 1_000_000.0)
-        bytes >= 1_000 -> String.format("%.1f KB", bytes / 1_000.0)
-        else -> "$bytes B"
-    }
 }

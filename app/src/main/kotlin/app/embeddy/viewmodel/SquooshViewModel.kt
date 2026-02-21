@@ -2,13 +2,13 @@ package app.embeddy.viewmodel
 
 import android.app.Application
 import android.net.Uri
-import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.embeddy.squoosh.OutputFormat
 import app.embeddy.squoosh.SquooshConfig
 import app.embeddy.squoosh.SquooshEngine
 import app.embeddy.squoosh.SquooshState
+import app.embeddy.util.FileInfoUtils
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -32,17 +32,10 @@ class SquooshViewModel(application: Application) : AndroidViewModel(application)
         engine.cleanup()
     }
 
-    /** Handle a file picked from the image picker. */
+    /** Handle a file picked from the image picker. Single query for name+size. */
     fun onFilePicked(uri: Uri) {
         val ctx = getApplication<Application>()
-        val fileName = ctx.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-            val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-            if (cursor.moveToFirst() && idx >= 0) cursor.getString(idx) else null
-        } ?: "image"
-        val fileSize = ctx.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-            val idx = cursor.getColumnIndex(OpenableColumns.SIZE)
-            if (cursor.moveToFirst() && idx >= 0) cursor.getLong(idx) else null
-        } ?: 0L
+        val (fileName, fileSize) = FileInfoUtils.queryFileInfo(ctx, uri)
 
         _state.value = SquooshState.Ready(
             fileName = fileName,
@@ -51,16 +44,17 @@ class SquooshViewModel(application: Application) : AndroidViewModel(application)
         )
     }
 
-    /** Start compression. */
+    /** Start compression — cancels any prior in-flight job. */
     fun compress() {
         val ready = _state.value as? SquooshState.Ready ?: return
         val uri = Uri.parse(ready.uri)
 
+        compressionJob?.cancel()
         _state.value = SquooshState.Compressing(ready.fileName)
         compressionJob = viewModelScope.launch {
             try {
                 val result = engine.compress(uri, _config.value)
-                _state.value = SquooshState.Done(result, ready.fileName)
+                _state.value = SquooshState.Done(result, ready.fileName, ready.uri)
             } catch (e: Exception) {
                 _state.value = SquooshState.Error(e.message ?: "Compression failed")
             }
@@ -81,6 +75,14 @@ class SquooshViewModel(application: Application) : AndroidViewModel(application)
 
     fun setMaxDimension(maxDim: Int) {
         _config.update { it.copy(maxDimension = maxDim) }
+    }
+
+    fun setExactWidth(width: Int) {
+        _config.update { it.copy(exactWidth = width) }
+    }
+
+    fun setExactHeight(height: Int) {
+        _config.update { it.copy(exactHeight = height) }
     }
 
     fun cancel() {

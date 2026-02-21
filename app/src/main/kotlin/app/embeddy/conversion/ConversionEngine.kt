@@ -4,11 +4,9 @@ import android.content.Context
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import com.arthenica.ffmpegkit.FFmpegKit
-import com.arthenica.ffmpegkit.FFmpegKitConfig
 import com.arthenica.ffmpegkit.ReturnCode
 import com.arthenica.ffmpegkit.Statistics
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOn
@@ -44,7 +42,27 @@ class ConversionEngine(private val context: Context) {
             val durationMs = retriever.extractMetadata(
                 MediaMetadataRetriever.METADATA_KEY_DURATION
             )?.toLongOrNull() ?: 0L
-            MediaInfo(width = width, height = height, durationMs = durationMs)
+            val bitrate = retriever.extractMetadata(
+                MediaMetadataRetriever.METADATA_KEY_BITRATE
+            )?.toIntOrNull() ?: 0
+            val rotation = retriever.extractMetadata(
+                MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION
+            )?.toIntOrNull() ?: 0
+            val mimeType = retriever.extractMetadata(
+                MediaMetadataRetriever.METADATA_KEY_MIMETYPE
+            ) ?: ""
+            val frameCount = retriever.extractMetadata(
+                MediaMetadataRetriever.METADATA_KEY_VIDEO_FRAME_COUNT
+            )?.toIntOrNull() ?: 0
+            MediaInfo(
+                width = width,
+                height = height,
+                durationMs = durationMs,
+                bitrate = bitrate,
+                rotation = rotation,
+                mimeType = mimeType,
+                frameCount = frameCount,
+            )
         } finally {
             retriever.release()
         }
@@ -175,6 +193,12 @@ class ConversionEngine(private val context: Context) {
     /**
      * Build the FFmpeg command matching the discwebp algorithm:
      * scale → fps → unsharp → libwebp with quality/compression/preset/loop
+     *
+     * Supports exact crop dimensions (exactWidth x exactHeight) and advanced flags:
+     * - denoise via hqdn3d
+     * - dithering via paletteuse
+     * - color space via -pix_fmt
+     * - keyframe interval via -g
      */
     private fun buildFfmpegCommand(
         inputPath: String,
@@ -183,13 +207,35 @@ class ConversionEngine(private val context: Context) {
         quality: Int,
     ): String {
         val filters = buildList {
-            // Scale to max dimension, preserve aspect ratio, use Lanczos
-            add("scale='min(${config.maxDimension},iw)':'min(${config.maxDimension},ih)':force_original_aspect_ratio=decrease:flags=lanczos")
+            // Scaling: exact dimensions take precedence over maxDimension
+            if (config.exactWidth > 0 && config.exactHeight > 0) {
+                // Exact crop: scale to fill then center-crop to exact dimensions
+                add("scale=${config.exactWidth}:${config.exactHeight}:force_original_aspect_ratio=increase:flags=lanczos")
+                add("crop=${config.exactWidth}:${config.exactHeight}")
+            } else if (config.exactWidth > 0) {
+                // Exact width, auto height preserving aspect ratio
+                add("scale=${config.exactWidth}:-2:flags=lanczos")
+            } else if (config.exactHeight > 0) {
+                // Exact height, auto width preserving aspect ratio
+                add("scale=-2:${config.exactHeight}:flags=lanczos")
+            } else {
+                // Scale to max dimension, preserve aspect ratio
+                add("scale='min(${config.maxDimension},iw)':'min(${config.maxDimension},ih)':force_original_aspect_ratio=decrease:flags=lanczos")
+            }
             // Set frame rate
             add("fps=${config.fps}")
+            // Denoise: hqdn3d with configurable strength (1-10 maps to luma_spatial param)
+            if (config.denoiseStrength > 0) {
+                val strength = config.denoiseStrength.coerceIn(1, 10)
+                add("hqdn3d=$strength:$strength:${strength / 2}:${strength / 2}")
+            }
             // Optional sharpening for text clarity (matches discwebp unsharp params)
             if (config.sharpen) {
                 add("unsharp=5:5:1.2:5:5:0.6")
+            }
+            // Dithering: for animated content with limited palettes
+            if (config.ditherMode != DitherMode.NONE) {
+                add("split[a][b];[a]palettegen[p];[b][p]paletteuse=dither=${config.ditherMode.ffmpegValue}")
             }
         }.joinToString(",")
 
@@ -215,6 +261,14 @@ class ConversionEngine(private val context: Context) {
             append("-loop ${config.loop} ")             // Loop count (0=infinite)
             append("-an ")                              // Strip audio
             append("-vsync vfr ")                       // Variable frame rate
+            // Color space / pixel format
+            if (config.colorSpace != ColorSpace.AUTO) {
+                append("-pix_fmt ${config.colorSpace.ffmpegValue} ")
+            }
+            // Keyframe interval
+            if (config.keyframeInterval > 0) {
+                append("-g ${config.keyframeInterval} ")
+            }
             append("\"$outputPath\"")
         }
     }
@@ -264,6 +318,10 @@ data class MediaInfo(
     val width: Int,
     val height: Int,
     val durationMs: Long,
+    val bitrate: Int = 0,
+    val rotation: Int = 0,
+    val mimeType: String = "",
+    val frameCount: Int = 0,
 )
 
 /** Progress events emitted during conversion. */

@@ -16,6 +16,15 @@ data class ConversionConfig(
     val preset: Preset = Preset.DISCORD,
     val trimStartMs: Long = 0,      // 0 = no trim
     val trimEndMs: Long = 0,        // 0 = use full duration
+    // Exact output dimensions — 0 means "use maxDimension scaling" instead
+    val exactWidth: Int = 0,
+    val exactHeight: Int = 0,
+    // Advanced FFmpeg encoding flags
+    val twoPassEncoding: Boolean = false,   // -pass 1 / -pass 2 for better bitrate allocation
+    val colorSpace: ColorSpace = ColorSpace.AUTO, // Output color space / pixel format
+    val denoiseStrength: Int = 0,           // hqdn3d denoise (0=off, 1-10 strength)
+    val ditherMode: DitherMode = DitherMode.NONE, // Bayer/Floyd-Steinberg for palette reduction
+    val keyframeInterval: Int = 0,          // -g flag: force keyframe every N frames (0=auto)
 ) {
     companion object {
         fun fromPreset(preset: Preset): ConversionConfig = ConversionConfig(
@@ -29,6 +38,22 @@ data class ConversionConfig(
             preset = preset,
         )
     }
+}
+
+/** Output color space / pixel format for encoding. */
+enum class ColorSpace(val label: String, val ffmpegValue: String) {
+    AUTO("Auto", ""),
+    YUV420("YUV 4:2:0", "yuv420p"),    // Standard, best compat
+    YUV444("YUV 4:4:4", "yuv444p"),    // Higher chroma fidelity, larger
+    RGB("RGB", "rgb24"),                // Lossless color, largest
+}
+
+/** Dithering mode for color quantization (useful for palette-constrained formats). */
+enum class DitherMode(val label: String, val ffmpegValue: String) {
+    NONE("None", ""),
+    BAYER("Bayer", "bayer"),
+    FLOYD_STEINBERG("Floyd-Steinberg", "floyd_steinberg"),
+    SIERRA("Sierra", "sierra2_4a"),
 }
 
 /** Represents the current state of a conversion operation. */

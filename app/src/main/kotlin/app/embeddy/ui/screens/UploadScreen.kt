@@ -184,7 +184,7 @@ fun UploadScreen(viewModel: UploadViewModel = viewModel()) {
                         )
                         Spacer(Modifier.height(12.dp))
                         TextButton(onClick = viewModel::reset) {
-                            Text("Try again")
+                            Text(stringResource(R.string.try_again))
                         }
                     }
                 }
@@ -267,7 +267,7 @@ private fun FileReadyCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(8.dp))
-            TextButton(onClick = onChangePick) { Text("Change file") }
+            TextButton(onClick = onChangePick) { Text(stringResource(R.string.change_file)) }
         }
     }
 }
@@ -430,7 +430,7 @@ private fun UploadDoneCard(
             ) {
                 Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("Upload another")
+                Text(stringResource(R.string.upload_another))
             }
         }
     }

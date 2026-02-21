@@ -4,7 +4,6 @@ import android.app.Application
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
-import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.embeddy.conversion.ConversionConfig
@@ -12,6 +11,7 @@ import app.embeddy.conversion.ConversionEngine
 import app.embeddy.conversion.ConversionProgress
 import app.embeddy.conversion.ConversionState
 import app.embeddy.conversion.Preset
+import app.embeddy.util.FileInfoUtils
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -40,8 +40,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 val ctx = getApplication<Application>()
-                val fileName = queryFileName(uri) ?: "media"
-                val fileSize = queryFileSize(uri) ?: 0L
+                val (fileName, fileSize) = FileInfoUtils.queryFileInfo(ctx, uri)
                 val info = engine.probeInput(uri)
 
                 _state.value = ConversionState.Ready(
@@ -181,21 +180,5 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** Update individual config fields (switches to CUSTOM preset). */
     fun updateConfig(transform: ConversionConfig.() -> ConversionConfig) {
         _config.update { it.transform().copy(preset = Preset.CUSTOM) }
-    }
-
-    private fun queryFileName(uri: Uri): String? {
-        val ctx = getApplication<Application>()
-        return ctx.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-            val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-            if (cursor.moveToFirst() && nameIndex >= 0) cursor.getString(nameIndex) else null
-        }
-    }
-
-    private fun queryFileSize(uri: Uri): Long? {
-        val ctx = getApplication<Application>()
-        return ctx.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-            val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
-            if (cursor.moveToFirst() && sizeIndex >= 0) cursor.getLong(sizeIndex) else null
-        }
     }
 }

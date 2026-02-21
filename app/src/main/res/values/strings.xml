@@ -33,6 +33,19 @@
     <string name="size_warning_body">Output is %1$s but target was %2$s (%3$s over). You can use it anyway or go back to trim/adjust settings.</string>
     <string name="use_anyway">Use anyway</string>
     <string name="trim_and_retry">Adjust &amp; retry</string>
+    <string name="change_file">Change file</string>
+    <string name="try_again">Try again</string>
+
+    <!-- Advanced encoding -->
+    <string name="advanced_settings">Advanced</string>
+    <string name="exact_dimensions">Exact Dimensions</string>
+    <string name="width_hint">Width</string>
+    <string name="height_hint">Height</string>
+    <string name="denoise">Denoise</string>
+    <string name="dithering">Dithering</string>
+    <string name="color_space">Color Space</string>
+    <string name="keyframe_interval">Keyframe Interval</string>
+    <string name="two_pass_encoding">Two-Pass Encoding</string>
 
     <!-- Inspect tab -->
     <string name="enter_url">Enter URL to inspect</string>
@@ -41,10 +54,15 @@
     <string name="open_graph">Open Graph</string>
     <string name="twitter_card">Twitter Card</string>
     <string name="general_meta">General</string>
+    <string name="media_info">Media Info</string>
     <string name="social_previews">Social Previews</string>
     <string name="no_metadata">No metadata found</string>
     <string name="copy_tag">Copy tag</string>
     <string name="embed_code">Embed Code</string>
+    <string name="inspect_hint">Enter a URL or pick a file to inspect metadata</string>
+    <string name="failed_to_fetch">Failed to fetch</string>
+    <string name="inspect_file">Inspect File</string>
+    <string name="or_pick_file">or pick a file to inspect</string>
 
     <!-- Upload tab -->
     <string name="pick_to_upload">Pick a file to upload</string>
@@ -56,15 +74,27 @@
     <string name="copy_url">Copy URL</string>
     <string name="public_url">Public URL</string>
     <string name="host_service">Host</string>
+    <string name="upload_another">Upload another</string>
 
     <!-- Squoosh tab -->
     <string name="pick_image">Pick an image to compress</string>
     <string name="output_format">Output Format</string>
-<string name="lossless">Lossless</string>
+    <string name="lossless">Lossless</string>
     <string name="compress">Compress</string>
     <string name="compressing">Compressing…</string>
     <string name="original_size">Original: %1$s</string>
     <string name="compressed_size">Compressed: %1$s</string>
     <string name="savings">Savings: %1$s</string>
     <string name="compression_complete">Compression complete</string>
+    <string name="compression_failed">Compression failed</string>
+    <string name="compress_another">Compress another</string>
+    <string name="change_image">Change image</string>
+
+    <!-- Trim player -->
+    <string name="trim">Trim</string>
+    <string name="play">Play</string>
+    <string name="pause">Pause</string>
+
+    <!-- Common -->
+    <string name="cancel">Cancel</string>
 </resources>

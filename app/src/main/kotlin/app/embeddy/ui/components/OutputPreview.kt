@@ -30,6 +30,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -54,6 +55,13 @@ fun OutputPreviewCard(
 ) {
     val context = LocalContext.current
     val sizeMb = String.format("%.2f", state.outputSizeBytes / 1_000_000.0)
+
+    // Cache ImageLoader across recompositions to avoid recreation per frame
+    val imageLoader = remember {
+        ImageLoader.Builder(context)
+            .components { add(ImageDecoderDecoder.Factory()) }
+            .build()
+    }
 
     Card(
         modifier = modifier.fillMaxWidth(),
@@ -90,10 +98,6 @@ fun OutputPreviewCard(
                     .background(MaterialTheme.colorScheme.surfaceVariant),
                 contentAlignment = Alignment.Center,
             ) {
-                val imageLoader = ImageLoader.Builder(context)
-                    .components { add(ImageDecoderDecoder.Factory()) }
-                    .build()
-
                 AsyncImage(
                     model = ImageRequest.Builder(context)
                         .data(File(state.outputPath))

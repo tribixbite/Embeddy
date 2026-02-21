@@ -40,8 +40,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import app.embeddy.R
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -162,7 +164,7 @@ fun VideoTrimPlayer(
                 ) {
                     Icon(
                         imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = if (isPlaying) "Pause" else "Play",
+                        contentDescription = stringResource(if (isPlaying) R.string.pause else R.string.play),
                         tint = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.size(32.dp),
                     )
@@ -178,13 +180,13 @@ fun VideoTrimPlayer(
             ) {
                 Icon(
                     Icons.Default.ContentCut,
-                    contentDescription = "Trim",
+                    contentDescription = stringResource(R.string.trim),
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(18.dp),
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = "Trim",
+                    text = stringResource(R.string.trim),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )

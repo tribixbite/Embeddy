@@ -1,5 +1,8 @@
 package app.embeddy.ui.screens
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
@@ -25,12 +28,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -63,9 +68,27 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 
 @Composable
-fun InspectScreen(viewModel: InspectViewModel = viewModel()) {
+fun InspectScreen(
+    viewModel: InspectViewModel = viewModel(),
+    /** Optional URI to inspect immediately (from Convert tab info icon). */
+    initialFileUri: Uri? = null,
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val urlInput by viewModel.urlInput.collectAsStateWithLifecycle()
+
+    // File picker for local file inspection
+    val filePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let { viewModel.inspectFile(it) }
+    }
+
+    // Auto-inspect if launched with a file URI
+    var hasAutoInspected by remember { mutableStateOf(false) }
+    if (initialFileUri != null && !hasAutoInspected) {
+        hasAutoInspected = true
+        viewModel.inspectFile(initialFileUri)
+    }
 
     Column(
         modifier = Modifier
@@ -90,18 +113,36 @@ fun InspectScreen(viewModel: InspectViewModel = viewModel()) {
             shape = RoundedCornerShape(16.dp),
         )
 
-        // Fetch button
-        Button(
-            onClick = viewModel::fetchMetadata,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp),
-            enabled = urlInput.isNotBlank() && state !is InspectState.Fetching,
-            shape = RoundedCornerShape(16.dp),
+        // Fetch URL button + Inspect File button side by side
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Icon(Icons.Outlined.Search, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(8.dp))
-            Text(stringResource(R.string.fetch))
+            Button(
+                onClick = viewModel::fetchMetadata,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(48.dp),
+                enabled = urlInput.isNotBlank() && state !is InspectState.Fetching,
+                shape = RoundedCornerShape(16.dp),
+            ) {
+                Icon(Icons.Outlined.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.fetch))
+            }
+
+            FilledTonalButton(
+                onClick = { filePicker.launch(arrayOf("*/*")) },
+                modifier = Modifier
+                    .weight(1f)
+                    .height(48.dp),
+                enabled = state !is InspectState.Fetching,
+                shape = RoundedCornerShape(16.dp),
+            ) {
+                Icon(Icons.AutoMirrored.Outlined.InsertDriveFile, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.inspect_file))
+            }
         }
 
         // State-driven content
@@ -115,7 +156,7 @@ fun InspectScreen(viewModel: InspectViewModel = viewModel()) {
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        text = "Enter a URL to inspect its metadata, OG tags, and social previews",
+                        text = stringResource(R.string.inspect_hint),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -151,7 +192,7 @@ fun InspectScreen(viewModel: InspectViewModel = viewModel()) {
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(
-                            text = "Failed to fetch",
+                            text = stringResource(R.string.failed_to_fetch),
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onErrorContainer,
                         )
@@ -176,7 +217,7 @@ fun InspectScreen(viewModel: InspectViewModel = viewModel()) {
 
 @Composable
 private fun MetadataResults(result: MetadataResult) {
-    // Social preview card (Discord-style embed)
+    // Social preview card (Discord-style embed) — only for URL inspections
     if (result.title != null || result.imageUrl != null) {
         SocialPreviewCard(result)
     }
@@ -194,6 +235,15 @@ private fun MetadataResults(result: MetadataResult) {
         MetadataSection(
             title = stringResource(R.string.twitter_card),
             tags = result.twitterTags,
+        )
+    }
+
+    // Media-specific technical info (from local file inspection)
+    if (result.mediaTags.isNotEmpty()) {
+        MetadataSection(
+            title = stringResource(R.string.media_info),
+            tags = result.mediaTags,
+            expandedByDefault = true,
         )
     }
 
@@ -250,7 +300,6 @@ private fun SocialPreviewCard(result: MetadataResult) {
                         .weight(1f)
                         .padding(12.dp),
                 ) {
-                    // Site name
                     result.siteName?.let { siteName ->
                         Text(
                             text = siteName,
@@ -260,7 +309,6 @@ private fun SocialPreviewCard(result: MetadataResult) {
                         Spacer(Modifier.height(4.dp))
                     }
 
-                    // Title
                     result.title?.let { title ->
                         Text(
                             text = title,
@@ -271,7 +319,6 @@ private fun SocialPreviewCard(result: MetadataResult) {
                         Spacer(Modifier.height(4.dp))
                     }
 
-                    // Description
                     result.description?.let { desc ->
                         Text(
                             text = desc,
@@ -307,8 +354,9 @@ private fun SocialPreviewCard(result: MetadataResult) {
 private fun MetadataSection(
     title: String,
     tags: Map<String, String>,
+    expandedByDefault: Boolean = true,
 ) {
-    var expanded by remember { mutableStateOf(true) }
+    var expanded by remember { mutableStateOf(expandedByDefault) }
     val clipboard = LocalClipboardManager.current
 
     Card(
@@ -330,7 +378,7 @@ private fun MetadataSection(
                 )
                 Icon(
                     imageVector = if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
-                    contentDescription = null,
+                    contentDescription = if (expanded) "Collapse" else "Expand",
                     modifier = Modifier.size(20.dp),
                 )
             }

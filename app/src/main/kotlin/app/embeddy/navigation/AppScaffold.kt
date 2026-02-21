@@ -69,7 +69,9 @@ fun AppScaffold() {
             label = "tab_content",
         ) { tab ->
             when (tab) {
-                EmbeddyTab.CONVERT -> ConvertScreen()
+                EmbeddyTab.CONVERT -> ConvertScreen(
+                    onNavigateToInspect = { currentTab = EmbeddyTab.INSPECT },
+                )
                 EmbeddyTab.INSPECT -> InspectScreen()
                 EmbeddyTab.UPLOAD -> UploadScreen()
                 EmbeddyTab.SQUOOSH -> SquooshScreen()

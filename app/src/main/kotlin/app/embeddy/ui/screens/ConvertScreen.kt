@@ -26,12 +26,16 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -45,10 +49,16 @@ import app.embeddy.ui.components.MediaPickerCard
 import app.embeddy.ui.components.OutputPreviewCard
 import app.embeddy.ui.components.SettingsPanel
 import app.embeddy.ui.components.VideoTrimPlayer
+import app.embeddy.util.FileInfoUtils
+import app.embeddy.viewmodel.InspectViewModel
 import app.embeddy.viewmodel.MainViewModel
 
 @Composable
-fun ConvertScreen(viewModel: MainViewModel = viewModel()) {
+fun ConvertScreen(
+    viewModel: MainViewModel = viewModel(),
+    inspectViewModel: InspectViewModel = viewModel(),
+    onNavigateToInspect: (() -> Unit)? = null,
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val config by viewModel.config.collectAsStateWithLifecycle()
 
@@ -88,11 +98,16 @@ fun ConvertScreen(viewModel: MainViewModel = viewModel()) {
             }
 
             is ConversionState.Ready -> {
-                // File info card
+                // File info card with inspect button
                 ReadyCard(
                     state = s,
                     onChangePick = {
                         filePicker.launch(arrayOf("video/*", "image/gif"))
+                    },
+                    onInspect = {
+                        // Navigate to inspect tab with this file's URI
+                        inspectViewModel.inspectFile(Uri.parse(s.inputUri))
+                        onNavigateToInspect?.invoke()
                     },
                 )
 
@@ -176,6 +191,7 @@ fun ConvertScreen(viewModel: MainViewModel = viewModel()) {
 private fun ReadyCard(
     state: ConversionState.Ready,
     onChangePick: () -> Unit,
+    onInspect: () -> Unit,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -198,7 +214,20 @@ private fun ReadyCard(
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
+                    modifier = Modifier.weight(1f),
                 )
+                // Info icon to inspect media metadata
+                IconButton(
+                    onClick = onInspect,
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    Icon(
+                        Icons.Outlined.Info,
+                        contentDescription = "Inspect media metadata",
+                        tint = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
             }
 
             Spacer(Modifier.height(8.dp))
@@ -219,7 +248,7 @@ private fun ReadyCard(
             Spacer(Modifier.height(8.dp))
 
             TextButton(onClick = onChangePick) {
-                Text("Change file")
+                Text(stringResource(R.string.change_file))
             }
         }
     }
@@ -284,7 +313,6 @@ private fun SizeWarningCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                // Accept the result as-is
                 FilledTonalButton(
                     onClick = onAccept,
                     modifier = Modifier.weight(1f),
@@ -292,7 +320,6 @@ private fun SizeWarningCard(
                     Text(stringResource(R.string.use_anyway))
                 }
 
-                // Go back and adjust settings / trim
                 OutlinedButton(
                     onClick = onRetry,
                     modifier = Modifier.weight(1f),
@@ -339,7 +366,7 @@ private fun ErrorCard(
             )
             Spacer(Modifier.height(12.dp))
             TextButton(onClick = onRetry) {
-                Text("Try again")
+                Text(stringResource(R.string.try_again))
             }
         }
     }

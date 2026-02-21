@@ -2,12 +2,13 @@ package app.embeddy.viewmodel
 
 import android.app.Application
 import android.net.Uri
-import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.embeddy.upload.UploadEngine
 import app.embeddy.upload.UploadHost
 import app.embeddy.upload.UploadState
+import app.embeddy.util.FileInfoUtils
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -27,6 +28,8 @@ class UploadViewModel(application: Application) : AndroidViewModel(application) 
     private val _stripMetadata = MutableStateFlow(true)
     val stripMetadata: StateFlow<Boolean> = _stripMetadata.asStateFlow()
 
+    private var uploadJob: Job? = null
+
     fun setHost(host: UploadHost) {
         _host.value = host
     }
@@ -35,17 +38,10 @@ class UploadViewModel(application: Application) : AndroidViewModel(application) 
         _stripMetadata.value = strip
     }
 
-    /** Handle a file picked from the file picker. */
+    /** Handle a file picked from the file picker. Single query for name+size. */
     fun onFilePicked(uri: Uri) {
         val ctx = getApplication<Application>()
-        val fileName = ctx.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-            val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-            if (cursor.moveToFirst() && idx >= 0) cursor.getString(idx) else null
-        } ?: "file"
-        val fileSize = ctx.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-            val idx = cursor.getColumnIndex(OpenableColumns.SIZE)
-            if (cursor.moveToFirst() && idx >= 0) cursor.getLong(idx) else null
-        } ?: 0L
+        val (fileName, fileSize) = FileInfoUtils.queryFileInfo(ctx, uri)
 
         _state.value = UploadState.Ready(
             fileName = fileName,
@@ -59,8 +55,19 @@ class UploadViewModel(application: Application) : AndroidViewModel(application) 
         val ready = _state.value as? UploadState.Ready ?: return
         val uri = Uri.parse(ready.uri)
 
+        // Pre-validate file size against host limit
+        val maxBytes = _host.value.maxSizeMb * 1_000_000L
+        if (ready.fileSize > maxBytes) {
+            val sizeMb = String.format("%.1f MB", ready.fileSize / 1_000_000.0)
+            _state.value = UploadState.Error(
+                "File is $sizeMb but ${_host.value.label} limit is ${_host.value.maxSizeMb} MB"
+            )
+            return
+        }
+
+        uploadJob?.cancel()
         _state.value = UploadState.Uploading(ready.fileName, progress = 0f)
-        viewModelScope.launch {
+        uploadJob = viewModelScope.launch {
             try {
                 val result = engine.upload(
                     uri = uri,
@@ -81,8 +88,17 @@ class UploadViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /** Cancel an in-progress upload. */
+    fun cancelUpload() {
+        uploadJob?.cancel()
+        uploadJob = null
+        _state.value = UploadState.Idle
+    }
+
     /** Reset to idle for a new upload. */
     fun reset() {
+        uploadJob?.cancel()
+        uploadJob = null
         _state.value = UploadState.Idle
         engine.cleanup()
     }

@@ -14,14 +14,17 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -34,9 +37,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import app.embeddy.R
+import app.embeddy.conversion.ColorSpace
 import app.embeddy.conversion.ConversionConfig
+import app.embeddy.conversion.DitherMode
 import app.embeddy.conversion.Preset
 import kotlin.math.roundToInt
 
@@ -49,6 +55,7 @@ fun SettingsPanel(
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    var advancedExpanded by remember { mutableStateOf(false) }
 
     Card(
         modifier = modifier.fillMaxWidth(),
@@ -70,7 +77,7 @@ fun SettingsPanel(
                 )
                 Icon(
                     imageVector = if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
-                    contentDescription = null,
+                    contentDescription = if (expanded) "Collapse settings" else "Expand settings",
                 )
             }
 
@@ -107,6 +114,47 @@ fun SettingsPanel(
                             onConfigChanged { copy(maxDimension = dim.roundToInt()) }
                         },
                     )
+
+                    // Exact dimensions
+                    Text(
+                        text = stringResource(R.string.exact_dimensions),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        OutlinedTextField(
+                            value = if (config.exactWidth > 0) config.exactWidth.toString() else "",
+                            onValueChange = { text ->
+                                val w = text.toIntOrNull() ?: 0
+                                onConfigChanged { copy(exactWidth = w) }
+                            },
+                            modifier = Modifier.weight(1f),
+                            label = { Text(stringResource(R.string.width_hint)) },
+                            placeholder = { Text("0") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            shape = RoundedCornerShape(12.dp),
+                        )
+                        OutlinedTextField(
+                            value = if (config.exactHeight > 0) config.exactHeight.toString() else "",
+                            onValueChange = { text ->
+                                val h = text.toIntOrNull() ?: 0
+                                onConfigChanged { copy(exactHeight = h) }
+                            },
+                            modifier = Modifier.weight(1f),
+                            label = { Text(stringResource(R.string.height_hint)) },
+                            placeholder = { Text("0") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            shape = RoundedCornerShape(12.dp),
+                        )
+                    }
+
+                    Spacer(Modifier.height(12.dp))
 
                     // FPS slider
                     SettingSlider(
@@ -164,6 +212,128 @@ fun SettingsPanel(
                                 onConfigChanged { copy(sharpen = on) }
                             },
                         )
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+
+                    // ── Advanced FFmpeg encoding flags ──
+                    TextButton(
+                        onClick = { advancedExpanded = !advancedExpanded },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(
+                            Icons.Outlined.Tune,
+                            contentDescription = null,
+                            modifier = Modifier.padding(end = 8.dp),
+                        )
+                        Text(
+                            text = stringResource(R.string.advanced_settings),
+                            style = MaterialTheme.typography.titleSmall,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Icon(
+                            imageVector = if (advancedExpanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                            contentDescription = null,
+                        )
+                    }
+
+                    AnimatedVisibility(
+                        visible = advancedExpanded,
+                        enter = expandVertically(),
+                        exit = shrinkVertically(),
+                    ) {
+                        Column {
+                            // 1. Denoise strength (hqdn3d)
+                            SettingSlider(
+                                label = stringResource(R.string.denoise),
+                                value = config.denoiseStrength.toFloat(),
+                                valueRange = 0f..10f,
+                                steps = 9,
+                                valueLabel = if (config.denoiseStrength == 0) "Off" else "${config.denoiseStrength}",
+                                onValueChange = { v ->
+                                    onConfigChanged { copy(denoiseStrength = v.roundToInt()) }
+                                },
+                            )
+
+                            // 2. Color space selector
+                            Text(
+                                text = stringResource(R.string.color_space),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                ColorSpace.entries.forEach { cs ->
+                                    FilterChip(
+                                        selected = config.colorSpace == cs,
+                                        onClick = { onConfigChanged { copy(colorSpace = cs) } },
+                                        label = { Text(cs.label) },
+                                    )
+                                }
+                            }
+
+                            Spacer(Modifier.height(12.dp))
+
+                            // 3. Dithering mode
+                            Text(
+                                text = stringResource(R.string.dithering),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                DitherMode.entries.forEach { dm ->
+                                    FilterChip(
+                                        selected = config.ditherMode == dm,
+                                        onClick = { onConfigChanged { copy(ditherMode = dm) } },
+                                        label = { Text(dm.label) },
+                                    )
+                                }
+                            }
+
+                            Spacer(Modifier.height(12.dp))
+
+                            // 4. Keyframe interval
+                            SettingSlider(
+                                label = stringResource(R.string.keyframe_interval),
+                                value = config.keyframeInterval.toFloat(),
+                                valueRange = 0f..120f,
+                                steps = 0,
+                                valueLabel = if (config.keyframeInterval == 0) "Auto" else "${config.keyframeInterval} frames",
+                                onValueChange = { v ->
+                                    onConfigChanged { copy(keyframeInterval = v.roundToInt()) }
+                                },
+                            )
+
+                            // 5. Two-pass encoding toggle
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = stringResource(R.string.two_pass_encoding),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                    )
+                                    Text(
+                                        text = "Better quality at same file size (slower)",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                Spacer(Modifier.width(12.dp))
+                                Switch(
+                                    checked = config.twoPassEncoding,
+                                    onCheckedChange = { on ->
+                                        onConfigChanged { copy(twoPassEncoding = on) }
+                                    },
+                                )
+                            }
+                        }
                     }
                 }
             }

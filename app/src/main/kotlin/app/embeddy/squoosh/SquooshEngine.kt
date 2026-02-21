@@ -3,9 +3,10 @@ package app.embeddy.squoosh
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.graphics.Matrix
+import android.graphics.Rect
 import android.net.Uri
-import android.os.Build
 import android.provider.OpenableColumns
 import androidx.exifinterface.media.ExifInterface
 import com.radzivon.bartoshyk.avif.coder.AvifSpeed
@@ -25,6 +26,7 @@ import java.io.FileOutputStream
  * - Quality control for lossy formats
  * - Lossless WebP option
  * - Max dimension scaling with Lanczos-quality downsampling
+ * - Exact width/height crop with center-crop
  * - AVIF support via awxkee/avif-coder (libaom-based, all API levels)
  */
 class SquooshEngine(private val context: Context) {
@@ -46,28 +48,56 @@ class SquooshEngine(private val context: Context) {
 
         // Decode with optional downsampling, then apply EXIF rotation so
         // the output matches what the user sees in their gallery app.
-        val rawBitmap = decodeBitmap(uri, config.maxDimension)
+        val targetDim = when {
+            config.exactWidth > 0 && config.exactHeight > 0 -> maxOf(config.exactWidth, config.exactHeight)
+            config.exactWidth > 0 -> config.exactWidth
+            config.exactHeight > 0 -> config.exactHeight
+            else -> config.maxDimension
+        }
+        val rawBitmap = decodeBitmap(uri, targetDim)
             ?: throw SquooshException("Failed to decode image")
         val bitmap = applyExifRotation(uri, rawBitmap)
 
         val originalWidth = bitmap.width
         val originalHeight = bitmap.height
 
-        // Optionally resize if maxDimension is set and image exceeds it
-        val resized = if (config.maxDimension > 0 &&
-            (bitmap.width > config.maxDimension || bitmap.height > config.maxDimension)
-        ) {
-            val scale = minOf(
-                config.maxDimension.toFloat() / bitmap.width,
-                config.maxDimension.toFloat() / bitmap.height,
-            )
-            val newW = (bitmap.width * scale).toInt()
-            val newH = (bitmap.height * scale).toInt()
-            // createScaledBitmap uses bilinear filtering by default
-            Bitmap.createScaledBitmap(bitmap, newW, newH, true).also {
-                if (it !== bitmap) bitmap.recycle()
+        // Apply resizing: exact crop or max-dimension scaling
+        val resized = when {
+            // Exact width+height: scale to cover then center-crop
+            config.exactWidth > 0 && config.exactHeight > 0 -> {
+                centerCrop(bitmap, config.exactWidth, config.exactHeight)
             }
-        } else bitmap
+            // Exact width only: scale width, derive height from aspect ratio
+            config.exactWidth > 0 -> {
+                val scale = config.exactWidth.toFloat() / bitmap.width
+                val newH = (bitmap.height * scale).toInt()
+                Bitmap.createScaledBitmap(bitmap, config.exactWidth, newH, true).also {
+                    if (it !== bitmap) bitmap.recycle()
+                }
+            }
+            // Exact height only: scale height, derive width from aspect ratio
+            config.exactHeight > 0 -> {
+                val scale = config.exactHeight.toFloat() / bitmap.height
+                val newW = (bitmap.width * scale).toInt()
+                Bitmap.createScaledBitmap(bitmap, newW, config.exactHeight, true).also {
+                    if (it !== bitmap) bitmap.recycle()
+                }
+            }
+            // Max dimension scaling
+            config.maxDimension > 0 &&
+                (bitmap.width > config.maxDimension || bitmap.height > config.maxDimension) -> {
+                val scale = minOf(
+                    config.maxDimension.toFloat() / bitmap.width,
+                    config.maxDimension.toFloat() / bitmap.height,
+                )
+                val newW = (bitmap.width * scale).toInt()
+                val newH = (bitmap.height * scale).toInt()
+                Bitmap.createScaledBitmap(bitmap, newW, newH, true).also {
+                    if (it !== bitmap) bitmap.recycle()
+                }
+            }
+            else -> bitmap
+        }
 
         val outputExt = config.format.extension
         val outputFile = File(outputDir, "${baseName}_squoosh.$outputExt")
@@ -111,6 +141,37 @@ class SquooshEngine(private val context: Context) {
         } finally {
             resized.recycle()
         }
+    }
+
+    /**
+     * Scale bitmap to fill the target rect then center-crop to exact dimensions.
+     * Produces an image that is exactly targetW x targetH without letterboxing.
+     */
+    private fun centerCrop(source: Bitmap, targetW: Int, targetH: Int): Bitmap {
+        val srcAspect = source.width.toFloat() / source.height
+        val dstAspect = targetW.toFloat() / targetH
+
+        val (scaledW, scaledH) = if (srcAspect > dstAspect) {
+            // Source is wider — fit height, crop width
+            val h = targetH
+            val w = (source.width * targetH.toFloat() / source.height).toInt()
+            w to h
+        } else {
+            // Source is taller — fit width, crop height
+            val w = targetW
+            val h = (source.height * targetW.toFloat() / source.width).toInt()
+            w to h
+        }
+
+        val scaled = Bitmap.createScaledBitmap(source, scaledW, scaledH, true)
+        if (scaled !== source) source.recycle()
+
+        // Center-crop to exact dimensions
+        val cropX = (scaled.width - targetW) / 2
+        val cropY = (scaled.height - targetH) / 2
+        val cropped = Bitmap.createBitmap(scaled, cropX, cropY, targetW, targetH)
+        if (cropped !== scaled) scaled.recycle()
+        return cropped
     }
 
     /**
@@ -190,7 +251,7 @@ class SquooshEngine(private val context: Context) {
     private fun resolveCompressFormat(config: SquooshConfig): Bitmap.CompressFormat {
         return when (config.format) {
             OutputFormat.WEBP -> {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
                     if (config.lossless) Bitmap.CompressFormat.WEBP_LOSSLESS
                     else Bitmap.CompressFormat.WEBP_LOSSY
                 } else {
@@ -246,6 +307,8 @@ data class SquooshConfig(
     val quality: Int = 80,         // 1-100 for lossy formats
     val lossless: Boolean = false, // WebP lossless mode
     val maxDimension: Int = 0,     // 0 = no resize
+    val exactWidth: Int = 0,       // 0 = use maxDimension; >0 = exact output width
+    val exactHeight: Int = 0,      // 0 = use maxDimension; >0 = exact output height
 )
 
 /** Compression result with before/after metrics. */
@@ -273,6 +336,6 @@ sealed interface SquooshState {
     data object Idle : SquooshState
     data class Ready(val fileName: String, val fileSize: Long, val uri: String) : SquooshState
     data class Compressing(val fileName: String) : SquooshState
-    data class Done(val result: SquooshResult, val inputFileName: String) : SquooshState
+    data class Done(val result: SquooshResult, val inputFileName: String, val inputUri: String = "") : SquooshState
     data class Error(val message: String) : SquooshState
 }
