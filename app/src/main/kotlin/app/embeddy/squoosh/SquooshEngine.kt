@@ -3,9 +3,11 @@ package app.embeddy.squoosh
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import android.net.Uri
 import android.os.Build
 import android.provider.OpenableColumns
+import androidx.exifinterface.media.ExifInterface
 import com.radzivon.bartoshyk.avif.coder.AvifSpeed
 import com.radzivon.bartoshyk.avif.coder.HeifCoder
 import com.radzivon.bartoshyk.avif.coder.PreciseMode
@@ -42,9 +44,11 @@ class SquooshEngine(private val context: Context) {
                 if (cursor.moveToFirst() && idx >= 0) cursor.getLong(idx) else 0L
             } ?: 0L
 
-        // Decode with optional downsampling for very large images
-        val bitmap = decodeBitmap(uri, config.maxDimension)
+        // Decode with optional downsampling, then apply EXIF rotation so
+        // the output matches what the user sees in their gallery app.
+        val rawBitmap = decodeBitmap(uri, config.maxDimension)
             ?: throw SquooshException("Failed to decode image")
+        val bitmap = applyExifRotation(uri, rawBitmap)
 
         val originalWidth = bitmap.width
         val originalHeight = bitmap.height
@@ -140,6 +144,46 @@ class SquooshEngine(private val context: Context) {
         return context.contentResolver.openInputStream(uri)?.use { stream ->
             BitmapFactory.decodeStream(stream, null, decodeOpts)
         }
+    }
+
+    /**
+     * Read EXIF orientation from the source URI and rotate/flip the bitmap to match.
+     * BitmapFactory ignores EXIF orientation — without this, photos from cameras
+     * that store rotation in EXIF (most phones) appear sideways or upside-down.
+     */
+    private fun applyExifRotation(uri: Uri, bitmap: Bitmap): Bitmap {
+        val orientation = try {
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                ExifInterface(stream).getAttributeInt(
+                    ExifInterface.TAG_ORIENTATION,
+                    ExifInterface.ORIENTATION_NORMAL,
+                )
+            } ?: ExifInterface.ORIENTATION_NORMAL
+        } catch (_: Exception) {
+            ExifInterface.ORIENTATION_NORMAL
+        }
+
+        val matrix = Matrix()
+        when (orientation) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+            ExifInterface.ORIENTATION_TRANSPOSE -> {
+                matrix.postRotate(90f)
+                matrix.postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_TRANSVERSE -> {
+                matrix.postRotate(270f)
+                matrix.postScale(-1f, 1f)
+            }
+            else -> return bitmap // No rotation needed
+        }
+
+        val rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+        if (rotated !== bitmap) bitmap.recycle()
+        return rotated
     }
 
     /** Map our OutputFormat + config to the Android Bitmap.CompressFormat. */
