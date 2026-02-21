@@ -45,7 +45,7 @@
     <string name="dithering">Dithering</string>
     <string name="color_space">Color Space</string>
     <string name="keyframe_interval">Keyframe Interval</string>
-    <string name="two_pass_encoding">Two-Pass Encoding</string>
+    <string name="compression_level">Compression Level</string>
 
     <!-- Inspect tab -->
     <string name="enter_url">Enter URL to inspect</string>
@@ -89,6 +89,8 @@
     <string name="compression_failed">Compression failed</string>
     <string name="compress_another">Compress another</string>
     <string name="change_image">Change image</string>
+    <string name="original_label">Original</string>
+    <string name="compressed_label">Compressed</string>
 
     <!-- Trim player -->
     <string name="trim">Trim</string>

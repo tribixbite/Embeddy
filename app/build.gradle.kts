@@ -106,6 +106,7 @@ dependencies {
     implementation(libs.androidx.splashscreen)
     implementation(libs.androidx.documentfile)
     implementation(libs.androidx.exifinterface)
+    implementation(libs.androidx.datastore.preferences)
     implementation(libs.jsoup)
 
     // Compose

@@ -9,16 +9,19 @@ import app.embeddy.squoosh.SquooshConfig
 import app.embeddy.squoosh.SquooshEngine
 import app.embeddy.squoosh.SquooshState
 import app.embeddy.util.FileInfoUtils
+import app.embeddy.util.SettingsRepository
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 class SquooshViewModel(application: Application) : AndroidViewModel(application) {
 
     private val engine = SquooshEngine(application)
+    private val settingsRepo = SettingsRepository(application)
 
     private val _state = MutableStateFlow<SquooshState>(SquooshState.Idle)
     val state: StateFlow<SquooshState> = _state.asStateFlow()
@@ -30,6 +33,17 @@ class SquooshViewModel(application: Application) : AndroidViewModel(application)
 
     init {
         engine.cleanup()
+        // Restore saved config from DataStore
+        viewModelScope.launch {
+            _config.value = settingsRepo.squooshConfig.first()
+        }
+    }
+
+    /** Persist current config to DataStore whenever it changes. */
+    private fun persistConfig() {
+        viewModelScope.launch {
+            settingsRepo.saveSquooshConfig(_config.value)
+        }
     }
 
     /** Handle a file picked from the image picker. Single query for name+size. */
@@ -63,26 +77,32 @@ class SquooshViewModel(application: Application) : AndroidViewModel(application)
 
     fun setFormat(format: OutputFormat) {
         _config.update { it.copy(format = format) }
+        persistConfig()
     }
 
     fun setQuality(quality: Int) {
         _config.update { it.copy(quality = quality) }
+        persistConfig()
     }
 
     fun setLossless(lossless: Boolean) {
         _config.update { it.copy(lossless = lossless) }
+        persistConfig()
     }
 
     fun setMaxDimension(maxDim: Int) {
         _config.update { it.copy(maxDimension = maxDim) }
+        persistConfig()
     }
 
     fun setExactWidth(width: Int) {
         _config.update { it.copy(exactWidth = width) }
+        persistConfig()
     }
 
     fun setExactHeight(height: Int) {
         _config.update { it.copy(exactHeight = height) }
+        persistConfig()
     }
 
     fun cancel() {

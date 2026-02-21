@@ -19,7 +19,7 @@
   - Color Space selector (Auto/YUV420/YUV444/RGB)
   - Dithering mode (None/Bayer/Floyd-Steinberg/Sierra)
   - Keyframe interval (auto or custom frame count)
-  - Two-pass encoding toggle
+  - Compression level slider (0-6, replaces two-pass toggle)
 - [x] **2.5** Inspect from file URIs: local media inspection via MediaMetadataRetriever + ExifInterface
   - Video: width, height, rotation, frame count, duration, bitrate, codec, track info
   - Image: EXIF camera, exposure, GPS, dates, color space, artist, copyright
@@ -39,13 +39,23 @@
 - [x] **3.2** ConversionEngine.probeInput: extract bitrate, rotation, mimeType, frameCount
 - [x] **3.3** MetadataEngine: cancellable via Job in InspectViewModel
 
+## Phase 4: Compromises Resolved
+
+- [x] **4.1** Replace two-pass toggle with compression_level slider (0-6)
+  - libwebp_anim doesn't support FFmpeg `-pass`; exposed `compressionLevel` slider instead
+- [x] **4.2** BPP-based size estimation in VideoTrimPlayer
+  - Formula: `(width * height * totalFrames * bpp) / 8` where bpp maps quality 0-100 → 0.05-0.30
+  - Falls back to proportional heuristic when dimensions unavailable
+- [x] **4.3** Pixel-perfect before/after slider via `drawWithContent` + `clipRect`
+  - Replaced Box offset masking approach; clips at draw level for all aspect ratios
+- [x] **4.4** Preferences DataStore for persisting user settings across sessions
+  - SettingsRepository saves/restores SquooshConfig and ConversionConfig
+  - ViewModels auto-restore on init, persist on every setting change
+  - Trim values excluded from persistence (per-file, not user preferences)
+
 ## Compromises / Known Issues
 
 - No unit tests yet (engine logic, metadata parsing)
-- No DataStore persistence for user preferences across sessions
 - No logging framework (Timber etc)
 - Cleanup functions only run on init, not scheduled
 - Tab state lost on process death
-- Before/after slider uses basic box clipping (works but not pixel-perfect for all aspect ratios)
-- Two-pass encoding flag is exposed in UI but not yet wired in ConversionEngine (libwebp_anim doesn't support -pass)
-- Size estimation in VideoTrimPlayer still uses 0.3x heuristic

@@ -113,6 +113,30 @@ fun ConvertScreen(
 
                 // Video preview with trim controls
                 if (s.durationMs > 0) {
+                    // Compute effective output resolution for BPP estimation
+                    val estWidth = when {
+                        config.exactWidth > 0 -> config.exactWidth
+                        s.width > config.maxDimension && config.maxDimension > 0 -> {
+                            val scale = minOf(
+                                config.maxDimension.toFloat() / s.width,
+                                config.maxDimension.toFloat() / s.height,
+                            )
+                            (s.width * scale).toInt()
+                        }
+                        else -> s.width
+                    }
+                    val estHeight = when {
+                        config.exactHeight > 0 -> config.exactHeight
+                        s.height > config.maxDimension && config.maxDimension > 0 -> {
+                            val scale = minOf(
+                                config.maxDimension.toFloat() / s.width,
+                                config.maxDimension.toFloat() / s.height,
+                            )
+                            (s.height * scale).toInt()
+                        }
+                        else -> s.height
+                    }
+
                     VideoTrimPlayer(
                         uri = Uri.parse(s.inputUri),
                         durationMs = s.durationMs,
@@ -121,6 +145,10 @@ fun ConvertScreen(
                         trimStartMs = config.trimStartMs,
                         trimEndMs = config.trimEndMs,
                         onTrimChanged = viewModel::setTrim,
+                        outputWidth = estWidth,
+                        outputHeight = estHeight,
+                        outputFps = config.fps,
+                        outputQuality = config.startQuality,
                     )
                 }
 

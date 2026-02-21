@@ -65,6 +65,14 @@ fun VideoTrimPlayer(
     trimEndMs: Long,
     onTrimChanged: (startMs: Long, endMs: Long) -> Unit,
     modifier: Modifier = Modifier,
+    /** Output width for BPP estimation (0 = fallback to heuristic). */
+    outputWidth: Int = 0,
+    /** Output height for BPP estimation (0 = fallback to heuristic). */
+    outputHeight: Int = 0,
+    /** Target FPS for BPP estimation. */
+    outputFps: Int = 12,
+    /** Quality setting (1-100) used to estimate bits-per-pixel. */
+    outputQuality: Int = 70,
 ) {
     val context = LocalContext.current
     val effectiveDuration = if (durationMs > 0) durationMs else 1L
@@ -105,9 +113,17 @@ fun VideoTrimPlayer(
     val trimStart = if (trimStartMs > 0) trimStartMs.toFloat() else 0f
     val trimEnd = if (trimEndMs > 0) trimEndMs.toFloat() else effectiveDuration.toFloat()
 
-    // Size estimation: proportional to trimmed duration fraction
+    // Size estimation using bits-per-pixel (BPP) model.
+    // BPP ranges from ~0.05 (low quality) to ~0.3 (high quality) for animated WebP.
+    // Formula: estimatedBytes = (width * height * totalFrames * bpp) / 8
     val trimmedDuration = (trimEnd - trimStart).toLong().coerceAtLeast(1)
-    val estimatedSize = if (effectiveDuration > 0) {
+    val estimatedSize = if (outputWidth > 0 && outputHeight > 0 && effectiveDuration > 0) {
+        val bpp = 0.05f + (outputQuality / 100f) * 0.25f  // maps quality 0-100 → bpp 0.05-0.30
+        val totalFrames = (trimmedDuration / 1000f * outputFps).toLong().coerceAtLeast(1)
+        val totalPixels = outputWidth.toLong() * outputHeight.toLong()
+        (totalPixels * totalFrames * bpp / 8f).toLong()
+    } else if (effectiveDuration > 0) {
+        // Fallback: proportional duration ratio with conservative 0.3x heuristic
         (inputSizeBytes * trimmedDuration.toFloat() / effectiveDuration * 0.3f).toLong()
     } else inputSizeBytes
 

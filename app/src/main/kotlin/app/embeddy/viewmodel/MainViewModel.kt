@@ -12,16 +12,19 @@ import app.embeddy.conversion.ConversionProgress
 import app.embeddy.conversion.ConversionState
 import app.embeddy.conversion.Preset
 import app.embeddy.util.FileInfoUtils
+import app.embeddy.util.SettingsRepository
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val engine = ConversionEngine(application)
+    private val settingsRepo = SettingsRepository(application)
 
     private val _state = MutableStateFlow<ConversionState>(ConversionState.Idle)
     val state: StateFlow<ConversionState> = _state.asStateFlow()
@@ -33,6 +36,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         engine.cleanupOldFiles()
+        // Restore saved config from DataStore
+        viewModelScope.launch {
+            _config.value = settingsRepo.conversionConfig.first()
+        }
+    }
+
+    /** Persist current config to DataStore. */
+    private fun persistConfig() {
+        viewModelScope.launch {
+            settingsRepo.saveConversionConfig(_config.value)
+        }
     }
 
     /** Handle a file picked via the system file picker. */
@@ -156,6 +170,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** Set trim points (in milliseconds from start of video). */
     fun setTrim(startMs: Long, endMs: Long) {
         _config.update { it.copy(trimStartMs = startMs, trimEndMs = endMs, preset = Preset.CUSTOM) }
+        // Don't persist trim values — they're per-file, not user preferences
     }
 
     /** Cancel an in-progress conversion. */
@@ -175,10 +190,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** Update the active preset, reconfiguring all settings. */
     fun setPreset(preset: Preset) {
         _config.value = ConversionConfig.fromPreset(preset)
+        persistConfig()
     }
 
     /** Update individual config fields (switches to CUSTOM preset). */
     fun updateConfig(transform: ConversionConfig.() -> ConversionConfig) {
         _config.update { it.transform().copy(preset = Preset.CUSTOM) }
+        persistConfig()
     }
 }

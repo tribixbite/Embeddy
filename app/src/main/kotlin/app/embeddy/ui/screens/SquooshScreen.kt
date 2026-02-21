@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -58,7 +57,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
@@ -66,7 +66,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -461,8 +460,8 @@ private fun SettingSliderRow(
 
 /**
  * Before/after comparison slider inspired by squoosh.app.
- * Displays original and compressed images stacked with a draggable divider
- * that reveals original on the left and compressed on the right.
+ * Uses drawWithContent + clipRect for pixel-perfect clipping regardless of aspect ratio.
+ * Original on the left, compressed on the right, divided by a draggable handle.
  */
 @Composable
 private fun BeforeAfterSlider(
@@ -491,7 +490,7 @@ private fun BeforeAfterSlider(
                 }
             },
     ) {
-        // Compressed image (full, underneath)
+        // Compressed image (full, underneath — visible on the right side)
         AsyncImage(
             model = ImageRequest.Builder(context)
                 .data(File(compressedPath))
@@ -502,41 +501,43 @@ private fun BeforeAfterSlider(
             contentScale = ContentScale.Fit,
         )
 
-        // Original image (clipped to left portion by divider)
-        Box(
+        // Original image clipped to left portion via drawWithContent + clipRect.
+        // This approach clips at the draw level so it works pixel-perfectly
+        // regardless of image aspect ratio or content scaling.
+        AsyncImage(
+            model = ImageRequest.Builder(context)
+                .data(originalUri)
+                .crossfade(false)
+                .build(),
+            contentDescription = "Original",
             modifier = Modifier
                 .fillMaxSize()
-                .clipToBounds(),
-        ) {
-            AsyncImage(
-                model = ImageRequest.Builder(context)
-                    .data(originalUri)
-                    .crossfade(false)
-                    .build(),
-                contentDescription = "Original",
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clipToBounds(),
-                contentScale = ContentScale.Fit,
-            )
-            // Mask: cover the right portion to reveal compressed underneath
-            val offsetPx = (containerWidthPx * dividerFraction).toInt()
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .offset { IntOffset(offsetPx, 0) }
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-            )
-        }
+                .drawWithContent {
+                    clipRect(right = size.width * dividerFraction) {
+                        this@drawWithContent.drawContent()
+                    }
+                },
+            contentScale = ContentScale.Fit,
+        )
 
         // Divider line
         val dividerOffsetDp = with(density) { (containerWidthPx * dividerFraction).toDp() }
         Box(
             modifier = Modifier
-                .offset(x = dividerOffsetDp - 1.dp)
+                .align(Alignment.CenterStart)
+                .padding(start = dividerOffsetDp - 1.dp)
                 .width(2.dp)
                 .height(300.dp)
                 .background(MaterialTheme.colorScheme.primary),
+        )
+
+        // Drag handle circle on the divider
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .padding(start = dividerOffsetDp - 12.dp)
+                .size(24.dp)
+                .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(12.dp)),
         )
 
         // Labels
@@ -548,7 +549,7 @@ private fun BeforeAfterSlider(
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Text(
-                text = "Original",
+                text = stringResource(R.string.original_label),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier
@@ -559,7 +560,7 @@ private fun BeforeAfterSlider(
                     .padding(horizontal = 6.dp, vertical = 2.dp),
             )
             Text(
-                text = "Compressed",
+                text = stringResource(R.string.compressed_label),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier

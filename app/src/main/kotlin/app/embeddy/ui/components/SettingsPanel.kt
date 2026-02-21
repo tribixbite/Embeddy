@@ -305,34 +305,17 @@ fun SettingsPanel(
                                 },
                             )
 
-                            // 5. Two-pass encoding toggle
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = stringResource(R.string.two_pass_encoding),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                    )
-                                    Text(
-                                        text = "Better quality at same file size (slower)",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                                Spacer(Modifier.width(12.dp))
-                                Switch(
-                                    checked = config.twoPassEncoding,
-                                    onCheckedChange = { on ->
-                                        onConfigChanged { copy(twoPassEncoding = on) }
-                                    },
-                                )
-                            }
+                            // 5. Compression level (0-6, higher = slower but smaller)
+                            SettingSlider(
+                                label = stringResource(R.string.compression_level),
+                                value = config.compressionLevel.toFloat(),
+                                valueRange = 0f..6f,
+                                steps = 5,
+                                valueLabel = "${config.compressionLevel}",
+                                onValueChange = { v ->
+                                    onConfigChanged { copy(compressionLevel = v.roundToInt()) }
+                                },
+                            )
                         }
                     }
                 }

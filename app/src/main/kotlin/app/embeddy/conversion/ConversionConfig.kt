@@ -20,7 +20,6 @@ data class ConversionConfig(
     val exactWidth: Int = 0,
     val exactHeight: Int = 0,
     // Advanced FFmpeg encoding flags
-    val twoPassEncoding: Boolean = false,   // -pass 1 / -pass 2 for better bitrate allocation
     val colorSpace: ColorSpace = ColorSpace.AUTO, // Output color space / pixel format
     val denoiseStrength: Int = 0,           // hqdn3d denoise (0=off, 1-10 strength)
     val ditherMode: DitherMode = DitherMode.NONE, // Bayer/Floyd-Steinberg for palette reduction
