@@ -90,13 +90,15 @@ class ConversionEngine(private val context: Context) {
         Timber.d("Starting conversion: %s → %s (q=%d, target=%d bytes)",
             inputFile.name, finalOutput.name, quality, config.targetSizeBytes)
 
-        // Get duration for progress calculation
-        val durationMs = try {
-            val info = probeInput(inputUri)
-            info.durationMs
-        } catch (_: Exception) {
-            0L
-        }
+        // Get duration for progress calculation.
+        // In stitch mode, FFmpeg outputs only the kept segments so use their
+        // combined duration; otherwise fall back to the probed full duration.
+        val durationMs = config.totalKeptDurationMs.takeIf { it > 0 }
+            ?: try {
+                probeInput(inputUri).durationMs
+            } catch (_: Exception) {
+                0L
+            }
 
         try {
             // Track the best (smallest) successful output across all attempts.
