@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import app.embeddy.R
 import app.embeddy.conversion.TrimSegment
+import app.embeddy.util.SizeEstimation
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -137,15 +138,16 @@ fun VideoTrimPlayer(
         (trimEnd - trimStart).coerceAtLeast(1)
     }
 
-    // BPP-based size estimation
-    val estimatedSize = if (outputWidth > 0 && outputHeight > 0 && totalKeptMs > 0) {
-        val bpp = 0.05f + (outputQuality / 100f) * 0.25f
-        val totalFrames = (totalKeptMs / 1000f * outputFps).toLong().coerceAtLeast(1)
-        val totalPixels = outputWidth.toLong() * outputHeight.toLong()
-        (totalPixels * totalFrames * bpp / 8f).toLong()
-    } else if (effectiveDuration > 0) {
-        (inputSizeBytes * totalKeptMs.toFloat() / effectiveDuration * 0.3f).toLong()
-    } else inputSizeBytes
+    // BPP-based size estimation (shared utility)
+    val estimatedSize = SizeEstimation.estimateOutputBytes(
+        width = outputWidth,
+        height = outputHeight,
+        durationMs = totalKeptMs,
+        fps = outputFps,
+        quality = outputQuality,
+        inputSizeBytes = inputSizeBytes,
+        totalDurationMs = effectiveDuration,
+    )
 
     Card(
         modifier = modifier.fillMaxWidth(),

@@ -5,9 +5,11 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.exifinterface.media.ExifInterface
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.io.File
+import java.io.IOException
 import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URL
@@ -24,6 +26,7 @@ class UploadEngine(private val context: Context) {
 
     /**
      * Upload a file to the selected host, optionally stripping metadata.
+     * Retries up to [MAX_RETRIES] times on transient IO/HTTP failures.
      * @param onProgress callback with fraction 0f..1f of bytes written
      */
     suspend fun upload(
@@ -32,34 +35,49 @@ class UploadEngine(private val context: Context) {
         stripMetadata: Boolean,
         onProgress: (Float) -> Unit = {},
     ): UploadResult = withContext(Dispatchers.IO) {
-        try {
-            val fileName = queryFileName(uri) ?: "file"
-            val mimeType = context.contentResolver.getType(uri) ?: "application/octet-stream"
+        val fileName = queryFileName(uri) ?: "file"
+        val mimeType = context.contentResolver.getType(uri) ?: "application/octet-stream"
 
-            // Copy to temp, optionally stripping EXIF
-            val tempFile = copyToTemp(uri, fileName)
-            if (stripMetadata && isExifSupported(mimeType)) {
-                stripExifData(tempFile)
-            }
-
-            val resultUrl = when (host) {
-                UploadHost.ZER0X0 -> uploadTo0x0(tempFile, fileName, mimeType, onProgress)
-                UploadHost.CATBOX -> uploadToCatbox(tempFile, fileName, mimeType, onProgress)
-            }
-
-            val fileSize = tempFile.length()
-            tempFile.delete()
-
-            UploadResult(
-                url = resultUrl,
-                fileName = fileName,
-                host = host,
-                fileSizeBytes = fileSize,
-            )
-        } catch (e: Exception) {
-            Timber.e(e, "Upload to %s failed", host.label)
-            throw UploadException("Upload failed: ${e.message}", e)
+        // Copy to temp once — retries reuse the same file
+        val tempFile = copyToTemp(uri, fileName)
+        if (stripMetadata && isExifSupported(mimeType)) {
+            stripExifData(tempFile)
         }
+
+        var lastException: Exception? = null
+        for (attempt in 1..MAX_RETRIES) {
+            try {
+                val resultUrl = when (host) {
+                    UploadHost.ZER0X0 -> uploadTo0x0(tempFile, fileName, mimeType, onProgress)
+                    UploadHost.CATBOX -> uploadToCatbox(tempFile, fileName, mimeType, onProgress)
+                }
+
+                val fileSize = tempFile.length()
+                tempFile.delete()
+
+                return@withContext UploadResult(
+                    url = resultUrl,
+                    fileName = fileName,
+                    host = host,
+                    fileSizeBytes = fileSize,
+                )
+            } catch (e: IOException) {
+                lastException = e
+                Timber.w("Upload attempt %d/%d to %s failed: %s", attempt, MAX_RETRIES, host.label, e.message)
+                if (attempt < MAX_RETRIES) {
+                    delay(RETRY_DELAY_MS * attempt) // Linear backoff
+                }
+            } catch (e: UploadException) {
+                // Server returned a non-retryable error (4xx) — don't retry
+                tempFile.delete()
+                Timber.e(e, "Upload to %s failed (non-retryable)", host.label)
+                throw e
+            }
+        }
+
+        tempFile.delete()
+        Timber.e(lastException, "Upload to %s failed after %d attempts", host.label, MAX_RETRIES)
+        throw UploadException("Upload failed after $MAX_RETRIES attempts: ${lastException?.message}", lastException)
     }
 
     /** POST to https://0x0.st with multipart/form-data. */
@@ -90,15 +108,7 @@ class UploadEngine(private val context: Context) {
             progressOutput.write("--$boundary--\r\n".toByteArray())
         }
 
-        val responseCode = connection.responseCode
-        val responseBody = if (responseCode in 200..299) {
-            connection.inputStream.bufferedReader().readText().trim()
-        } else {
-            val error = connection.errorStream?.bufferedReader()?.readText() ?: "Unknown error"
-            throw UploadException("0x0.st returned HTTP $responseCode: $error")
-        }
-        connection.disconnect()
-        return responseBody
+        return handleResponse(connection, "0x0.st")
     }
 
     /** POST to https://catbox.moe/user/api.php with multipart/form-data. */
@@ -130,14 +140,30 @@ class UploadEngine(private val context: Context) {
             progressOutput.write("--$boundary--\r\n".toByteArray())
         }
 
+        return handleResponse(connection, "catbox.moe")
+    }
+
+    /**
+     * Read HTTP response: 2xx returns body, 5xx throws IOException (retryable),
+     * 4xx throws UploadException (non-retryable).
+     */
+    private fun handleResponse(connection: HttpURLConnection, hostName: String): String {
         val responseCode = connection.responseCode
-        val responseBody = if (responseCode in 200..299) {
-            connection.inputStream.bufferedReader().readText().trim()
-        } else {
-            val error = connection.errorStream?.bufferedReader()?.readText() ?: "Unknown error"
-            throw UploadException("catbox.moe returned HTTP $responseCode: $error")
+        val responseBody = try {
+            if (responseCode in 200..299) {
+                connection.inputStream.bufferedReader().readText().trim()
+            } else {
+                val error = connection.errorStream?.bufferedReader()?.readText() ?: "Unknown error"
+                if (responseCode >= 500) {
+                    // Server error — retryable via IOException
+                    throw IOException("$hostName returned HTTP $responseCode: $error")
+                }
+                // Client error (4xx) — non-retryable
+                throw UploadException("$hostName returned HTTP $responseCode: $error")
+            }
+        } finally {
+            connection.disconnect()
         }
-        connection.disconnect()
         return responseBody
     }
 
@@ -209,6 +235,9 @@ class UploadEngine(private val context: Context) {
     }
 
     companion object {
+        private const val MAX_RETRIES = 3
+        private const val RETRY_DELAY_MS = 1500L // Linear backoff: 1.5s, 3s, 4.5s
+
         /** EXIF tags that may contain sensitive/identifying info. */
         private val EXIF_TAGS_TO_STRIP = listOf(
             ExifInterface.TAG_GPS_LATITUDE,

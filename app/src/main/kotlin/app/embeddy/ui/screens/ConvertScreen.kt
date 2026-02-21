@@ -50,6 +50,7 @@ import app.embeddy.ui.components.OutputPreviewCard
 import app.embeddy.ui.components.SettingsPanel
 import app.embeddy.ui.components.VideoTrimPlayer
 import app.embeddy.util.FileInfoUtils
+import app.embeddy.util.SizeEstimation
 import app.embeddy.viewmodel.InspectViewModel
 import app.embeddy.viewmodel.MainViewModel
 
@@ -114,28 +115,8 @@ fun ConvertScreen(
                 // Video preview with trim controls
                 if (s.durationMs > 0) {
                     // Compute effective output resolution for BPP estimation
-                    val estWidth = when {
-                        config.exactWidth > 0 -> config.exactWidth
-                        s.width > config.maxDimension && config.maxDimension > 0 -> {
-                            val scale = minOf(
-                                config.maxDimension.toFloat() / s.width,
-                                config.maxDimension.toFloat() / s.height,
-                            )
-                            (s.width * scale).toInt()
-                        }
-                        else -> s.width
-                    }
-                    val estHeight = when {
-                        config.exactHeight > 0 -> config.exactHeight
-                        s.height > config.maxDimension && config.maxDimension > 0 -> {
-                            val scale = minOf(
-                                config.maxDimension.toFloat() / s.width,
-                                config.maxDimension.toFloat() / s.height,
-                            )
-                            (s.height * scale).toInt()
-                        }
-                        else -> s.height
-                    }
+                    val estWidth = SizeEstimation.estimateOutputWidth(s.width, s.height, config)
+                    val estHeight = SizeEstimation.estimateOutputHeight(s.width, s.height, config)
 
                     VideoTrimPlayer(
                         uri = Uri.parse(s.inputUri),
