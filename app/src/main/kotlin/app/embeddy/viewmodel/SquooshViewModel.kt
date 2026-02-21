@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -32,7 +33,7 @@ class SquooshViewModel(application: Application) : AndroidViewModel(application)
     private var compressionJob: Job? = null
 
     init {
-        engine.cleanup()
+        viewModelScope.launch(Dispatchers.IO) { engine.cleanup() }
         // Restore saved config from DataStore
         viewModelScope.launch {
             _config.value = settingsRepo.squooshConfig.first()

@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -36,7 +37,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var conversionJob: Job? = null
 
     init {
-        engine.cleanupOldFiles()
+        viewModelScope.launch(Dispatchers.IO) { engine.cleanupOldFiles() }
         // Restore saved config from DataStore
         viewModelScope.launch {
             _config.value = settingsRepo.conversionConfig.first()
@@ -89,10 +90,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Merge overlapping segments to prevent duplicate frames in FFmpeg concat. */
+    private fun mergeOverlappingSegments(segments: List<TrimSegment>): List<TrimSegment> {
+        if (segments.size <= 1) return segments
+        val sorted = segments.sortedBy { it.startMs }
+        return sorted.fold(mutableListOf<TrimSegment>()) { acc, seg ->
+            val last = acc.lastOrNull()
+            if (last != null && seg.startMs <= last.endMs) {
+                // Overlapping or adjacent — merge by extending end
+                acc[acc.lastIndex] = TrimSegment(last.startMs, maxOf(last.endMs, seg.endMs))
+            } else {
+                acc.add(seg)
+            }
+            acc
+        }
+    }
+
     /** Start the conversion process. */
     fun startConversion() {
         val ready = _state.value as? ConversionState.Ready ?: return
-        val currentConfig = _config.value
+        // Merge any overlapping segments before building FFmpeg command
+        val currentConfig = _config.value.let { cfg ->
+            if (cfg.segments.size > 1) cfg.copy(segments = mergeOverlappingSegments(cfg.segments))
+            else cfg
+        }
         val uri = Uri.parse(ready.inputUri)
         val baseName = ready.fileName.substringBeforeLast(".")
 
@@ -187,9 +208,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** Remove a segment by index. */
+    /** Remove a segment by index (bounds-checked). */
     fun removeSegment(index: Int) {
         _config.update { current ->
+            if (index !in current.segments.indices) return@update current
             val newSegments = current.segments.toMutableList().apply { removeAt(index) }
             current.copy(segments = newSegments, preset = Preset.CUSTOM)
         }

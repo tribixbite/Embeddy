@@ -185,11 +185,16 @@ private fun saveToDownloads(context: Context, path: String) {
     val uri = resolver.insert(
         android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,
         contentValues,
-    ) ?: return
+    )
+    if (uri == null) {
+        android.widget.Toast.makeText(context, "Failed to save to Downloads", android.widget.Toast.LENGTH_SHORT).show()
+        return
+    }
     resolver.openOutputStream(uri)?.use { output ->
         file.inputStream().use { input -> input.copyTo(output) }
     }
     contentValues.clear()
     contentValues.put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
     resolver.update(uri, contentValues, null, null)
+    android.widget.Toast.makeText(context, "Saved to Downloads", android.widget.Toast.LENGTH_SHORT).show()
 }

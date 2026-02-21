@@ -14,6 +14,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.io.File
+import java.util.UUID
 import kotlin.coroutines.resume
 
 /**
@@ -80,7 +81,7 @@ class ConversionEngine(private val context: Context) {
     ): Flow<ConversionProgress> = callbackFlow {
         // Copy input to a temp file so FFmpeg can access it directly
         val inputFile = copyUriToTemp(inputUri)
-        val tempOutput = File(tempDir, "temp_output.webp")
+        val tempOutput = File(tempDir, "temp_${UUID.randomUUID()}.webp")
         val finalOutput = File(cacheDir, "${outputName}_embeddy.webp")
 
         var quality = config.startQuality
@@ -286,12 +287,16 @@ class ConversionEngine(private val context: Context) {
 
     /**
      * Build an FFmpeg command that stitches multiple segments using the concat filter.
-     * Each segment is trimmed from the same input, filtered, then concatenated.
+     * Each segment is trimmed from the same input, concatenated, THEN filtered.
+     *
+     * Filters are applied AFTER concat to avoid FFmpeg label collisions — some
+     * filters (e.g. palettegen/paletteuse for dithering) use internal labels like
+     * [a][b][p] that would conflict if duplicated per segment.
      *
      * Complex filtergraph structure:
-     *   [0:v]trim=start:end,setpts=PTS-STARTPTS,<filters>[v0];
-     *   [0:v]trim=start:end,setpts=PTS-STARTPTS,<filters>[v1];
-     *   [v0][v1]concat=n=2:v=1:a=0[vout]
+     *   [0:v]trim=start:end,setpts=PTS-STARTPTS[v0];
+     *   [0:v]trim=start:end,setpts=PTS-STARTPTS[v1];
+     *   [v0][v1]concat=n=2:v=1:a=0[cat];[cat]<filters>[vout]
      */
     private fun buildStitchCommand(
         inputPath: String,
@@ -306,12 +311,12 @@ class ConversionEngine(private val context: Context) {
             config.segments.forEachIndexed { i, seg ->
                 val start = String.format("%.3f", seg.startMs / 1000.0)
                 val end = String.format("%.3f", seg.endMs / 1000.0)
-                // Trim each segment, reset PTS, apply video filters
-                append("[0:v]trim=$start:$end,setpts=PTS-STARTPTS,$filters[v$i];")
+                // Trim each segment and reset PTS (no per-segment filters)
+                append("[0:v]trim=$start:$end,setpts=PTS-STARTPTS[v$i];")
             }
-            // Concatenate all segments
+            // Concatenate all segments, then apply filters to the combined stream
             val inputs = (0 until n).joinToString("") { "[v$it]" }
-            append("${inputs}concat=n=$n:v=1:a=0[vout]")
+            append("${inputs}concat=n=$n:v=1:a=0[cat];[cat]$filters[vout]")
         }
 
         return buildString {

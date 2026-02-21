@@ -61,8 +61,8 @@ class MetadataEngine {
         generalTags["File Size"] = formatFileSize(fileSize)
 
         // MediaMetadataRetriever for video/audio metadata
+        val retriever = MediaMetadataRetriever()
         try {
-            val retriever = MediaMetadataRetriever()
             retriever.setDataSource(context, uri)
 
             fun extract(key: Int, label: String) {
@@ -114,10 +114,10 @@ class MetadataEngine {
                 extract(MediaMetadataRetriever.METADATA_KEY_SAMPLERATE, "Sample Rate")
                 extract(MediaMetadataRetriever.METADATA_KEY_BITS_PER_SAMPLE, "Bits Per Sample")
             }
-
-            retriever.release()
         } catch (_: Exception) {
             // Not a valid media file for MediaMetadataRetriever
+        } finally {
+            retriever.release()
         }
 
         // EXIF metadata for images
