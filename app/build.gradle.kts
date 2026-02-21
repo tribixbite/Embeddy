@@ -134,4 +134,8 @@ dependencies {
 
     // Background work (periodic cache cleanup)
     implementation(libs.work.runtime)
+
+    // Testing
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
 }
