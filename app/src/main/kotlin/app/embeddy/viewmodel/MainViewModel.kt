@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import app.embeddy.conversion.ConversionConfig
 import app.embeddy.conversion.ConversionEngine
@@ -23,7 +24,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-class MainViewModel(application: Application) : AndroidViewModel(application) {
+class MainViewModel(
+    application: Application,
+    private val savedState: SavedStateHandle,
+) : AndroidViewModel(application) {
 
     private val engine = ConversionEngine(application)
     private val settingsRepo = SettingsRepository(application)
@@ -36,12 +40,59 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private var conversionJob: Job? = null
 
+    // SavedStateHandle keys for process death restoration
+    private companion object {
+        const val KEY_INPUT_URI = "ss_input_uri"
+        const val KEY_FILE_NAME = "ss_file_name"
+        const val KEY_FILE_SIZE = "ss_file_size"
+        const val KEY_DURATION_MS = "ss_duration_ms"
+        const val KEY_WIDTH = "ss_width"
+        const val KEY_HEIGHT = "ss_height"
+    }
+
     init {
         viewModelScope.launch(Dispatchers.IO) { engine.cleanupOldFiles() }
         // Restore saved config from DataStore
         viewModelScope.launch {
             _config.value = settingsRepo.conversionConfig.first()
         }
+        // Restore Ready state from SavedStateHandle if process was killed
+        restoreReadyState()
+    }
+
+    /** Restore the Ready state from SavedStateHandle after process death. */
+    private fun restoreReadyState() {
+        val uri = savedState.get<String>(KEY_INPUT_URI) ?: return
+        val fileName = savedState.get<String>(KEY_FILE_NAME) ?: return
+        val fileSize = savedState.get<Long>(KEY_FILE_SIZE) ?: return
+        _state.value = ConversionState.Ready(
+            inputUri = uri,
+            fileName = fileName,
+            fileSize = fileSize,
+            durationMs = savedState.get<Long>(KEY_DURATION_MS) ?: 0L,
+            width = savedState.get<Int>(KEY_WIDTH) ?: 0,
+            height = savedState.get<Int>(KEY_HEIGHT) ?: 0,
+        )
+    }
+
+    /** Persist Ready state fields to SavedStateHandle. */
+    private fun saveReadyState(ready: ConversionState.Ready) {
+        savedState[KEY_INPUT_URI] = ready.inputUri
+        savedState[KEY_FILE_NAME] = ready.fileName
+        savedState[KEY_FILE_SIZE] = ready.fileSize
+        savedState[KEY_DURATION_MS] = ready.durationMs
+        savedState[KEY_WIDTH] = ready.width
+        savedState[KEY_HEIGHT] = ready.height
+    }
+
+    /** Clear saved Ready state when leaving that state. */
+    private fun clearSavedReadyState() {
+        savedState.remove<String>(KEY_INPUT_URI)
+        savedState.remove<String>(KEY_FILE_NAME)
+        savedState.remove<Long>(KEY_FILE_SIZE)
+        savedState.remove<Long>(KEY_DURATION_MS)
+        savedState.remove<Int>(KEY_WIDTH)
+        savedState.remove<Int>(KEY_HEIGHT)
     }
 
     /** Persist current config to DataStore. */
@@ -56,10 +107,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 val ctx = getApplication<Application>()
+                // Take persistable permission so URI survives process death
+                try {
+                    ctx.contentResolver.takePersistableUriPermission(
+                        uri, Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                    )
+                } catch (_: SecurityException) {
+                    // Not all URIs support persistable permission — non-fatal
+                }
+
                 val (fileName, fileSize) = FileInfoUtils.queryFileInfo(ctx, uri)
                 val info = engine.probeInput(uri)
 
-                _state.value = ConversionState.Ready(
+                val ready = ConversionState.Ready(
                     inputUri = uri.toString(),
                     fileName = fileName,
                     fileSize = fileSize,
@@ -67,6 +127,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     width = info.width,
                     height = info.height,
                 )
+                _state.value = ready
+                saveReadyState(ready)
             } catch (e: Exception) {
                 _state.value = ConversionState.Error("Failed to read file: ${e.message}")
             }
@@ -230,6 +292,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         conversionJob?.cancel()
         conversionJob = null
         _state.value = ConversionState.Idle
+        clearSavedReadyState()
     }
 
     /** Reset to idle state for a new conversion. */
@@ -237,6 +300,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         conversionJob?.cancel()
         conversionJob = null
         _state.value = ConversionState.Idle
+        clearSavedReadyState()
     }
 
     /** Update the active preset, reconfiguring all settings. */
