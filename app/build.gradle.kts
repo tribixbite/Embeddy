@@ -128,4 +128,10 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.coil.gif)
     implementation(libs.coil.video)
+
+    // Logging
+    implementation(libs.timber)
+
+    // Background work (periodic cache cleanup)
+    implementation(libs.work.runtime)
 }

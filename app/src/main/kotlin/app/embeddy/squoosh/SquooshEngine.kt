@@ -14,6 +14,7 @@ import com.radzivon.bartoshyk.avif.coder.HeifCoder
 import com.radzivon.bartoshyk.avif.coder.PreciseMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import timber.log.Timber
 import java.io.File
 import java.io.FileOutputStream
 
@@ -60,6 +61,9 @@ class SquooshEngine(private val context: Context) {
 
         val originalWidth = bitmap.width
         val originalHeight = bitmap.height
+        Timber.d("Squoosh: %s (%dx%d, %d bytes) → %s q=%d",
+            fileName, originalWidth, originalHeight, originalSize,
+            config.format.label, config.quality)
 
         // Apply resizing: exact crop or max-dimension scaling
         val resized = when {

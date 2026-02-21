@@ -94,7 +94,7 @@ fun ConversionProgressCard(
                 )
 
                 OutlinedButton(onClick = onCancel) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.cancel))
                 }
             }
         }

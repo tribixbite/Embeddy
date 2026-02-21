@@ -149,6 +149,8 @@ fun ConvertScreen(
                         outputHeight = estHeight,
                         outputFps = config.fps,
                         outputQuality = config.startQuality,
+                        segments = config.segments,
+                        onSegmentsChanged = viewModel::setSegments,
                     )
                 }
 

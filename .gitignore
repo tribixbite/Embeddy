@@ -16,3 +16,4 @@ local.properties
 output/
 *.hprof
 tools/aapt2-arm64/
+tools/

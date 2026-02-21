@@ -11,6 +11,7 @@ import app.embeddy.conversion.ConversionEngine
 import app.embeddy.conversion.ConversionProgress
 import app.embeddy.conversion.ConversionState
 import app.embeddy.conversion.Preset
+import app.embeddy.conversion.TrimSegment
 import app.embeddy.util.FileInfoUtils
 import app.embeddy.util.SettingsRepository
 import kotlinx.coroutines.Job
@@ -167,10 +168,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    /** Set trim points (in milliseconds from start of video). */
+    /** Set trim points (in milliseconds from start of video). Legacy single-trim API. */
     fun setTrim(startMs: Long, endMs: Long) {
-        _config.update { it.copy(trimStartMs = startMs, trimEndMs = endMs, preset = Preset.CUSTOM) }
+        _config.update { it.copy(trimStartMs = startMs, trimEndMs = endMs, segments = emptyList(), preset = Preset.CUSTOM) }
         // Don't persist trim values — they're per-file, not user preferences
+    }
+
+    /** Replace the segments list (for multi-segment stitching). */
+    fun setSegments(segments: List<TrimSegment>) {
+        _config.update { it.copy(segments = segments, preset = Preset.CUSTOM) }
+    }
+
+    /** Add a new segment to the keep list. */
+    fun addSegment(segment: TrimSegment) {
+        _config.update { current ->
+            val newSegments = (current.segments + segment).sortedBy { it.startMs }
+            current.copy(segments = newSegments, preset = Preset.CUSTOM)
+        }
+    }
+
+    /** Remove a segment by index. */
+    fun removeSegment(index: Int) {
+        _config.update { current ->
+            val newSegments = current.segments.toMutableList().apply { removeAt(index) }
+            current.copy(segments = newSegments, preset = Preset.CUSTOM)
+        }
+    }
+
+    /** Update a specific segment at the given index. */
+    fun updateSegment(index: Int, segment: TrimSegment) {
+        _config.update { current ->
+            val newSegments = current.segments.toMutableList().apply { set(index, segment) }
+            current.copy(segments = newSegments.sortedBy { it.startMs }, preset = Preset.CUSTOM)
+        }
     }
 
     /** Cancel an in-progress conversion. */

@@ -17,17 +17,21 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -44,6 +48,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import app.embeddy.R
+import app.embeddy.conversion.TrimSegment
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -51,9 +56,12 @@ import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.delay
 
 /**
- * Video preview with playback controls and a trim range slider.
- * Reports trim selection back via onTrimChanged(startMs, endMs).
- * Also shows an estimated output size based on trimmed duration vs input bitrate.
+ * Video preview with playback controls and trim/stitch support.
+ *
+ * Supports two modes:
+ * - **Simple trim**: single range slider to set start/end points
+ * - **Stitch mode**: multiple segments to keep, with gaps removed from the output.
+ *   Users can add/remove segments to selectively cut sections from the video.
  */
 @Composable
 fun VideoTrimPlayer(
@@ -73,9 +81,16 @@ fun VideoTrimPlayer(
     outputFps: Int = 12,
     /** Quality setting (1-100) used to estimate bits-per-pixel. */
     outputQuality: Int = 70,
+    /** Multi-segment stitch list. When non-empty, overrides single trim. */
+    segments: List<TrimSegment> = emptyList(),
+    /** Callback when segments change (stitch mode). */
+    onSegmentsChanged: (List<TrimSegment>) -> Unit = {},
 ) {
     val context = LocalContext.current
     val effectiveDuration = if (durationMs > 0) durationMs else 1L
+
+    // Stitch mode toggle
+    var stitchMode by remember { mutableStateOf(segments.isNotEmpty()) }
 
     // ExoPlayer instance — create once per URI
     val exoPlayer = remember(uri) {
@@ -91,7 +106,6 @@ fun VideoTrimPlayer(
         onDispose { exoPlayer.release() }
     }
 
-    // Track playback position for the position indicator
     var isPlaying by remember { mutableStateOf(false) }
     var currentPositionMs by remember { mutableLongStateOf(0L) }
 
@@ -99,32 +113,38 @@ fun VideoTrimPlayer(
     LaunchedEffect(isPlaying) {
         while (isPlaying) {
             currentPositionMs = exoPlayer.currentPosition
-            // Auto-loop within trim range
-            val end = if (trimEndMs > 0) trimEndMs else effectiveDuration
+            val end = if (stitchMode && segments.isNotEmpty()) {
+                segments.last().endMs
+            } else {
+                if (trimEndMs > 0) trimEndMs else effectiveDuration
+            }
             if (currentPositionMs >= end) {
-                exoPlayer.seekTo(trimStartMs)
+                val start = if (stitchMode && segments.isNotEmpty()) {
+                    segments.first().startMs
+                } else trimStartMs
+                exoPlayer.seekTo(start)
             }
             delay(100)
         }
     }
 
-    // Trim slider range (0..duration in ms, mapped to float for RangeSlider)
-    val sliderRange = 0f..effectiveDuration.toFloat()
-    val trimStart = if (trimStartMs > 0) trimStartMs.toFloat() else 0f
-    val trimEnd = if (trimEndMs > 0) trimEndMs.toFloat() else effectiveDuration.toFloat()
+    // Calculate total kept duration for size estimation
+    val totalKeptMs = if (stitchMode && segments.isNotEmpty()) {
+        segments.sumOf { it.durationMs }
+    } else {
+        val trimStart = if (trimStartMs > 0) trimStartMs else 0L
+        val trimEnd = if (trimEndMs > 0) trimEndMs else effectiveDuration
+        (trimEnd - trimStart).coerceAtLeast(1)
+    }
 
-    // Size estimation using bits-per-pixel (BPP) model.
-    // BPP ranges from ~0.05 (low quality) to ~0.3 (high quality) for animated WebP.
-    // Formula: estimatedBytes = (width * height * totalFrames * bpp) / 8
-    val trimmedDuration = (trimEnd - trimStart).toLong().coerceAtLeast(1)
-    val estimatedSize = if (outputWidth > 0 && outputHeight > 0 && effectiveDuration > 0) {
-        val bpp = 0.05f + (outputQuality / 100f) * 0.25f  // maps quality 0-100 → bpp 0.05-0.30
-        val totalFrames = (trimmedDuration / 1000f * outputFps).toLong().coerceAtLeast(1)
+    // BPP-based size estimation
+    val estimatedSize = if (outputWidth > 0 && outputHeight > 0 && totalKeptMs > 0) {
+        val bpp = 0.05f + (outputQuality / 100f) * 0.25f
+        val totalFrames = (totalKeptMs / 1000f * outputFps).toLong().coerceAtLeast(1)
         val totalPixels = outputWidth.toLong() * outputHeight.toLong()
         (totalPixels * totalFrames * bpp / 8f).toLong()
     } else if (effectiveDuration > 0) {
-        // Fallback: proportional duration ratio with conservative 0.3x heuristic
-        (inputSizeBytes * trimmedDuration.toFloat() / effectiveDuration * 0.3f).toLong()
+        (inputSizeBytes * totalKeptMs.toFloat() / effectiveDuration * 0.3f).toLong()
     } else inputSizeBytes
 
     Card(
@@ -148,24 +168,30 @@ fun VideoTrimPlayer(
                     factory = { ctx ->
                         PlayerView(ctx).apply {
                             player = exoPlayer
-                            useController = false // We provide custom controls
+                            useController = false
                             setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
                         }
                     },
                     modifier = Modifier.fillMaxSize(),
                 )
 
-                // Play/pause overlay button
+                // Play/pause overlay
                 IconButton(
                     onClick = {
                         if (exoPlayer.isPlaying) {
                             exoPlayer.pause()
                             isPlaying = false
                         } else {
-                            // Start from trim start if at end
-                            val end = if (trimEndMs > 0) trimEndMs else effectiveDuration
+                            val end = if (stitchMode && segments.isNotEmpty()) {
+                                segments.last().endMs
+                            } else {
+                                if (trimEndMs > 0) trimEndMs else effectiveDuration
+                            }
                             if (exoPlayer.currentPosition >= end) {
-                                exoPlayer.seekTo(trimStartMs)
+                                val start = if (stitchMode && segments.isNotEmpty()) {
+                                    segments.first().startMs
+                                } else trimStartMs
+                                exoPlayer.seekTo(start)
                             }
                             exoPlayer.play()
                             isPlaying = true
@@ -189,7 +215,7 @@ fun VideoTrimPlayer(
 
             Spacer(Modifier.height(12.dp))
 
-            // Trim range slider
+            // Trim header with stitch mode toggle
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth(),
@@ -206,40 +232,75 @@ fun VideoTrimPlayer(
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )
+                Spacer(Modifier.weight(1f))
+                // Stitch mode toggle chip
+                FilterChip(
+                    selected = stitchMode,
+                    onClick = {
+                        stitchMode = !stitchMode
+                        if (stitchMode && segments.isEmpty()) {
+                            // Initialize with one segment covering the current trim range
+                            val start = if (trimStartMs > 0) trimStartMs else 0L
+                            val end = if (trimEndMs > 0) trimEndMs else effectiveDuration
+                            onSegmentsChanged(listOf(TrimSegment(start, end)))
+                        } else if (!stitchMode) {
+                            // Revert to simple trim from first segment
+                            val first = segments.firstOrNull()
+                            if (first != null) {
+                                onTrimChanged(first.startMs, first.endMs)
+                            }
+                            onSegmentsChanged(emptyList())
+                        }
+                    },
+                    label = { Text(stringResource(R.string.stitch_mode), style = MaterialTheme.typography.labelSmall) },
+                )
             }
 
-            RangeSlider(
-                value = trimStart..trimEnd,
-                onValueChange = { range ->
-                    val newStart = range.start.toLong()
-                    val newEnd = range.endInclusive.toLong()
-                    onTrimChanged(newStart, newEnd)
-                    // Seek player to start of new range for preview
-                    exoPlayer.seekTo(newStart)
-                },
-                valueRange = sliderRange,
-                modifier = Modifier.fillMaxWidth(),
-                colors = SliderDefaults.colors(
-                    activeTrackColor = MaterialTheme.colorScheme.primary,
-                    inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant,
-                ),
-            )
+            if (stitchMode) {
+                // Multi-segment stitch UI
+                StitchSegments(
+                    segments = segments,
+                    durationMs = effectiveDuration,
+                    exoPlayer = exoPlayer,
+                    onSegmentsChanged = onSegmentsChanged,
+                )
+            } else {
+                // Simple single-range trim slider
+                val sliderRange = 0f..effectiveDuration.toFloat()
+                val trimStart = if (trimStartMs > 0) trimStartMs.toFloat() else 0f
+                val trimEnd = if (trimEndMs > 0) trimEndMs.toFloat() else effectiveDuration.toFloat()
 
-            // Trim times + size estimate
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Text(
-                    text = "${formatTime(trimStart.toLong())} – ${formatTime(trimEnd.toLong())}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                RangeSlider(
+                    value = trimStart..trimEnd,
+                    onValueChange = { range ->
+                        val newStart = range.start.toLong()
+                        val newEnd = range.endInclusive.toLong()
+                        onTrimChanged(newStart, newEnd)
+                        exoPlayer.seekTo(newStart)
+                    },
+                    valueRange = sliderRange,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = SliderDefaults.colors(
+                        activeTrackColor = MaterialTheme.colorScheme.primary,
+                        inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant,
+                    ),
                 )
-                Text(
-                    text = formatTime(trimmedDuration),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        text = "${formatTime(trimStart.toLong())} – ${formatTime(trimEnd.toLong())}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = formatTime(totalKeptMs),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
             }
 
             Spacer(Modifier.height(8.dp))
@@ -253,19 +314,142 @@ fun VideoTrimPlayer(
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(
-                    text = "Est. output: $estStr",
+                    text = stringResource(R.string.est_output, estStr),
                     style = MaterialTheme.typography.labelSmall,
                     color = if (overTarget) MaterialTheme.colorScheme.error
                     else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
-                    text = "Target: $targetStr",
+                    text = stringResource(R.string.target_label, targetStr),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
     }
+}
+
+/**
+ * UI for managing multiple stitch segments.
+ * Each segment has its own range slider and can be added/removed.
+ */
+@Composable
+private fun StitchSegments(
+    segments: List<TrimSegment>,
+    durationMs: Long,
+    exoPlayer: ExoPlayer,
+    onSegmentsChanged: (List<TrimSegment>) -> Unit,
+) {
+    val sliderRange = 0f..durationMs.toFloat()
+
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        segments.forEachIndexed { index, segment ->
+            // Segment label
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(R.string.segment_label, index + 1),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.weight(1f),
+                )
+                // Remove button (only if more than 1 segment)
+                if (segments.size > 1) {
+                    IconButton(
+                        onClick = {
+                            val updated = segments.toMutableList().apply { removeAt(index) }
+                            onSegmentsChanged(updated)
+                        },
+                        modifier = Modifier.size(28.dp),
+                    ) {
+                        Icon(
+                            Icons.Default.Remove,
+                            contentDescription = stringResource(R.string.remove_segment),
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                }
+            }
+
+            // Range slider for this segment
+            RangeSlider(
+                value = segment.startMs.toFloat()..segment.endMs.toFloat(),
+                onValueChange = { range ->
+                    val updated = segments.toMutableList().apply {
+                        set(index, TrimSegment(range.start.toLong(), range.endInclusive.toLong()))
+                    }
+                    onSegmentsChanged(updated.sortedBy { it.startMs })
+                    exoPlayer.seekTo(range.start.toLong())
+                },
+                valueRange = sliderRange,
+                modifier = Modifier.fillMaxWidth(),
+                colors = SliderDefaults.colors(
+                    activeTrackColor = segmentColor(index),
+                    inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant,
+                ),
+            )
+
+            // Time labels for this segment
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = "${formatTime(segment.startMs)} – ${formatTime(segment.endMs)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = formatTime(segment.durationMs),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = segmentColor(index),
+                )
+            }
+        }
+
+        // Add segment button
+        TextButton(
+            onClick = {
+                // Add a new segment at the end of the video (last 20% or after last segment)
+                val lastEnd = segments.maxOfOrNull { it.endMs } ?: 0L
+                val newStart = lastEnd.coerceAtMost(durationMs - 1000)
+                    .coerceAtLeast(0)
+                val newEnd = durationMs
+                if (newStart < newEnd) {
+                    onSegmentsChanged(segments + TrimSegment(newStart, newEnd))
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(4.dp))
+            Text(stringResource(R.string.add_segment), style = MaterialTheme.typography.labelMedium)
+        }
+
+        // Total kept duration summary
+        val totalKept = segments.sumOf { it.durationMs }
+        val removed = durationMs - totalKept
+        if (removed > 0) {
+            Text(
+                text = "Keeping ${formatTime(totalKept)} of ${formatTime(durationMs)} (removing ${formatTime(removed)})",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+/** Assign distinct colors to segments for visual differentiation. */
+@Composable
+private fun segmentColor(index: Int) = when (index % 4) {
+    0 -> MaterialTheme.colorScheme.primary
+    1 -> MaterialTheme.colorScheme.tertiary
+    2 -> MaterialTheme.colorScheme.secondary
+    else -> MaterialTheme.colorScheme.error
 }
 
 private fun formatTime(ms: Long): String {

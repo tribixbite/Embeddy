@@ -3,6 +3,17 @@ package app.embeddy.conversion
 /**
  * Mutable conversion settings derived from a [Preset] or user customization.
  */
+/**
+ * A segment of video to keep during stitching.
+ * Multiple segments allow users to remove sections from the middle of a video.
+ */
+data class TrimSegment(
+    val startMs: Long,
+    val endMs: Long,
+) {
+    val durationMs: Long get() = (endMs - startMs).coerceAtLeast(0)
+}
+
 data class ConversionConfig(
     val maxDimension: Int = 720,
     val fps: Int = 12,
@@ -14,8 +25,11 @@ data class ConversionConfig(
     val loop: Int = 0,              // 0 = infinite loop
     val compressionLevel: Int = 4,  // WebP compression (0-6)
     val preset: Preset = Preset.DISCORD,
-    val trimStartMs: Long = 0,      // 0 = no trim
-    val trimEndMs: Long = 0,        // 0 = use full duration
+    val trimStartMs: Long = 0,      // 0 = no trim (legacy single-trim)
+    val trimEndMs: Long = 0,        // 0 = use full duration (legacy single-trim)
+    // Multi-segment stitching: when non-empty, overrides trimStartMs/trimEndMs.
+    // Each segment defines a portion to KEEP; gaps between segments are removed.
+    val segments: List<TrimSegment> = emptyList(),
     // Exact output dimensions — 0 means "use maxDimension scaling" instead
     val exactWidth: Int = 0,
     val exactHeight: Int = 0,
@@ -25,6 +39,13 @@ data class ConversionConfig(
     val ditherMode: DitherMode = DitherMode.NONE, // Bayer/Floyd-Steinberg for palette reduction
     val keyframeInterval: Int = 0,          // -g flag: force keyframe every N frames (0=auto)
 ) {
+    /** Total kept duration in ms across all segments (or single trim range). */
+    val totalKeptDurationMs: Long
+        get() = if (segments.isNotEmpty()) {
+            segments.sumOf { it.durationMs }
+        } else if (trimEndMs > trimStartMs) {
+            trimEndMs - trimStartMs
+        } else 0L
     companion object {
         fun fromPreset(preset: Preset): ConversionConfig = ConversionConfig(
             maxDimension = preset.maxDimension,

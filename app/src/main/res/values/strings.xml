@@ -96,6 +96,12 @@
     <string name="trim">Trim</string>
     <string name="play">Play</string>
     <string name="pause">Pause</string>
+    <string name="add_segment">Add segment</string>
+    <string name="remove_segment">Remove</string>
+    <string name="segment_label">Segment %1$d</string>
+    <string name="stitch_mode">Stitch mode</string>
+    <string name="est_output">Est. output: %1$s</string>
+    <string name="target_label">Target: %1$s</string>
 
     <!-- Common -->
     <string name="cancel">Cancel</string>

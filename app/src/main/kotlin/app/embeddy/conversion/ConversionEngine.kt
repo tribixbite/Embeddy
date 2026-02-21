@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import timber.log.Timber
 import java.io.File
 import kotlin.coroutines.resume
 
@@ -85,6 +86,8 @@ class ConversionEngine(private val context: Context) {
         var quality = config.startQuality
         var attempt = 1
         val startTime = System.currentTimeMillis()
+        Timber.d("Starting conversion: %s → %s (q=%d, target=%d bytes)",
+            inputFile.name, finalOutput.name, quality, config.targetSizeBytes)
 
         // Get duration for progress calculation
         val durationMs = try {
@@ -181,6 +184,7 @@ class ConversionEngine(private val context: Context) {
                 send(ConversionProgress.Failed("FFmpeg could not produce output — try a different file or shorter trim"))
             }
         } catch (e: Exception) {
+            Timber.e(e, "Conversion failed")
             send(ConversionProgress.Failed(e.message ?: "Unknown error"))
         } finally {
             tempOutput.delete()
@@ -191,14 +195,59 @@ class ConversionEngine(private val context: Context) {
     }.flowOn(Dispatchers.IO)
 
     /**
-     * Build the FFmpeg command matching the discwebp algorithm:
-     * scale → fps → unsharp → libwebp with quality/compression/preset/loop
-     *
-     * Supports exact crop dimensions (exactWidth x exactHeight) and advanced flags:
-     * - denoise via hqdn3d
-     * - dithering via paletteuse
-     * - color space via -pix_fmt
-     * - keyframe interval via -g
+     * Build the core video filter chain (scale, fps, denoise, sharpen, dither).
+     * Shared between single-segment and multi-segment (stitching) modes.
+     */
+    private fun buildVideoFilters(config: ConversionConfig): String {
+        return buildList {
+            // Scaling: exact dimensions take precedence over maxDimension
+            if (config.exactWidth > 0 && config.exactHeight > 0) {
+                add("scale=${config.exactWidth}:${config.exactHeight}:force_original_aspect_ratio=increase:flags=lanczos")
+                add("crop=${config.exactWidth}:${config.exactHeight}")
+            } else if (config.exactWidth > 0) {
+                add("scale=${config.exactWidth}:-2:flags=lanczos")
+            } else if (config.exactHeight > 0) {
+                add("scale=-2:${config.exactHeight}:flags=lanczos")
+            } else {
+                add("scale='min(${config.maxDimension},iw)':'min(${config.maxDimension},ih)':force_original_aspect_ratio=decrease:flags=lanczos")
+            }
+            add("fps=${config.fps}")
+            if (config.denoiseStrength > 0) {
+                val strength = config.denoiseStrength.coerceIn(1, 10)
+                add("hqdn3d=$strength:$strength:${strength / 2}:${strength / 2}")
+            }
+            if (config.sharpen) {
+                add("unsharp=5:5:1.2:5:5:0.6")
+            }
+            if (config.ditherMode != DitherMode.NONE) {
+                add("split[a][b];[a]palettegen[p];[b][p]paletteuse=dither=${config.ditherMode.ffmpegValue}")
+            }
+        }.joinToString(",")
+    }
+
+    /** Append encoder flags common to both single and multi-segment modes. */
+    private fun StringBuilder.appendEncoderFlags(config: ConversionConfig, quality: Int) {
+        append("-c:v libwebp_anim ")
+        append("-quality $quality ")
+        append("-compression_level ${config.compressionLevel} ")
+        append("-preset picture ")
+        append("-loop ${config.loop} ")
+        append("-an ")
+        append("-vsync vfr ")
+        if (config.colorSpace != ColorSpace.AUTO) {
+            append("-pix_fmt ${config.colorSpace.ffmpegValue} ")
+        }
+        if (config.keyframeInterval > 0) {
+            append("-g ${config.keyframeInterval} ")
+        }
+    }
+
+    /**
+     * Build the FFmpeg command matching the discwebp algorithm.
+     * Supports:
+     * - Single trim (trimStartMs/trimEndMs)
+     * - Multi-segment stitching via concat filter (segments list)
+     * - Exact crop, denoise, sharpen, dither, color space, keyframe interval
      */
     private fun buildFfmpegCommand(
         inputPath: String,
@@ -206,69 +255,71 @@ class ConversionEngine(private val context: Context) {
         config: ConversionConfig,
         quality: Int,
     ): String {
-        val filters = buildList {
-            // Scaling: exact dimensions take precedence over maxDimension
-            if (config.exactWidth > 0 && config.exactHeight > 0) {
-                // Exact crop: scale to fill then center-crop to exact dimensions
-                add("scale=${config.exactWidth}:${config.exactHeight}:force_original_aspect_ratio=increase:flags=lanczos")
-                add("crop=${config.exactWidth}:${config.exactHeight}")
-            } else if (config.exactWidth > 0) {
-                // Exact width, auto height preserving aspect ratio
-                add("scale=${config.exactWidth}:-2:flags=lanczos")
-            } else if (config.exactHeight > 0) {
-                // Exact height, auto width preserving aspect ratio
-                add("scale=-2:${config.exactHeight}:flags=lanczos")
-            } else {
-                // Scale to max dimension, preserve aspect ratio
-                add("scale='min(${config.maxDimension},iw)':'min(${config.maxDimension},ih)':force_original_aspect_ratio=decrease:flags=lanczos")
-            }
-            // Set frame rate
-            add("fps=${config.fps}")
-            // Denoise: hqdn3d with configurable strength (1-10 maps to luma_spatial param)
-            if (config.denoiseStrength > 0) {
-                val strength = config.denoiseStrength.coerceIn(1, 10)
-                add("hqdn3d=$strength:$strength:${strength / 2}:${strength / 2}")
-            }
-            // Optional sharpening for text clarity (matches discwebp unsharp params)
-            if (config.sharpen) {
-                add("unsharp=5:5:1.2:5:5:0.6")
-            }
-            // Dithering: for animated content with limited palettes
-            if (config.ditherMode != DitherMode.NONE) {
-                add("split[a][b];[a]palettegen[p];[b][p]paletteuse=dither=${config.ditherMode.ffmpegValue}")
-            }
-        }.joinToString(",")
+        val filters = buildVideoFilters(config)
+
+        // Multi-segment stitching mode: use complex filtergraph with concat
+        if (config.segments.size > 1) {
+            return buildStitchCommand(inputPath, outputPath, config, quality, filters)
+        }
+
+        // Single-segment mode (legacy trim or single segment)
+        val effectiveStart = config.segments.firstOrNull()?.startMs ?: config.trimStartMs
+        val effectiveEnd = config.segments.firstOrNull()?.endMs ?: config.trimEndMs
 
         return buildString {
-            append("-y ")                               // Overwrite output
-            // Trim: seek to start before input for fast seek, use -to for end
-            if (config.trimStartMs > 0) {
-                val ss = String.format("%.3f", config.trimStartMs / 1000.0)
+            append("-y ")
+            if (effectiveStart > 0) {
+                val ss = String.format("%.3f", effectiveStart / 1000.0)
                 append("-ss $ss ")
             }
-            append("-i \"$inputPath\" ")                // Input file
-            if (config.trimEndMs > 0) {
-                // -to is relative to -ss when -ss is before -i
-                val endSec = (config.trimEndMs - config.trimStartMs) / 1000.0
+            append("-i \"$inputPath\" ")
+            if (effectiveEnd > 0) {
+                val endSec = (effectiveEnd - effectiveStart) / 1000.0
                 val to = String.format("%.3f", endSec)
                 append("-to $to ")
             }
-            append("-vf \"$filters\" ")                 // Video filters
-            append("-c:v libwebp_anim ")                // Animated WebP encoder
-            append("-quality $quality ")                // WebP quality
-            append("-compression_level ${config.compressionLevel} ")
-            append("-preset picture ")                  // WebP preset for still-ish content
-            append("-loop ${config.loop} ")             // Loop count (0=infinite)
-            append("-an ")                              // Strip audio
-            append("-vsync vfr ")                       // Variable frame rate
-            // Color space / pixel format
-            if (config.colorSpace != ColorSpace.AUTO) {
-                append("-pix_fmt ${config.colorSpace.ffmpegValue} ")
+            append("-vf \"$filters\" ")
+            appendEncoderFlags(config, quality)
+            append("\"$outputPath\"")
+        }
+    }
+
+    /**
+     * Build an FFmpeg command that stitches multiple segments using the concat filter.
+     * Each segment is trimmed from the same input, filtered, then concatenated.
+     *
+     * Complex filtergraph structure:
+     *   [0:v]trim=start:end,setpts=PTS-STARTPTS,<filters>[v0];
+     *   [0:v]trim=start:end,setpts=PTS-STARTPTS,<filters>[v1];
+     *   [v0][v1]concat=n=2:v=1:a=0[vout]
+     */
+    private fun buildStitchCommand(
+        inputPath: String,
+        outputPath: String,
+        config: ConversionConfig,
+        quality: Int,
+        filters: String,
+    ): String {
+        val n = config.segments.size
+
+        val filterGraph = buildString {
+            config.segments.forEachIndexed { i, seg ->
+                val start = String.format("%.3f", seg.startMs / 1000.0)
+                val end = String.format("%.3f", seg.endMs / 1000.0)
+                // Trim each segment, reset PTS, apply video filters
+                append("[0:v]trim=$start:$end,setpts=PTS-STARTPTS,$filters[v$i];")
             }
-            // Keyframe interval
-            if (config.keyframeInterval > 0) {
-                append("-g ${config.keyframeInterval} ")
-            }
+            // Concatenate all segments
+            val inputs = (0 until n).joinToString("") { "[v$it]" }
+            append("${inputs}concat=n=$n:v=1:a=0[vout]")
+        }
+
+        return buildString {
+            append("-y ")
+            append("-i \"$inputPath\" ")
+            append("-filter_complex \"$filterGraph\" ")
+            append("-map \"[vout]\" ")
+            appendEncoderFlags(config, quality)
             append("\"$outputPath\"")
         }
     }
@@ -286,7 +337,7 @@ class ConversionEngine(private val context: Context) {
                     cont.resume(ReturnCode.isSuccess(returnCode))
                 }
             },
-            { /* log callback — ignored */ },
+            { log -> Timber.v("FFmpeg: %s", log.message) },
             { stats -> onStatistics(stats) },
         )
 

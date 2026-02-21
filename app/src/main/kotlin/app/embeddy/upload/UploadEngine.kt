@@ -6,6 +6,7 @@ import android.provider.OpenableColumns
 import androidx.exifinterface.media.ExifInterface
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import timber.log.Timber
 import java.io.File
 import java.io.OutputStream
 import java.net.HttpURLConnection
@@ -56,6 +57,7 @@ class UploadEngine(private val context: Context) {
                 fileSizeBytes = fileSize,
             )
         } catch (e: Exception) {
+            Timber.e(e, "Upload to %s failed", host.label)
             throw UploadException("Upload failed: ${e.message}", e)
         }
     }
