@@ -116,6 +116,7 @@ class ConversionEngine(private val context: Context) {
                     config = config,
                     quality = quality,
                 )
+                Timber.d("FFmpeg command (q=%d): %s", quality, command)
 
                 val success = executeFfmpeg(command) { stats ->
                     val progress = if (durationMs > 0) {
@@ -233,7 +234,6 @@ class ConversionEngine(private val context: Context) {
         append("-c:v libwebp_anim ")
         append("-quality $quality ")
         append("-compression_level ${config.compressionLevel} ")
-        append("-preset picture ")
         append("-loop ${config.loop} ")
         append("-an ")
         append("-vsync vfr ")
@@ -340,8 +340,12 @@ class ConversionEngine(private val context: Context) {
             command,
             { session ->
                 val returnCode = session.returnCode
+                val success = ReturnCode.isSuccess(returnCode)
+                if (!success) {
+                    Timber.e("FFmpeg FAILED (rc=%s): %s", returnCode, session.output?.takeLast(500))
+                }
                 if (cont.isActive) {
-                    cont.resume(ReturnCode.isSuccess(returnCode))
+                    cont.resume(success)
                 }
             },
             { log -> Timber.v("FFmpeg: %s", log.message) },

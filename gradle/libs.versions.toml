@@ -20,7 +20,7 @@ timber = "5.0.1"
 workRuntime = "2.10.0"
 
 # Media
-ffmpegKit = "6.1.0"
+ffmpegKit = "6.1.1"
 coil = "2.7.0"
 avifCoder = "2.1.4"
 media3 = "1.5.1"
