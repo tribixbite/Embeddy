@@ -368,6 +368,82 @@ class ConversionEngine(private val context: Context) {
         tempFile
     }
 
+    /**
+     * Generate a short preview clip (~3 seconds) using the current settings.
+     * Single-pass at the given quality — no adaptive loop, no target size check.
+     * Returns the output file path on success, or null on failure.
+     */
+    fun generatePreview(
+        inputUri: Uri,
+        config: ConversionConfig,
+        previewDurationSec: Double = 3.0,
+    ): Flow<ConversionProgress> = callbackFlow {
+        val inputFile = copyUriToTemp(inputUri)
+        val previewOutput = File(tempDir, "preview_${UUID.randomUUID()}.webp")
+
+        try {
+            // Determine the preview start point from trim/segment settings
+            val startMs = config.segments.firstOrNull()?.startMs
+                ?: config.trimStartMs.takeIf { it > 0 }
+                ?: 0L
+
+            val previewConfig = config.copy(
+                // Override trim to only produce previewDurationSec of output
+                trimStartMs = startMs,
+                trimEndMs = startMs + (previewDurationSec * 1000).toLong(),
+                segments = emptyList(), // Force single-segment mode for preview
+            )
+
+            val durationMs = (previewDurationSec * 1000).toLong()
+
+            send(ConversionProgress.Attempt(config.startQuality, 1))
+
+            val command = buildFfmpegCommand(
+                inputPath = inputFile.absolutePath,
+                outputPath = previewOutput.absolutePath,
+                config = previewConfig,
+                quality = config.startQuality,
+            )
+            Timber.d("Preview FFmpeg command (q=%d): %s", config.startQuality, command)
+
+            val success = executeFfmpeg(command) { stats ->
+                val progress = if (durationMs > 0) {
+                    (stats.time.toFloat() / durationMs).coerceIn(0f, 1f)
+                } else 0f
+                trySend(
+                    ConversionProgress.Progress(
+                        fraction = progress,
+                        currentQuality = config.startQuality,
+                        attempt = 1,
+                        elapsedMs = 0,
+                    )
+                )
+            }
+
+            if (success && previewOutput.exists() && previewOutput.length() > 0) {
+                send(
+                    ConversionProgress.Complete(
+                        outputPath = previewOutput.absolutePath,
+                        fileSizeBytes = previewOutput.length(),
+                        qualityUsed = config.startQuality,
+                    )
+                )
+            } else {
+                previewOutput.delete()
+                send(ConversionProgress.Failed("Preview generation failed"))
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Preview generation failed")
+            previewOutput.delete()
+            send(ConversionProgress.Failed(e.message ?: "Unknown error"))
+        } finally {
+            inputFile.delete()
+            // Note: previewOutput is NOT deleted here — caller owns cleanup
+        }
+
+        close()
+    }.flowOn(Dispatchers.IO)
+
     /** Cleanup old converted files older than 24 hours. */
     fun cleanupOldFiles() {
         val cutoff = System.currentTimeMillis() - 24 * 60 * 60 * 1000

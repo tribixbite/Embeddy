@@ -46,6 +46,10 @@
     <string name="color_space">Color Space</string>
     <string name="keyframe_interval">Keyframe Interval</string>
     <string name="compression_level">Compression Level</string>
+    <string name="preview_clip">Preview 3s clip</string>
+    <string name="preview_generating">Generating preview…</string>
+    <string name="preview_title">Preview</string>
+    <string name="preview_dismiss">Done</string>
 
     <!-- Inspect tab -->
     <string name="enter_url">Enter URL to inspect</string>

@@ -39,6 +39,7 @@ class MainViewModel(
     val config: StateFlow<ConversionConfig> = _config.asStateFlow()
 
     private var conversionJob: Job? = null
+    private var previewJob: Job? = null
 
     // SavedStateHandle keys for process death restoration
     private companion object {
@@ -284,6 +285,64 @@ class MainViewModel(
         _config.update { current ->
             val newSegments = current.segments.toMutableList().apply { set(index, segment) }
             current.copy(segments = newSegments.sortedBy { it.startMs }, preset = Preset.CUSTOM)
+        }
+    }
+
+    /** Generate a ~3-second preview clip using the current settings. */
+    fun startPreview() {
+        val ready = _state.value as? ConversionState.Ready ?: return
+        val currentConfig = _config.value
+        val uri = Uri.parse(ready.inputUri)
+
+        previewJob?.cancel()
+        previewJob = viewModelScope.launch {
+            _state.value = ConversionState.Previewing()
+
+            engine.generatePreview(uri, currentConfig).collect { progress ->
+                when (progress) {
+                    is ConversionProgress.Progress -> {
+                        _state.update { current ->
+                            if (current is ConversionState.Previewing) {
+                                current.copy(progress = progress.fraction)
+                            } else current
+                        }
+                    }
+                    is ConversionProgress.Complete -> {
+                        _state.value = ConversionState.PreviewReady(
+                            previewPath = progress.outputPath,
+                            fileSizeBytes = progress.fileSizeBytes,
+                            previousReady = ready,
+                        )
+                    }
+                    is ConversionProgress.Failed -> {
+                        // Restore Ready state on failure
+                        _state.value = ready
+                    }
+                    else -> { /* Attempt, SizeExceeded — ignored for preview */ }
+                }
+            }
+        }
+    }
+
+    /** Cancel a running preview and restore the Ready state. */
+    fun cancelPreview() {
+        previewJob?.cancel()
+        previewJob = null
+        val current = _state.value
+        when (current) {
+            is ConversionState.Previewing -> restoreReadyState()
+            is ConversionState.PreviewReady -> dismissPreview()
+            else -> { /* not previewing */ }
+        }
+    }
+
+    /** Dismiss preview result, delete temp file, restore Ready state. */
+    fun dismissPreview() {
+        val preview = _state.value as? ConversionState.PreviewReady
+        if (preview != null) {
+            // Delete the temp preview file
+            java.io.File(preview.previewPath).delete()
+            _state.value = preview.previousReady
         }
     }
 

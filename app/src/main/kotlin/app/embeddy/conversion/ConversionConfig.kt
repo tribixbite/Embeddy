@@ -115,4 +115,18 @@ sealed interface ConversionState {
     ) : ConversionState
 
     data class Error(val message: String) : ConversionState
+
+    /** Generating a short preview clip with current settings. */
+    data class Previewing(
+        val progress: Float = 0f,
+        val elapsedMs: Long = 0,
+    ) : ConversionState
+
+    /** Preview clip generated, ready to display. */
+    data class PreviewReady(
+        val previewPath: String,
+        val fileSizeBytes: Long,
+        /** Stash the Ready state so we can restore it after dismissing preview. */
+        val previousReady: Ready,
+    ) : ConversionState
 }

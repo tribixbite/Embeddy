@@ -47,9 +47,9 @@ import app.embeddy.conversion.ConversionState
 import app.embeddy.ui.components.ConversionProgressCard
 import app.embeddy.ui.components.MediaPickerCard
 import app.embeddy.ui.components.OutputPreviewCard
+import app.embeddy.ui.components.PreviewCard
 import app.embeddy.ui.components.SettingsPanel
 import app.embeddy.ui.components.VideoTrimPlayer
-import app.embeddy.util.FileInfoUtils
 import app.embeddy.util.SizeEstimation
 import app.embeddy.viewmodel.InspectViewModel
 import app.embeddy.viewmodel.MainViewModel
@@ -139,6 +139,7 @@ fun ConvertScreen(
                     config = config,
                     onPresetSelected = viewModel::setPreset,
                     onConfigChanged = viewModel::updateConfig,
+                    onPreview = viewModel::startPreview,
                 )
 
                 // Convert button with target size shown
@@ -183,6 +184,29 @@ fun ConvertScreen(
                     state = s,
                     onAccept = viewModel::acceptOversize,
                     onRetry = viewModel::reset,
+                )
+            }
+
+            is ConversionState.Previewing -> {
+                ConversionProgressCard(
+                    state = ConversionState.Converting(
+                        progress = s.progress,
+                        currentQuality = config.startQuality,
+                        attempt = 1,
+                        elapsedMs = s.elapsedMs,
+                    ),
+                    targetSizeBytes = config.targetSizeBytes,
+                    onCancel = viewModel::cancelPreview,
+                    label = stringResource(R.string.preview_generating),
+                )
+            }
+
+            is ConversionState.PreviewReady -> {
+                PreviewCard(
+                    previewPath = s.previewPath,
+                    fileSizeBytes = s.fileSizeBytes,
+                    qualityUsed = config.startQuality,
+                    onDismiss = viewModel::dismissPreview,
                 )
             }
 

@@ -32,6 +32,8 @@ fun ConversionProgressCard(
     targetSizeBytes: Long = 0,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Optional label override — defaults to "Converting…" string resource. */
+    label: String? = null,
 ) {
     val animatedProgress by animateFloatAsState(
         targetValue = state.progress,
@@ -50,7 +52,7 @@ fun ConversionProgressCard(
             modifier = Modifier.padding(20.dp),
         ) {
             Text(
-                text = stringResource(R.string.converting),
+                text = label ?: stringResource(R.string.converting),
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurface,
             )

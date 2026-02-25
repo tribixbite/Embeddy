@@ -18,7 +18,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.PlayCircle
 import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
@@ -52,6 +54,7 @@ fun SettingsPanel(
     config: ConversionConfig,
     onPresetSelected: (Preset) -> Unit,
     onConfigChanged: (ConversionConfig.() -> ConversionConfig) -> Unit,
+    onPreview: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -316,6 +319,23 @@ fun SettingsPanel(
                                     onConfigChanged { copy(compressionLevel = v.roundToInt()) }
                                 },
                             )
+
+                            // 6. Preview button — generates a 3-second clip
+                            if (onPreview != null) {
+                                Spacer(Modifier.height(8.dp))
+                                Button(
+                                    onClick = onPreview,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp),
+                                ) {
+                                    Icon(
+                                        Icons.Outlined.PlayCircle,
+                                        contentDescription = null,
+                                        modifier = Modifier.padding(end = 8.dp),
+                                    )
+                                    Text(stringResource(R.string.preview_clip))
+                                }
+                            }
                         }
                     }
                 }
