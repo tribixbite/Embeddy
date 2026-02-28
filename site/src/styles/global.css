@@ -1,0 +1,73 @@
+@import "tailwindcss";
+@import "@skeletonlabs/skeleton";
+@import "@skeletonlabs/skeleton/themes/cerberus";
+@import "@skeletonlabs/skeleton-svelte";
+
+@theme {
+  /* Embeddy brand colors — deep purple-blue dark theme */
+  --color-brand-50: oklch(0.97 0.01 280);
+  --color-brand-100: oklch(0.93 0.02 280);
+  --color-brand-200: oklch(0.85 0.05 280);
+  --color-brand-300: oklch(0.75 0.10 280);
+  --color-brand-400: oklch(0.65 0.15 280);
+  --color-brand-500: oklch(0.55 0.20 275);
+  --color-brand-600: oklch(0.48 0.20 275);
+  --color-brand-700: oklch(0.40 0.17 275);
+  --color-brand-800: oklch(0.30 0.12 275);
+  --color-brand-900: oklch(0.20 0.08 275);
+
+  --color-surface-50: oklch(0.16 0.015 275);
+  --color-surface-100: oklch(0.14 0.013 275);
+  --color-surface-200: oklch(0.12 0.010 275);
+
+  --color-accent: oklch(0.72 0.19 165);
+
+  --font-display: "Inter", system-ui, sans-serif;
+  --font-body: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  /* Scroll-triggered fade-in animation */
+  --animate-fade-up: fade-up 0.5s ease-out both;
+
+  @keyframes fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(1.5rem);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  --animate-fade-in: fade-in 0.6s ease-out both;
+
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+}
+
+/* Smooth scrolling globally */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Subtle animated gradient for hero backgrounds */
+@keyframes gradient-shift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+.hero-gradient {
+  background: linear-gradient(
+    135deg,
+    oklch(0.15 0.04 275),
+    oklch(0.12 0.06 300),
+    oklch(0.14 0.05 250),
+    oklch(0.10 0.03 280)
+  );
+  background-size: 300% 300%;
+  animation: gradient-shift 12s ease infinite;
+}
