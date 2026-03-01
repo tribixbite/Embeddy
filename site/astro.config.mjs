@@ -5,8 +5,7 @@ import tailwindcss from "@tailwindcss/vite";
 
 // https://astro.build/config
 export default defineConfig({
-  site: "https://tribixbite.github.io",
-  base: "/Embeddy",
+  site: "https://embeddy.link",
   integrations: [svelte()],
   vite: {
     plugins: [tailwindcss()],
