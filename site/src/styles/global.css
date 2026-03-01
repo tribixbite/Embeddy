@@ -1,10 +1,7 @@
 @import "tailwindcss";
-@import "@skeletonlabs/skeleton";
-@import "@skeletonlabs/skeleton/themes/cerberus";
-@import "@skeletonlabs/skeleton-svelte";
 
 @theme {
-  /* Embeddy brand colors — deep purple-blue dark theme */
+  /* Embeddy brand colors — deep purple-blue */
   --color-brand-50: oklch(0.97 0.01 280);
   --color-brand-100: oklch(0.93 0.02 280);
   --color-brand-200: oklch(0.85 0.05 280);
@@ -16,17 +13,18 @@
   --color-brand-800: oklch(0.30 0.12 275);
   --color-brand-900: oklch(0.20 0.08 275);
 
-  --color-surface-50: oklch(0.16 0.015 275);
-  --color-surface-100: oklch(0.14 0.013 275);
-  --color-surface-200: oklch(0.12 0.010 275);
-
   --color-accent: oklch(0.72 0.19 165);
+
+  /* Dark surface scale — used for backgrounds and cards */
+  --color-dark-950: oklch(0.10 0.01 275);
+  --color-dark-900: oklch(0.13 0.012 275);
+  --color-dark-800: oklch(0.16 0.015 275);
+  --color-dark-700: oklch(0.20 0.015 275);
 
   --font-display: "Inter", system-ui, sans-serif;
   --font-body: "Inter", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
 
-  /* Scroll-triggered fade-in animation */
   --animate-fade-up: fade-up 0.5s ease-out both;
 
   @keyframes fade-up {
@@ -48,12 +46,10 @@
   }
 }
 
-/* Smooth scrolling globally */
 html {
   scroll-behavior: smooth;
 }
 
-/* Subtle animated gradient for hero backgrounds */
 @keyframes gradient-shift {
   0% { background-position: 0% 50%; }
   50% { background-position: 100% 50%; }
