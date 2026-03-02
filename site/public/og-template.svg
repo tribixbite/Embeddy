@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1a1025"/>
+      <stop offset="50%" stop-color="#150d20"/>
+      <stop offset="100%" stop-color="#0f0a18"/>
+    </linearGradient>
+    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#7c3aed"/>
+      <stop offset="100%" stop-color="#06b6d4"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#7c3aed"/>
+      <stop offset="100%" stop-color="#22d3ee"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="630" fill="url(#bg)"/>
+
+  <!-- Subtle grid -->
+  <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+    <path d="M0 40L40 0H20L0 20M40 40V20L20 40" fill="none" stroke="white" stroke-width="0.3" opacity="0.04"/>
+  </pattern>
+  <rect width="1200" height="630" fill="url(#grid)"/>
+
+  <!-- Accent glow -->
+  <ellipse cx="600" cy="250" rx="400" ry="200" fill="#7c3aed" opacity="0.06"/>
+
+  <!-- App icon -->
+  <rect x="540" y="80" width="120" height="120" rx="28" fill="url(#brand)"/>
+  <text x="600" y="160" font-family="system-ui, sans-serif" font-weight="800" font-size="72" fill="white" text-anchor="middle">E</text>
+
+  <!-- Title -->
+  <text x="600" y="260" font-family="system-ui, sans-serif" font-weight="800" font-size="64" fill="white" text-anchor="middle">Embeddy</text>
+
+  <!-- Subtitle -->
+  <text x="600" y="310" font-family="system-ui, sans-serif" font-weight="400" font-size="26" fill="#a0a0b8" text-anchor="middle">Swiss-army knife for embeddable media on Android</text>
+
+  <!-- Feature pills row -->
+  <!-- Convert -->
+  <rect x="160" y="370" width="180" height="44" rx="22" fill="#7c3aed" fill-opacity="0.15" stroke="#7c3aed" stroke-opacity="0.3" stroke-width="1"/>
+  <text x="250" y="398" font-family="system-ui, sans-serif" font-weight="600" font-size="18" fill="#a78bfa" text-anchor="middle">Convert</text>
+
+  <!-- Inspect -->
+  <rect x="370" y="370" width="180" height="44" rx="22" fill="#06b6d4" fill-opacity="0.15" stroke="#06b6d4" stroke-opacity="0.3" stroke-width="1"/>
+  <text x="460" y="398" font-family="system-ui, sans-serif" font-weight="600" font-size="18" fill="#67e8f9" text-anchor="middle">Inspect</text>
+
+  <!-- Upload -->
+  <rect x="580" y="370" width="180" height="44" rx="22" fill="#22c55e" fill-opacity="0.15" stroke="#22c55e" stroke-opacity="0.3" stroke-width="1"/>
+  <text x="670" y="398" font-family="system-ui, sans-serif" font-weight="600" font-size="18" fill="#86efac" text-anchor="middle">Upload</text>
+
+  <!-- Squoosh -->
+  <rect x="790" y="370" width="180" height="44" rx="22" fill="#f59e0b" fill-opacity="0.15" stroke="#f59e0b" stroke-opacity="0.3" stroke-width="1"/>
+  <text x="880" y="398" font-family="system-ui, sans-serif" font-weight="600" font-size="18" fill="#fcd34d" text-anchor="middle">Squoosh</text>
+
+  <!-- Format icons row -->
+  <text x="600" y="470" font-family="system-ui, sans-serif" font-weight="500" font-size="18" fill="#6b7280" text-anchor="middle">WebP  ·  AVIF  ·  GIF  ·  PNG  ·  JPEG</text>
+
+  <!-- Bottom bar -->
+  <rect x="0" y="530" width="1200" height="100" fill="#0d0815" opacity="0.6"/>
+  <rect x="0" y="530" width="1200" height="1" fill="url(#accent)" opacity="0.3"/>
+
+  <!-- Android badge -->
+  <text x="120" y="586" font-family="system-ui, sans-serif" font-weight="600" font-size="18" fill="#9ca3af">Android 7.0+</text>
+
+  <!-- Tech stack -->
+  <text x="600" y="586" font-family="system-ui, sans-serif" font-weight="400" font-size="16" fill="#6b7280" text-anchor="middle">Kotlin 2  ·  Jetpack Compose  ·  Material 3  ·  FFmpeg</text>
+
+  <!-- Free & open source -->
+  <text x="1080" y="586" font-family="system-ui, sans-serif" font-weight="600" font-size="18" fill="#9ca3af" text-anchor="end">Free &amp; Open Source</text>
+</svg>

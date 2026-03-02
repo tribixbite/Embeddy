@@ -21,6 +21,9 @@ const ogImage = new URL(`${import.meta.env.BASE_URL}og.png`, Astro.site);
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="generator" content={Astro.generator} />
+    <meta name="theme-color" content="#1a1025" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="robots" content="index, follow" />
 
     <title>{title}</title>
     <meta name="description" content={description} />
@@ -28,16 +31,23 @@ const ogImage = new URL(`${import.meta.env.BASE_URL}og.png`, Astro.site);
 
     <!-- Open Graph -->
     <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Embeddy" />
+    <meta property="og:locale" content="en_US" />
     <meta property="og:url" content={canonicalURL} />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:image" content={ogImage} />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Embeddy — Convert, Inspect, Upload, Squoosh. Four tools for embeddable media on Android." />
 
     <!-- Twitter Card -->
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={ogImage} />
+    <meta name="twitter:image:alt" content="Embeddy — Convert, Inspect, Upload, Squoosh. Four tools for embeddable media on Android." />
 
     <!-- Structured Data: SoftwareApplication -->
     <script
@@ -55,6 +65,13 @@ const ogImage = new URL(`${import.meta.env.BASE_URL}og.png`, Astro.site);
           "https://github.com/tribixbite/Embeddy/releases/latest",
         softwareVersion: "0.1.12",
         license: "https://www.gnu.org/licenses/gpl-3.0.html",
+        datePublished: "2025-01-01",
+        author: {
+          "@type": "Person",
+          name: "tribixbite",
+          url: "https://github.com/tribixbite",
+        },
+        screenshot: ogImage.toString(),
         offers: {
           "@type": "Offer",
           price: "0",
@@ -71,10 +88,21 @@ const ogImage = new URL(`${import.meta.env.BASE_URL}og.png`, Astro.site);
       rel="stylesheet"
     />
 
+    <!-- Icons -->
     <link
       rel="icon"
       type="image/svg+xml"
       href={`${import.meta.env.BASE_URL}favicon.svg`}
+    />
+    <link
+      rel="icon"
+      type="image/x-icon"
+      href={`${import.meta.env.BASE_URL}favicon.ico`}
+    />
+    <link
+      rel="apple-touch-icon"
+      sizes="180x180"
+      href={`${import.meta.env.BASE_URL}apple-touch-icon.png`}
     />
   </head>
   <body

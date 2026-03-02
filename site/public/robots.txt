@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://embeddy.link/sitemap-index.xml
