@@ -10,5 +10,16 @@ export default defineConfig({
   integrations: [svelte(), sitemap()],
   vite: {
     plugins: [tailwindcss()],
+    worker: {
+      format: "es",
+    },
+    optimizeDeps: {
+      exclude: [
+        "@jsquash/avif",
+        "@jsquash/jpeg",
+        "@jsquash/png",
+        "@jsquash/webp",
+      ],
+    },
   },
 });

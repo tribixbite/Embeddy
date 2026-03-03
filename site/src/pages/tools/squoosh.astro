@@ -1,0 +1,13 @@
+---
+import ToolLayout from "../../layouts/ToolLayout.astro";
+import ToolNav from "../../components/tools/ToolNav.svelte";
+import SquooshTool from "../../components/tools/squoosh/SquooshTool.svelte";
+---
+
+<ToolLayout
+  title="Squoosh"
+  description="Compress images to WebP, JPEG, PNG, or AVIF in your browser. Quality slider, lossless toggle, resize, and before/after comparison."
+>
+  <ToolNav currentPath="/tools/squoosh" client:load />
+  <SquooshTool client:load />
+</ToolLayout>

@@ -1,0 +1,13 @@
+---
+import ToolLayout from "../../layouts/ToolLayout.astro";
+import ToolNav from "../../components/tools/ToolNav.svelte";
+import UploadTool from "../../components/tools/upload/UploadTool.svelte";
+---
+
+<ToolLayout
+  title="Upload"
+  description="Anonymous file uploads to 0x0.st and catbox.moe with EXIF stripping. No account needed."
+>
+  <ToolNav currentPath="/tools/upload" client:load />
+  <UploadTool client:load />
+</ToolLayout>

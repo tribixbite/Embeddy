@@ -10,6 +10,8 @@
     title: string;
     description: string;
     badges: string[];
+    /** Link to browser-based tool page, if available */
+    toolHref?: string;
   }
 
   const features: Feature[] = [
@@ -26,6 +28,7 @@
       description:
         "Fetch any URL and preview its Open Graph and Twitter Card metadata. See exactly how your links will embed on Discord, Slack, and Twitter before sharing.",
       badges: ["OG tags", "Twitter Card", "Embed preview"],
+      toolHref: "/tools/inspect",
     },
     {
       icon: "M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5",
@@ -33,6 +36,7 @@
       description:
         "Anonymous file uploads to 0x0.st and catbox.moe. EXIF metadata stripping protects your privacy. Retry with linear backoff on transient failures.",
       badges: ["0x0.st", "catbox.moe", "EXIF strip"],
+      toolHref: "/tools/upload",
     },
     {
       icon: "M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.41a2.25 2.25 0 013.182 0l2.909 2.91m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z",
@@ -40,6 +44,7 @@
       description:
         "Still image compression to WebP, JPEG, PNG, or AVIF. Quality slider, lossless toggle, exact crop dimensions, and a before/after comparison slider.",
       badges: ["WebP", "AVIF", "Lossless", "Before/After"],
+      toolHref: "/tools/squoosh",
     },
   ];
 
@@ -114,6 +119,19 @@
           </span>
         {/each}
       </div>
+
+      <!-- Try in Browser link -->
+      {#if feature.toolHref}
+        <a
+          href={feature.toolHref}
+          class="mt-4 inline-flex items-center gap-1.5 text-xs font-medium text-brand-400 transition-colors hover:text-brand-300"
+        >
+          Try in Browser
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="h-3 w-3">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+          </svg>
+        </a>
+      {/if}
     </div>
   {/each}
 </div>

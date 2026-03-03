@@ -1,0 +1,13 @@
+---
+import ToolLayout from "../../layouts/ToolLayout.astro";
+import ToolNav from "../../components/tools/ToolNav.svelte";
+import InspectTool from "../../components/tools/inspect/InspectTool.svelte";
+---
+
+<ToolLayout
+  title="Inspect"
+  description="Fetch any URL and preview its Open Graph and Twitter Card metadata. See how your links embed on Discord, Slack, and Twitter."
+>
+  <ToolNav currentPath="/tools/inspect" client:load />
+  <InspectTool client:load />
+</ToolLayout>
