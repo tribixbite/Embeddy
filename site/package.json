@@ -1,13 +1,6 @@
 {
   "name": "embeddy-site",
-  "type": "module",
   "version": "0.0.1",
-  "scripts": {
-    "dev": "astro dev",
-    "build": "astro check && astro build",
-    "preview": "astro preview",
-    "astro": "astro"
-  },
   "dependencies": {
     "@astrojs/check": "^0.9.0",
     "@astrojs/sitemap": "^3.7.0",
@@ -24,5 +17,12 @@
     "svelte": "^5.0.0",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.0"
-  }
+  },
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro check && astro build",
+    "preview": "astro preview",
+    "astro": "astro"
+  },
+  "type": "module"
 }
