@@ -1,0 +1,9 @@
+name = "embeddy-api"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+
+# Custom domain: api.embeddy.link
+# Configure via Cloudflare dashboard or `wrangler route`
+
+[observability]
+enabled = true
