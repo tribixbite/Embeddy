@@ -16,6 +16,7 @@
     "@jsquash/jpeg": "^1.4.0",
     "@jsquash/png": "^3.0.0",
     "@jsquash/webp": "^1.4.0",
+    "@rollup/rollup-android-arm64": "^4.59.0",
     "@tailwindcss/vite": "^4.0.0",
     "astro": "^5.17.1",
     "exifr": "^7.1.3",

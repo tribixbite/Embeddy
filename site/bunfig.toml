@@ -1,0 +1,6 @@
+[install]
+# Android f2fs blocks hardlinks (EACCES), use file copy instead.
+# On Termux, bun also walks up to ~/package.json and hoists there.
+# Workaround: bun install --cwd $(pwd) --backend=copyfile
+# Or just use: npm install
+backend = "copyfile"
