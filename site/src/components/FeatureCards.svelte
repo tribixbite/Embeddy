@@ -21,6 +21,7 @@
       description:
         "Video and GIF to animated WebP with adaptive quality loop. Platform presets for Discord (10 MB / 720p), Telegram (256 KB sticker), Slack (5 MB), or fully custom targets.",
       badges: ["FFmpeg-kit", "Adaptive quality", "Trim & stitch"],
+      toolHref: "/tools/convert",
     },
     {
       icon: "M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z",

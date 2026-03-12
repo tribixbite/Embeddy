@@ -1,0 +1,13 @@
+---
+import ToolLayout from "../../layouts/ToolLayout.astro";
+import ToolNav from "../../components/tools/ToolNav.svelte";
+import ConvertTool from "../../components/tools/convert/ConvertTool.svelte";
+---
+
+<ToolLayout
+  title="Convert"
+  description="Convert GIF and video to animated WebP in your browser. Adaptive quality, loop control, frame rate targeting."
+>
+  <ToolNav currentPath="/tools/convert" client:load />
+  <ConvertTool client:load />
+</ToolLayout>

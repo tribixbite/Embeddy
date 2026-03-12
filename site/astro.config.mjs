@@ -19,6 +19,7 @@ export default defineConfig({
         "@jsquash/jpeg",
         "@jsquash/png",
         "@jsquash/webp",
+        "wasm-webp",
       ],
     },
   },
