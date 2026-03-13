@@ -1,9 +1,10 @@
 /**
  * Encode RGBA frames into animated WebP using wasm-webp.
- * Handles resizing via OffscreenCanvas before encoding.
+ * Also exports shared utilities (cropFrame, resizeFrame, subsampleFrames)
+ * used by gif-encoder.ts.
  */
 
-import type { DecodedFrame, ConvertOptions, ConvertProgress } from "./types";
+import type { DecodedFrame, ConvertOptions, ConvertProgress, CropRect } from "./types";
 
 /** Lazy-loaded wasm-webp module */
 let wasmModule: typeof import("wasm-webp") | null = null;
@@ -16,10 +17,51 @@ async function getModule() {
 }
 
 /**
+ * Crop a single RGBA frame using normalized CropRect (0-1 fractions).
+ * Uses OffscreenCanvas for sub-rectangle extraction.
+ */
+export function cropFrame(
+  rgba: Uint8Array,
+  srcW: number,
+  srcH: number,
+  crop: CropRect,
+): { data: Uint8Array; width: number; height: number } {
+  // Convert fractional crop to pixel coordinates, clamped to source bounds
+  const px = Math.max(0, Math.round(crop.x * srcW));
+  const py = Math.max(0, Math.round(crop.y * srcH));
+  const pw = Math.min(srcW - px, Math.max(1, Math.round(crop.w * srcW)));
+  const ph = Math.min(srcH - py, Math.max(1, Math.round(crop.h * srcH)));
+
+  if (pw <= 0 || ph <= 0) {
+    return { data: rgba, width: srcW, height: srcH };
+  }
+
+  // Draw full frame, then extract crop region
+  const srcCanvas =
+    typeof OffscreenCanvas !== "undefined"
+      ? new OffscreenCanvas(srcW, srcH)
+      : createCanvas(srcW, srcH);
+  const srcCtx = srcCanvas.getContext("2d") as CanvasRenderingContext2D;
+  const imageData = srcCtx.createImageData(srcW, srcH);
+  imageData.data.set(rgba);
+  srcCtx.putImageData(imageData, 0, 0);
+
+  const dstCanvas =
+    typeof OffscreenCanvas !== "undefined"
+      ? new OffscreenCanvas(pw, ph)
+      : createCanvas(pw, ph);
+  const dstCtx = dstCanvas.getContext("2d") as CanvasRenderingContext2D;
+  dstCtx.drawImage(srcCanvas, px, py, pw, ph, 0, 0, pw, ph);
+
+  const cropped = dstCtx.getImageData(0, 0, pw, ph);
+  return { data: new Uint8Array(cropped.data.buffer), width: pw, height: ph };
+}
+
+/**
  * Resize a single RGBA frame to fit within maxDimension, preserving aspect ratio.
  * Returns the resized RGBA data and new dimensions.
  */
-function resizeFrame(
+export function resizeFrame(
   rgba: Uint8Array,
   srcW: number,
   srcH: number,
@@ -54,7 +96,7 @@ function resizeFrame(
   return { data: new Uint8Array(resized.data.buffer), width: dstW, height: dstH };
 }
 
-function createCanvas(w: number, h: number): HTMLCanvasElement {
+export function createCanvas(w: number, h: number): HTMLCanvasElement {
   const c = document.createElement("canvas");
   c.width = w;
   c.height = h;
@@ -65,7 +107,7 @@ function createCanvas(w: number, h: number): HTMLCanvasElement {
  * Subsample frames to match a target FPS (for video sources where
  * the decoded FPS may differ from the desired output FPS).
  */
-function subsampleFrames(
+export function subsampleFrames(
   frames: DecodedFrame[],
   sourceFps: number,
   targetFps: number,
@@ -85,12 +127,7 @@ function subsampleFrames(
 
 /**
  * Encode decoded frames into an animated WebP blob.
- * @param frames - RGBA frames with per-frame delays
- * @param width - Source canvas width
- * @param height - Source canvas height
- * @param options - Encoding options (quality, lossless, maxDimension, loops, targetFps)
- * @param sourceFps - Original source FPS (for subsampling calculation)
- * @param onProgress - Progress callback
+ * Pipeline: subsample → crop → resize → encode
  */
 export async function encodeAnimatedWebP(
   frames: DecodedFrame[],
@@ -105,13 +142,29 @@ export async function encodeAnimatedWebP(
   // Subsample if target FPS is lower than source
   let workFrames = subsampleFrames(frames, sourceFps, options.targetFps);
 
-  // Resize all frames if maxDimension is set
+  // Crop all frames if crop is set
   let outW = width;
   let outH = height;
-  if (options.maxDimension > 0 && (width > options.maxDimension || height > options.maxDimension)) {
-    const scale = Math.min(options.maxDimension / width, options.maxDimension / height);
-    outW = Math.round(width * scale);
-    outH = Math.round(height * scale);
+  if (options.crop) {
+    outW = Math.max(1, Math.round(options.crop.w * width));
+    outH = Math.max(1, Math.round(options.crop.h * height));
+    workFrames = workFrames.map((frame, i) => {
+      onProgress?.({
+        phase: "cropping",
+        percent: Math.round((i / workFrames.length) * 100),
+        frame: i + 1,
+        total: workFrames.length,
+      });
+      const cropped = cropFrame(frame.rgba, width, height, options.crop!);
+      return { rgba: cropped.data, delay: frame.delay };
+    });
+  }
+
+  // Resize all frames if maxDimension is set
+  if (options.maxDimension > 0 && (outW > options.maxDimension || outH > options.maxDimension)) {
+    const scale = Math.min(options.maxDimension / outW, options.maxDimension / outH);
+    const newW = Math.round(outW * scale);
+    const newH = Math.round(outH * scale);
 
     workFrames = workFrames.map((frame, i) => {
       onProgress?.({
@@ -120,9 +173,12 @@ export async function encodeAnimatedWebP(
         frame: i + 1,
         total: workFrames.length,
       });
-      const resized = resizeFrame(frame.rgba, width, height, options.maxDimension);
+      const resized = resizeFrame(frame.rgba, outW, outH, options.maxDimension);
       return { rgba: resized.data, delay: frame.delay };
     });
+
+    outW = newW;
+    outH = newH;
   }
 
   // Build wasm-webp frame array
