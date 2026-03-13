@@ -1,6 +1,7 @@
 package app.embeddy.inspect
 
 import android.content.Context
+import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -170,6 +171,24 @@ class MetadataEngine {
                 }
             } catch (_: Exception) {
                 // EXIF parsing failed silently
+            }
+
+            // BitmapFactory fallback for dimensions — works for animated WebP,
+            // which often lacks EXIF width/height tags but has RIFF container dimensions
+            val hasWidth = mediaTags["Image Width"]?.let { it != "0" } == true
+            if (!hasWidth) {
+                try {
+                    context.contentResolver.openInputStream(uri)?.use { stream ->
+                        val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        BitmapFactory.decodeStream(stream, null, opts)
+                        if (opts.outWidth > 0 && opts.outHeight > 0) {
+                            mediaTags["Image Width"] = opts.outWidth.toString()
+                            mediaTags["Image Height"] = opts.outHeight.toString()
+                        }
+                    }
+                } catch (_: Exception) {
+                    // BitmapFactory fallback failed silently
+                }
             }
         }
 
