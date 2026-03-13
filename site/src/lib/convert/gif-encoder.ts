@@ -117,5 +117,6 @@ export async function encodeAnimatedGif(
     total: workFrames.length,
   });
 
-  return new Blob([gif.bytesView()], { type: "image/gif" });
+  const bytes = gif.bytesView();
+  return new Blob([bytes.buffer as ArrayBuffer], { type: "image/gif" });
 }
