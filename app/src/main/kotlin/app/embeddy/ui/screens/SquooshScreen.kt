@@ -520,12 +520,12 @@ private fun BeforeAfterSlider(
             contentScale = ContentScale.Fit,
         )
 
-        // Divider line
+        // Divider line — use coerceAtLeast(0.dp) to prevent negative padding crash
         val dividerOffsetDp = with(density) { (containerWidthPx * dividerFraction).toDp() }
         Box(
             modifier = Modifier
                 .align(Alignment.CenterStart)
-                .padding(start = dividerOffsetDp - 1.dp)
+                .padding(start = (dividerOffsetDp - 1.dp).coerceAtLeast(0.dp))
                 .width(2.dp)
                 .height(300.dp)
                 .background(MaterialTheme.colorScheme.primary),
@@ -535,7 +535,7 @@ private fun BeforeAfterSlider(
         Box(
             modifier = Modifier
                 .align(Alignment.CenterStart)
-                .padding(start = dividerOffsetDp - 12.dp)
+                .padding(start = (dividerOffsetDp - 12.dp).coerceAtLeast(0.dp))
                 .size(24.dp)
                 .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(12.dp)),
         )
