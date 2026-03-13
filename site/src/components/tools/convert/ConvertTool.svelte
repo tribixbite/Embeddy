@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * Convert tool — GIF/video to animated WebP via wasm-webp.
+   * Convert tool — GIF/video/WebP to animated WebP or GIF.
    * States: idle → decoding → settings → converting → done → error
    */
   import FileDropZone from "../shared/FileDropZone.svelte";
@@ -9,7 +9,9 @@
   import ConvertProgressBar from "./ConvertProgress.svelte";
   import { decodeGif } from "../../../lib/convert/gif-decoder";
   import { decodeVideo } from "../../../lib/convert/video-decoder";
+  import { decodeWebP } from "../../../lib/convert/webp-decoder";
   import { encodeAnimatedWebP } from "../../../lib/convert/encoder";
+  import { encodeAnimatedGif } from "../../../lib/convert/gif-encoder";
   import type {
     ConvertOptions,
     ConvertProgress,
@@ -26,6 +28,7 @@
   let frames: DecodedFrame[] = $state([]);
   let resultBlob: Blob | null = $state(null);
   let resultUrl = $state("");
+  let sourcePreviewUrl = $state("");
   let progress: ConvertProgress = $state({
     phase: "decoding",
     percent: 0,
@@ -39,14 +42,19 @@
     maxDimension: 0,
     loops: 0,
     targetFps: 10,
+    outputFormat: "webp",
+    crop: null,
   });
 
-  /** Accepted file types: GIF and common video formats */
-  const acceptTypes = "image/gif,video/mp4,video/webm,video/quicktime,video/x-matroska";
+  /** Accepted file types: GIF, WebP, and common video formats */
+  const acceptTypes = "image/gif,image/webp,video/mp4,video/webm,video/quicktime,video/x-matroska";
 
-  /** Check if the file is a GIF by magic bytes or MIME */
   function isGif(file: File): boolean {
     return file.type === "image/gif" || file.name.toLowerCase().endsWith(".gif");
+  }
+
+  function isWebP(file: File): boolean {
+    return file.type === "image/webp" || file.name.toLowerCase().endsWith(".webp");
   }
 
   async function handleFile(files: File[]) {
@@ -57,14 +65,26 @@
     state = "decoding";
     error = "";
 
+    // Create source preview URL for crop overlay
+    if (sourcePreviewUrl) URL.revokeObjectURL(sourcePreviewUrl);
+    sourcePreviewUrl = URL.createObjectURL(file);
+
     try {
       let decoded: { frames: DecodedFrame[]; info: SourceInfo };
 
       if (isGif(file)) {
         const buffer = await file.arrayBuffer();
         decoded = await decodeGif(buffer, (p) => { progress = p; });
+        // GIF input → default output WebP (conversion)
+        options.outputFormat = "webp";
+      } else if (isWebP(file)) {
+        decoded = await decodeWebP(file, options.targetFps, 300, (p) => { progress = p; });
+        // WebP input → default output GIF (reverse conversion)
+        options.outputFormat = "gif";
       } else if (file.type.startsWith("video/")) {
         decoded = await decodeVideo(file, options.targetFps, 300, (p) => { progress = p; });
+        // Video input → default output WebP
+        options.outputFormat = "webp";
       } else {
         throw new Error(`Unsupported format: ${file.type || file.name}`);
       }
@@ -90,14 +110,27 @@
     error = "";
 
     try {
-      const blob = await encodeAnimatedWebP(
-        frames,
-        sourceInfo.width,
-        sourceInfo.height,
-        options,
-        sourceInfo.fps,
-        (p) => { progress = p; },
-      );
+      let blob: Blob;
+
+      if (options.outputFormat === "gif") {
+        blob = await encodeAnimatedGif(
+          frames,
+          sourceInfo.width,
+          sourceInfo.height,
+          options,
+          sourceInfo.fps,
+          (p) => { progress = p; },
+        );
+      } else {
+        blob = await encodeAnimatedWebP(
+          frames,
+          sourceInfo.width,
+          sourceInfo.height,
+          options,
+          sourceInfo.fps,
+          (p) => { progress = p; },
+        );
+      }
 
       // Clean up previous result
       if (resultUrl) URL.revokeObjectURL(resultUrl);
@@ -112,11 +145,13 @@
 
   function reset() {
     if (resultUrl) URL.revokeObjectURL(resultUrl);
+    if (sourcePreviewUrl) URL.revokeObjectURL(sourcePreviewUrl);
     sourceFile = null;
     sourceInfo = null;
     frames = [];
     resultBlob = null;
     resultUrl = "";
+    sourcePreviewUrl = "";
     state = "idle";
     error = "";
   }
@@ -126,11 +161,11 @@
   {#if state === "idle"}
     <FileDropZone
       accept={acceptTypes}
-      label="Drop a GIF or video here to convert"
+      label="Drop a GIF, WebP, or video here to convert"
       onfile={handleFile}
     />
     <p class="text-center text-xs text-white/30">
-      Supports GIF, MP4, WebM, MOV, MKV
+      Supports GIF, WebP, MP4, WebM, MOV, MKV
     </p>
 
   {:else if state === "decoding"}
@@ -142,7 +177,7 @@
       <div class="flex items-center justify-between">
         <div class="text-sm text-white/50">
           <span class="font-medium text-white/80">{sourceFile?.name}</span>
-          <span class="ml-2">{sourceInfo.width} x {sourceInfo.height}</span>
+          <span class="ml-2">{sourceInfo.width} &times; {sourceInfo.height}</span>
           <span class="ml-2">{sourceInfo.frameCount} frames</span>
         </div>
         <button
@@ -158,6 +193,7 @@
       bind:options
       info={sourceInfo}
       disabled={state === "converting"}
+      {sourcePreviewUrl}
       onconvert={handleConvert}
     />
 
@@ -172,6 +208,7 @@
       {resultUrl}
       filename={sourceFile.name}
       frameCount={frames.length}
+      outputFormat={options.outputFormat}
     />
 
     <div class="flex gap-3">

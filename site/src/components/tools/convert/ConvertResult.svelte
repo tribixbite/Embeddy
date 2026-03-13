@@ -1,6 +1,7 @@
 <script lang="ts">
   /**
-   * Animated WebP result preview, size stats, and download button.
+   * Result preview, size stats, and download button.
+   * Supports WebP and GIF output formats.
    */
   import { formatFileSize, formatSavings } from "../shared/format-size";
 
@@ -10,20 +11,23 @@
     resultUrl,
     filename,
     frameCount,
+    outputFormat = "webp",
   }: {
     originalSize: number;
     resultSize: number;
     resultUrl: string;
     filename: string;
     frameCount: number;
+    outputFormat?: "webp" | "gif";
   } = $props();
 
-  /** Generate output filename: source.gif → source.webp */
+  /** Generate output filename with correct extension */
   let outputName = $derived(() => {
     const base = filename.replace(/\.[^.]+$/, "");
-    return `${base}.webp`;
+    return `${base}.${outputFormat}`;
   });
 
+  let formatLabel = $derived(outputFormat.toUpperCase());
   let savings = $derived(formatSavings(originalSize, resultSize));
   let savedBytes = $derived(originalSize - resultSize);
   let isSmaller = $derived(resultSize < originalSize);
@@ -34,7 +38,7 @@
   <div class="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
     <img
       src={resultUrl}
-      alt="Animated WebP preview"
+      alt="Animated {formatLabel} preview"
       class="mx-auto max-h-80 rounded-lg object-contain"
     />
   </div>
@@ -47,7 +51,7 @@
         <p class="mt-1 text-sm font-mono text-white/70">{formatFileSize(originalSize)}</p>
       </div>
       <div>
-        <p class="text-xs text-white/40 uppercase tracking-wider">WebP</p>
+        <p class="text-xs text-white/40 uppercase tracking-wider">{formatLabel}</p>
         <p class="mt-1 text-sm font-mono text-white/70">{formatFileSize(resultSize)}</p>
       </div>
       <div>
