@@ -1,11 +1,23 @@
 /** Shared types for the Convert tool pipeline. */
 
-/** A single decoded frame ready for WebP encoding */
+/** A single decoded frame ready for encoding */
 export interface DecodedFrame {
   /** Raw RGBA pixel data (width * height * 4 bytes) */
   rgba: Uint8Array;
   /** Frame display duration in milliseconds */
   delay: number;
+}
+
+/** Normalized crop rectangle (all values 0-1 fractions of source dimensions) */
+export interface CropRect {
+  /** Left edge as fraction of source width */
+  x: number;
+  /** Top edge as fraction of source height */
+  y: number;
+  /** Crop width as fraction of source width */
+  w: number;
+  /** Crop height as fraction of source height */
+  h: number;
 }
 
 /** Source file metadata extracted during decoding */
@@ -20,28 +32,32 @@ export interface SourceInfo {
   totalDuration: number;
   /** Average frame rate */
   fps: number;
-  /** Source format ("gif" | "video") */
-  format: "gif" | "video";
+  /** Source format */
+  format: "gif" | "video" | "webp";
 }
 
-/** Encoding options for the animated WebP output */
+/** Encoding options for the output */
 export interface ConvertOptions {
-  /** WebP quality 1-100 (lossy mode) */
+  /** Quality 1-100 (lossy mode for WebP; palette quality for GIF) */
   quality: number;
-  /** Lossless encoding (0 = lossy, 1 = lossless) */
+  /** Lossless encoding — WebP only */
   lossless: boolean;
   /** Max dimension (0 = no resize) */
   maxDimension: number;
   /** Loop count (0 = infinite) */
   loops: number;
-  /** Target FPS for video sources (0 = preserve original) */
+  /** Target FPS for video/WebP sources (0 = preserve original) */
   targetFps: number;
+  /** Output format */
+  outputFormat: "webp" | "gif";
+  /** Crop region or null for no crop */
+  crop: CropRect | null;
 }
 
 /** Progress callback for long-running operations */
 export interface ConvertProgress {
   /** Current phase description */
-  phase: "decoding" | "resizing" | "encoding";
+  phase: "decoding" | "cropping" | "resizing" | "encoding";
   /** 0-100 percentage within current phase */
   percent: number;
   /** Current frame being processed */
