@@ -46,8 +46,8 @@ export async function decodeWebP(
     const firstFrameData = ctx.getImageData(0, 0, width, height);
     const firstRgba = new Uint8Array(firstFrameData.data.buffer);
 
-    // Try to detect if animated by capturing a second frame after a short delay
-    const isAnimated = await detectAnimated(img, ctx, firstRgba, width, height);
+    // Detect animation via RIFF header (VP8X flags), pixel-comparison fallback
+    const isAnimated = await detectAnimated(file, img, ctx, firstRgba, width, height);
 
     if (!isAnimated) {
       // Static WebP — single frame
@@ -143,17 +143,42 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 }
 
 /**
- * Detect if a WebP is animated by capturing two frames with a short gap
- * and comparing pixel data.
+ * Detect if a WebP is animated by parsing the RIFF container header.
+ * Animated WebPs have a VP8X chunk where bit 1 of the flags byte is set.
+ * Falls back to pixel-comparison heuristic if header parsing fails.
  */
 async function detectAnimated(
+  file: File,
   img: HTMLImageElement,
   ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   firstRgba: Uint8Array,
   width: number,
   height: number,
 ): Promise<boolean> {
-  // Wait ~150ms and recapture — if pixels differ, it's animated
+  // Primary: parse RIFF header for VP8X animation flag
+  try {
+    // VP8X chunk starts at byte 12 if present: "RIFF" (4) + size (4) + "WEBP" (4)
+    // VP8X chunk: "VP8X" (4) + chunk_size (4) + flags (4) — animation is bit 1 of flags
+    const header = new Uint8Array(await file.slice(0, 21).arrayBuffer());
+    // Verify RIFF + WEBP signature
+    const riff = String.fromCharCode(header[0], header[1], header[2], header[3]);
+    const webp = String.fromCharCode(header[8], header[9], header[10], header[11]);
+    if (riff === "RIFF" && webp === "WEBP") {
+      const chunkId = String.fromCharCode(header[12], header[13], header[14], header[15]);
+      if (chunkId === "VP8X") {
+        // Flags byte is at offset 20 (after VP8X + chunk_size)
+        const flags = header[20];
+        // Bit 1 (0x02) = animation flag
+        return (flags & 0x02) !== 0;
+      }
+      // No VP8X chunk means simple lossy/lossless WebP — not animated
+      return false;
+    }
+  } catch (_) {
+    // Header parsing failed, fall through to pixel heuristic
+  }
+
+  // Fallback: pixel-comparison heuristic (less reliable, esp. in headless browsers)
   await sleep(150);
   ctx.clearRect(0, 0, width, height);
   ctx.drawImage(img, 0, 0, width, height);
