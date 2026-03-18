@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import com.arthenica.ffmpegkit.FFmpegKit
+import com.arthenica.ffmpegkit.FFprobeKit
 import com.arthenica.ffmpegkit.ReturnCode
 import com.arthenica.ffmpegkit.Statistics
 import kotlinx.coroutines.Dispatchers
@@ -30,8 +31,35 @@ class ConversionEngine(private val context: Context) {
     private val tempDir: File
         get() = File(context.cacheDir, "temp").also { it.mkdirs() }
 
-    /** Extract basic metadata from the input URI. */
+    /**
+     * Extract basic metadata from the input URI.
+     * Primary: MediaMetadataRetriever (fast, no temp file).
+     * Fallback: FFprobeKit (copies to temp file, handles edge cases
+     * like very-low-bitrate or audio-less files that MMR rejects).
+     * Returns default zeros if both fail — conversion can still proceed.
+     */
     suspend fun probeInput(uri: Uri): MediaInfo = withContext(Dispatchers.IO) {
+        // Try MediaMetadataRetriever first (fast, no temp file needed)
+        try {
+            return@withContext probeWithRetriever(uri)
+        } catch (e: Exception) {
+            Timber.w(e, "MediaMetadataRetriever failed for %s, trying FFprobe", uri)
+        }
+
+        // Fallback: copy to temp file and probe with FFprobeKit
+        try {
+            return@withContext probeWithFfprobe(uri)
+        } catch (e: Exception) {
+            Timber.w(e, "FFprobe fallback also failed for %s", uri)
+        }
+
+        // Both probes failed — return defaults so the user can still attempt conversion
+        Timber.w("All probes failed for %s, returning default MediaInfo", uri)
+        MediaInfo(width = 0, height = 0, durationMs = 0)
+    }
+
+    /** Probe using Android's MediaMetadataRetriever (fast, but fragile for some files). */
+    private fun probeWithRetriever(uri: Uri): MediaInfo {
         val retriever = MediaMetadataRetriever()
         try {
             retriever.setDataSource(context, uri)
@@ -56,7 +84,7 @@ class ConversionEngine(private val context: Context) {
             val frameCount = retriever.extractMetadata(
                 MediaMetadataRetriever.METADATA_KEY_VIDEO_FRAME_COUNT
             )?.toIntOrNull() ?: 0
-            MediaInfo(
+            return MediaInfo(
                 width = width,
                 height = height,
                 durationMs = durationMs,
@@ -67,6 +95,40 @@ class ConversionEngine(private val context: Context) {
             )
         } finally {
             retriever.release()
+        }
+    }
+
+    /**
+     * Probe using FFprobeKit — handles files that MediaMetadataRetriever rejects
+     * (very-low-bitrate, missing audio track, unusual codec configurations).
+     * Requires copying the URI to a temp file for FFprobe access.
+     */
+    private suspend fun probeWithFfprobe(uri: Uri): MediaInfo {
+        val tempFile = copyUriToTemp(uri)
+        try {
+            val session = FFprobeKit.getMediaInformation(tempFile.absolutePath)
+            if (!ReturnCode.isSuccess(session.returnCode)) {
+                throw IllegalStateException("FFprobe failed with rc=${session.returnCode}")
+            }
+            val mediaInfo = session.mediaInformation
+                ?: throw IllegalStateException("FFprobe returned no media information")
+
+            val videoStream = mediaInfo.streams
+                ?.firstOrNull { it.type == "video" }
+
+            val durationSec = mediaInfo.duration?.toDoubleOrNull() ?: 0.0
+
+            return MediaInfo(
+                width = videoStream?.width?.toInt() ?: 0,
+                height = videoStream?.height?.toInt() ?: 0,
+                durationMs = (durationSec * 1000).toLong(),
+                bitrate = mediaInfo.bitrate?.toLongOrNull()?.toInt() ?: 0,
+                rotation = 0, // FFprobe rotation requires parsing side_data
+                mimeType = mediaInfo.format ?: "",
+                frameCount = 0, // Not directly available from FFprobe info
+            )
+        } finally {
+            tempFile.delete()
         }
     }
 

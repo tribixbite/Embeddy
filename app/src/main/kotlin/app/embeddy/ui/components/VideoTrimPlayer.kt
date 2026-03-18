@@ -39,6 +39,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,6 +48,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.foundation.systemGestureExclusion
 import app.embeddy.R
 import app.embeddy.conversion.TrimSegment
 import app.embeddy.util.SizeEstimation
@@ -110,20 +112,35 @@ fun VideoTrimPlayer(
     var isPlaying by remember { mutableStateOf(false) }
     var currentPositionMs by remember { mutableLongStateOf(0L) }
 
-    // Poll position while playing
+    // Keep fresh references for the playback loop (avoids stale captures)
+    val currentSegments by rememberUpdatedState(segments)
+    val currentTrimStart by rememberUpdatedState(trimStartMs)
+    val currentTrimEnd by rememberUpdatedState(trimEndMs)
+    val currentStitchMode by rememberUpdatedState(stitchMode)
+
+    // Poll position while playing — skips gaps between segments in stitch mode
     LaunchedEffect(isPlaying) {
         while (isPlaying) {
             currentPositionMs = exoPlayer.currentPosition
-            val end = if (stitchMode && segments.isNotEmpty()) {
-                segments.last().endMs
+
+            if (currentStitchMode && currentSegments.isNotEmpty()) {
+                val pos = currentPositionMs
+                // Check if we're inside an active segment
+                val active = currentSegments.find { pos >= it.startMs && pos < it.endMs }
+                if (active == null) {
+                    // In a gap — jump to next segment or loop to first
+                    val next = currentSegments.find { it.startMs > pos }
+                    if (next != null) {
+                        exoPlayer.seekTo(next.startMs)
+                    } else if (pos >= currentSegments.last().endMs) {
+                        exoPlayer.seekTo(currentSegments.first().startMs)
+                    }
+                }
             } else {
-                if (trimEndMs > 0) trimEndMs else effectiveDuration
-            }
-            if (currentPositionMs >= end) {
-                val start = if (stitchMode && segments.isNotEmpty()) {
-                    segments.first().startMs
-                } else trimStartMs
-                exoPlayer.seekTo(start)
+                val end = if (currentTrimEnd > 0) currentTrimEnd else effectiveDuration
+                if (currentPositionMs >= end) {
+                    exoPlayer.seekTo(if (currentTrimStart > 0) currentTrimStart else 0L)
+                }
             }
             delay(100)
         }
@@ -277,11 +294,15 @@ fun VideoTrimPlayer(
                     onValueChange = { range ->
                         val newStart = range.start.toLong()
                         val newEnd = range.endInclusive.toLong()
+                        // Seek to whichever handle the user is dragging
+                        if (newStart != trimStart.toLong()) exoPlayer.seekTo(newStart)
+                        else if (newEnd != trimEnd.toLong()) exoPlayer.seekTo(newEnd)
                         onTrimChanged(newStart, newEnd)
-                        exoPlayer.seekTo(newStart)
                     },
                     valueRange = sliderRange,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .systemGestureExclusion(),
                     colors = SliderDefaults.colors(
                         activeTrackColor = MaterialTheme.colorScheme.primary,
                         inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant,
@@ -376,18 +397,30 @@ private fun StitchSegments(
                 }
             }
 
-            // Range slider for this segment
+            // Range slider for this segment — systemGestureExclusion prevents
+            // Android back-gesture from intercepting handle drags near screen edges
             RangeSlider(
                 value = segment.startMs.toFloat()..segment.endMs.toFloat(),
                 onValueChange = { range ->
+                    val newStart = range.start.toLong()
+                    val newEnd = range.endInclusive.toLong()
+                    // Seek to whichever handle the user is dragging
+                    if (newStart != segment.startMs) exoPlayer.seekTo(newStart)
+                    else if (newEnd != segment.endMs) exoPlayer.seekTo(newEnd)
                     val updated = segments.toMutableList().apply {
-                        set(index, TrimSegment(range.start.toLong(), range.endInclusive.toLong()))
+                        set(index, TrimSegment(newStart, newEnd))
                     }
-                    onSegmentsChanged(updated.sortedBy { it.startMs })
-                    exoPlayer.seekTo(range.start.toLong())
+                    // Don't sort during drag — index swap breaks the gesture
+                    onSegmentsChanged(updated)
+                },
+                onValueChangeFinished = {
+                    // Sort segments only after drag completes
+                    onSegmentsChanged(segments.sortedBy { it.startMs })
                 },
                 valueRange = sliderRange,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .systemGestureExclusion(),
                 colors = SliderDefaults.colors(
                     activeTrackColor = segmentColor(index),
                     inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant,
