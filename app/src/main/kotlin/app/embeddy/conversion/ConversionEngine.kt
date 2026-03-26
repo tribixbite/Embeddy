@@ -133,7 +133,9 @@ class ConversionEngine(private val context: Context) {
     }
 
     /**
-     * Convert input URI to animated WebP using adaptive quality.
+     * Convert input URI to animated WebP.
+     * When targetSizeBytes > 0, uses adaptive quality (reduce quality until file fits).
+     * When targetSizeBytes == 0, encodes once at startQuality with no size check.
      * Emits [ConversionProgress] updates and returns the output file path on success.
      */
     fun convert(
@@ -211,8 +213,8 @@ class ConversionEngine(private val context: Context) {
                     hasAnyOutput = true
                 }
 
-                if (fileSize <= config.targetSizeBytes) {
-                    // Fits the target — done
+                // No target size → one-shot encode, skip adaptive loop
+                if (config.targetSizeBytes <= 0 || fileSize <= config.targetSizeBytes) {
                     tempOutput.delete()
                     inputFile.delete()
                     send(

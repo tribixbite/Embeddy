@@ -41,6 +41,9 @@ fun ConversionProgressCard(
         label = "progress",
     )
 
+    // Use indeterminate bar when progress hasn't moved (duration unknown / stats not arriving)
+    val indeterminate = state.progress <= 0f && state.elapsedMs > 1000
+
     Card(
         modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -71,14 +74,25 @@ fun ConversionProgressCard(
 
             Spacer(Modifier.height(16.dp))
 
-            LinearProgressIndicator(
-                progress = { animatedProgress },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(8.dp)
-                    .clip(RoundedCornerShape(4.dp)),
-                trackColor = MaterialTheme.colorScheme.surfaceVariant,
-            )
+            if (indeterminate) {
+                // No progress data — show animated indeterminate bar
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(8.dp)
+                        .clip(RoundedCornerShape(4.dp)),
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                )
+            } else {
+                LinearProgressIndicator(
+                    progress = { animatedProgress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(8.dp)
+                        .clip(RoundedCornerShape(4.dp)),
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                )
+            }
 
             Spacer(Modifier.height(12.dp))
 
@@ -87,10 +101,15 @@ fun ConversionProgressCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                val pct = (animatedProgress * 100).toInt()
                 val elapsed = formatElapsed(state.elapsedMs)
+                val statusText = if (indeterminate) {
+                    "Encoding… · $elapsed"
+                } else {
+                    val pct = (animatedProgress * 100).toInt()
+                    "$pct% · $elapsed"
+                }
                 Text(
-                    text = "$pct% · $elapsed",
+                    text = statusText,
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

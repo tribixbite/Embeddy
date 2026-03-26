@@ -142,8 +142,11 @@ fun ConvertScreen(
                     onPreview = viewModel::startPreview,
                 )
 
-                // Convert button with target size shown
-                val targetMb = String.format("%.1f MB", config.targetSizeBytes / 1_000_000.0)
+                // Convert button — shows target size when enabled
+                val targetLabel = if (config.targetSizeBytes > 0) {
+                    val mb = String.format("%.1f MB", config.targetSizeBytes / 1_000_000.0)
+                    " ($mb target)"
+                } else ""
                 Button(
                     onClick = viewModel::startConversion,
                     modifier = Modifier
@@ -158,7 +161,7 @@ fun ConvertScreen(
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        text = "${stringResource(R.string.convert)} ($targetMb target)",
+                        text = stringResource(R.string.convert) + targetLabel,
                         style = MaterialTheme.typography.titleMedium,
                     )
                 }

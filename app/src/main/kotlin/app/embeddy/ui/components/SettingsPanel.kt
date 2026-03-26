@@ -183,16 +183,18 @@ fun SettingsPanel(
                         },
                     )
 
-                    // Target size slider (in MB)
+                    // Target size slider (0 = disabled, no adaptive quality loop)
                     val sizeMb = config.targetSizeBytes / 1_000_000f
                     SettingSlider(
                         label = stringResource(R.string.target_size),
                         value = sizeMb,
-                        valueRange = 0.25f..25f,
+                        valueRange = 0f..25f,
                         steps = 0,
-                        valueLabel = String.format("%.1f MB", sizeMb),
+                        valueLabel = if (config.targetSizeBytes == 0L) "Off" else String.format("%.1f MB", sizeMb),
                         onValueChange = { mb ->
-                            onConfigChanged { copy(targetSizeBytes = (mb * 1_000_000).toLong()) }
+                            // Snap values below 0.2 MB to 0 (disabled)
+                            val bytes = if (mb < 0.2f) 0L else (mb * 1_000_000).toLong()
+                            onConfigChanged { copy(targetSizeBytes = bytes) }
                         },
                     )
 
