@@ -14,7 +14,7 @@ const MAX_CAPTURE_DURATION_S = 30;
  * Static WebP returns a single frame. Animated WebP extracts all frames.
  * @param file - WebP file
  * @param targetFps - Frames per second to capture (used only by canvas fallback)
- * @param maxFrames - Safety cap to prevent memory issues (default 1500)
+ * @param maxFrames - Safety cap to prevent memory issues (default 1500, auto-reduced for high-res)
  */
 export async function decodeWebP(
   file: File,
@@ -63,7 +63,8 @@ async function decodeWithImageDecoder(
   const track = decoder.tracks.selectedTrack;
   if (!track) throw new Error("No image track found in WebP");
 
-  const totalFrames = Math.min(track.frameCount, maxFrames);
+  // Memory-aware cap applied after first frame dimensions are known
+  let totalFrames = Math.min(track.frameCount, maxFrames);
   onProgress?.({ phase: "decoding", percent: 0, frame: 0, total: totalFrames });
 
   // Decode all frames to get dimensions from first frame
@@ -83,6 +84,10 @@ async function decodeWithImageDecoder(
     if (i === 0) {
       width = videoFrame.displayWidth;
       height = videoFrame.displayHeight;
+      // Tighten frame cap based on actual dimensions (512 MB memory budget)
+      const bytesPerFrame = width * height * 4;
+      const memoryMax = Math.max(30, Math.floor((512 * 1024 * 1024) / bytesPerFrame));
+      totalFrames = Math.min(totalFrames, memoryMax);
     }
 
     // Draw VideoFrame to canvas to extract RGBA pixels

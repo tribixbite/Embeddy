@@ -181,6 +181,16 @@ export async function encodeAnimatedWebP(
     outH = newH;
   }
 
+  // Safety check: estimate total memory for wasm-webp (RGBA frames + encoder overhead)
+  const totalBytes = workFrames.length * outW * outH * 4;
+  const maxWasmBytes = 512 * 1024 * 1024; // 512 MB budget
+  if (totalBytes > maxWasmBytes) {
+    throw new Error(
+      `Frame data too large for browser encoding (${Math.round(totalBytes / 1024 / 1024)} MB). ` +
+      `Reduce max dimension, lower FPS, or trim the input.`
+    );
+  }
+
   // Build wasm-webp frame array
   onProgress?.({ phase: "encoding", percent: 0, frame: 0, total: workFrames.length });
 

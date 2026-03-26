@@ -9,7 +9,7 @@ import type { DecodedFrame, SourceInfo, ConvertProgress } from "./types";
  * Decode a video file into RGBA frames by stepping through with seek.
  * @param file - Video file (MP4, WebM, etc.)
  * @param targetFps - Frames per second to extract (default 10)
- * @param maxFrames - Safety cap to prevent memory issues (default 1500)
+ * @param maxFrames - Safety cap to prevent memory issues (default 1500, auto-reduced for high-res)
  */
 export async function decodeVideo(
   file: File,
@@ -36,8 +36,14 @@ export async function decodeVideo(
     if (!width || !height) throw new Error("Could not determine video dimensions");
     if (!duration || !isFinite(duration)) throw new Error("Could not determine video duration");
 
+    // Memory-aware frame cap: limit total RGBA data to ~512 MB
+    // Each frame = width * height * 4 bytes (RGBA)
+    const bytesPerFrame = width * height * 4;
+    const memoryBudget = 512 * 1024 * 1024; // 512 MB
+    const memoryMaxFrames = Math.max(30, Math.floor(memoryBudget / bytesPerFrame));
+
     const frameInterval = 1 / targetFps;
-    const totalFrames = Math.min(Math.floor(duration * targetFps), maxFrames);
+    const totalFrames = Math.min(Math.floor(duration * targetFps), maxFrames, memoryMaxFrames);
     const delayMs = Math.round(1000 / targetFps);
 
     // Canvas for frame capture
