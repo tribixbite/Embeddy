@@ -9,12 +9,12 @@ import type { DecodedFrame, SourceInfo, ConvertProgress } from "./types";
  * Decode a video file into RGBA frames by stepping through with seek.
  * @param file - Video file (MP4, WebM, etc.)
  * @param targetFps - Frames per second to extract (default 10)
- * @param maxFrames - Safety cap to prevent memory issues (default 300)
+ * @param maxFrames - Safety cap to prevent memory issues (default 1500)
  */
 export async function decodeVideo(
   file: File,
   targetFps = 10,
-  maxFrames = 300,
+  maxFrames = 1500,
   onProgress?: (p: ConvertProgress) => void,
 ): Promise<{ frames: DecodedFrame[]; info: SourceInfo }> {
   const url = URL.createObjectURL(file);

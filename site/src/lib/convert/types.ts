@@ -52,6 +52,8 @@ export interface ConvertOptions {
   outputFormat: "webp" | "gif";
   /** Crop region or null for no crop */
   crop: CropRect | null;
+  /** Target file size in bytes (0 = disabled, encode at fixed quality) */
+  targetSizeBytes: number;
 }
 
 /** Progress callback for long-running operations */

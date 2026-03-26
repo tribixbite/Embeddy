@@ -14,12 +14,12 @@ const MAX_CAPTURE_DURATION_S = 30;
  * Static WebP returns a single frame. Animated WebP extracts all frames.
  * @param file - WebP file
  * @param targetFps - Frames per second to capture (used only by canvas fallback)
- * @param maxFrames - Safety cap to prevent memory issues (default 300)
+ * @param maxFrames - Safety cap to prevent memory issues (default 1500)
  */
 export async function decodeWebP(
   file: File,
   targetFps = 10,
-  maxFrames = 300,
+  maxFrames = 1500,
   onProgress?: (p: ConvertProgress) => void,
 ): Promise<{ frames: DecodedFrame[]; info: SourceInfo }> {
   // Detect animation from RIFF header before choosing decode path

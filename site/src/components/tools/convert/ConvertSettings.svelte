@@ -88,6 +88,32 @@
     </div>
   {/if}
 
+  <!-- Target file size (optional) -->
+  <div>
+    <label class="mb-2 block text-xs font-medium text-white/40 uppercase tracking-wider">
+      Target size <span class="text-white/25">(MB, 0 = off)</span>
+    </label>
+    <input
+      type="number"
+      min="0"
+      max="100"
+      step="0.5"
+      value={options.targetSizeBytes > 0 ? +(options.targetSizeBytes / 1_000_000).toFixed(1) : ""}
+      oninput={(e) => {
+        const mb = parseFloat((e.target as HTMLInputElement).value);
+        options.targetSizeBytes = mb > 0 ? Math.round(mb * 1_000_000) : 0;
+      }}
+      {disabled}
+      placeholder="Off"
+      class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/80 placeholder:text-white/25 focus:border-brand-500/50 focus:outline-none"
+    />
+    {#if options.targetSizeBytes > 0}
+      <p class="mt-1 text-xs text-white/30">
+        Will reduce quality from {options.quality} until output fits
+      </p>
+    {/if}
+  </div>
+
   <!-- Crop section -->
   <div>
     <label class="flex cursor-pointer items-center gap-3">
@@ -198,6 +224,9 @@
     <span>{info.frameCount} frames</span>
     <span>{info.fps} fps</span>
     <span>{(info.totalDuration / 1000).toFixed(1)}s</span>
+    {#if info.frameCount >= 1500}
+      <span class="text-yellow-400/70">frame cap reached</span>
+    {/if}
   </div>
 
   <!-- Convert button -->

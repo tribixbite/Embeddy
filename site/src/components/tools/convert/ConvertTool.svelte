@@ -44,6 +44,7 @@
     targetFps: 10,
     outputFormat: "webp",
     crop: null,
+    targetSizeBytes: 0,
   });
 
   /** Accepted file types: GIF, WebP, and common video formats */
@@ -78,11 +79,11 @@
         // GIF input → default output WebP (conversion)
         options.outputFormat = "webp";
       } else if (isWebP(file)) {
-        decoded = await decodeWebP(file, options.targetFps, 300, (p) => { progress = p; });
+        decoded = await decodeWebP(file, options.targetFps, 1500, (p) => { progress = p; });
         // WebP input → default output GIF (reverse conversion)
         options.outputFormat = "gif";
       } else if (file.type.startsWith("video/")) {
-        decoded = await decodeVideo(file, options.targetFps, 300, (p) => { progress = p; });
+        decoded = await decodeVideo(file, options.targetFps, 1500, (p) => { progress = p; });
         // Video input → default output WebP
         options.outputFormat = "webp";
       } else {
@@ -110,26 +111,42 @@
     error = "";
 
     try {
+      const encode = async (opts: ConvertOptions) => {
+        if (opts.outputFormat === "gif") {
+          return encodeAnimatedGif(
+            frames, sourceInfo!.width, sourceInfo!.height,
+            opts, sourceInfo!.fps, (p) => { progress = p; },
+          );
+        }
+        return encodeAnimatedWebP(
+          frames, sourceInfo!.width, sourceInfo!.height,
+          opts, sourceInfo!.fps, (p) => { progress = p; },
+        );
+      };
+
       let blob: Blob;
 
-      if (options.outputFormat === "gif") {
-        blob = await encodeAnimatedGif(
-          frames,
-          sourceInfo.width,
-          sourceInfo.height,
-          options,
-          sourceInfo.fps,
-          (p) => { progress = p; },
-        );
+      if (options.targetSizeBytes > 0 && !options.lossless) {
+        // Adaptive quality loop: reduce quality until output fits target
+        const qualityStep = 10;
+        const minQuality = 5;
+        let quality = options.quality;
+        let bestBlob: Blob | null = null;
+
+        while (quality >= minQuality) {
+          const attemptOpts = { ...options, quality };
+          blob = await encode(attemptOpts);
+
+          // Always keep the latest result (smallest = lowest quality tried)
+          bestBlob = blob;
+
+          if (blob.size <= options.targetSizeBytes) break;
+          quality -= qualityStep;
+        }
+
+        blob = bestBlob!;
       } else {
-        blob = await encodeAnimatedWebP(
-          frames,
-          sourceInfo.width,
-          sourceInfo.height,
-          options,
-          sourceInfo.fps,
-          (p) => { progress = p; },
-        );
+        blob = await encode(options);
       }
 
       // Clean up previous result
