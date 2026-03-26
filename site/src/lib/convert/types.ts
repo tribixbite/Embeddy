@@ -54,6 +54,10 @@ export interface ConvertOptions {
   crop: CropRect | null;
   /** Target file size in bytes (0 = disabled, encode at fixed quality) */
   targetSizeBytes: number;
+  /** Exact colors mode: preserves RGB under transparent areas, disables
+   *  lossy delta blending, adds periodic keyframes. Eliminates ghosting
+   *  artifacts on dark content but increases file size significantly. */
+  exactColors: boolean;
 }
 
 /** Progress callback for long-running operations */

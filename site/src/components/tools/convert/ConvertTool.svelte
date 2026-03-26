@@ -62,6 +62,7 @@
     outputFormat: "webp",
     crop: null,
     targetSizeBytes: 0,
+    exactColors: false,
   });
 
   /** Accepted file types: GIF, WebP, and common video formats */
@@ -169,9 +170,10 @@
         {
           minimize: false, // O(n²) with minimize=true — too slow for 600+ frame streaming
           loop: opts.loops,
-          mixed: false,  // Prevent lossy blend shortcuts that cause ghosting on dark content
-          kmin: 3,       // Keyframe every 3-5 frames to reset error accumulation
-          kmax: 5,
+          mixed: opts.exactColors ? false : true,
+          // Periodic keyframes reset error accumulation (only when exactColors enabled)
+          kmin: opts.exactColors ? 3 : 0,
+          kmax: opts.exactColors ? 5 : 0,
         },
         (p) => { progress = p; },
       );
@@ -206,7 +208,7 @@
             lossless: opts.lossless,
             quality: opts.quality,
             method: 0, // fastest for streaming
-            exact: true, // preserve exact RGB under transparent areas (anti-ghosting)
+            exact: opts.exactColors,
           },
         );
         pushed++;
