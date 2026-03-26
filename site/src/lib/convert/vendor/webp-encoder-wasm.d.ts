@@ -34,7 +34,8 @@ export interface WebpFrameOptions {
 
 export interface WebpEncoderInstance {
   init(options: WebpFileOptions): boolean;
-  push(pixels: Uint8Array, width: number, height: number, options: WebpFrameOptions): boolean;
+  /** Push a frame. Returns boolean or Promise<boolean> due to Asyncify (emscripten_sleep). */
+  push(pixels: Uint8Array, width: number, height: number, options: WebpFrameOptions): boolean | Promise<boolean>;
   encode(): Uint8Array;
   release(): void;
 }

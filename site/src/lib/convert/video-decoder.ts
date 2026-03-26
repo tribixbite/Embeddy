@@ -21,9 +21,9 @@ export async function decodeVideo(
   onProgress?: (p: ConvertProgress) => void,
 ): Promise<{ frames: DecodedFrame[]; info: SourceInfo }> {
   const url = URL.createObjectURL(file);
+  const video = document.createElement("video");
 
   try {
-    const video = document.createElement("video");
     video.muted = true;
     video.playsInline = true;
     video.preload = "auto";
@@ -95,13 +95,24 @@ export async function decodeVideo(
       },
     };
   } finally {
+    detachVideo(video);
     URL.revokeObjectURL(url);
   }
 }
 
-/** Seek the video to a specific time and wait for the frame to be available */
+/**
+ * Seek the video to a specific time and wait for the frame to be available.
+ * Short-circuits if the video is already at the target time (HTML5 spec
+ * won't fire 'seeked' event if currentTime matches the requested time).
+ */
 function seekTo(video: HTMLVideoElement, time: number): Promise<void> {
   return new Promise((resolve, reject) => {
+    // If already at target time, browser won't fire 'seeked' — resolve immediately
+    if (Math.abs(video.currentTime - time) < 0.001) {
+      resolve();
+      return;
+    }
+
     const onSeeked = () => {
       video.removeEventListener("seeked", onSeeked);
       video.removeEventListener("error", onError);
@@ -116,6 +127,12 @@ function seekTo(video: HTMLVideoElement, time: number): Promise<void> {
     video.addEventListener("error", onError);
     video.currentTime = time;
   });
+}
+
+/** Detach video source and halt background decoding before URL revocation */
+function detachVideo(video: HTMLVideoElement) {
+  video.removeAttribute("src");
+  video.load();
 }
 
 /** Create a DOM <canvas> fallback for environments without OffscreenCanvas */
@@ -196,9 +213,9 @@ export async function* streamDecodeVideo(
   delay: number;
 }> {
   const url = URL.createObjectURL(file);
+  const video = document.createElement("video");
 
   try {
-    const video = document.createElement("video");
     video.muted = true;
     video.playsInline = true;
     video.preload = "auto";
@@ -281,6 +298,7 @@ export async function* streamDecodeVideo(
       yield { rgba, width: w, height: h, delay: delayMs };
     }
   } finally {
+    detachVideo(video);
     URL.revokeObjectURL(url);
   }
 }

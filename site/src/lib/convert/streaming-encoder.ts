@@ -22,6 +22,8 @@ export class StreamingWebPEncoder {
   private totalFrames = 0;
   private pushedFrames = 0;
   private onProgress?: (p: ConvertProgress) => void;
+  /** Active reject handler — invoked on abort() to unblock pending Promises */
+  private rejectActive?: (err: Error) => void;
 
   /** Spawn the Worker and load the WASM module */
   async init(options: InitOptions = {}, onProgress?: (p: ConvertProgress) => void): Promise<void> {
@@ -35,7 +37,9 @@ export class StreamingWebPEncoder {
     );
 
     return new Promise<void>((resolve, reject) => {
+      this.rejectActive = reject;
       const handler = (e: MessageEvent<FromWorker>) => {
+        this.rejectActive = undefined;
         if (e.data.type === "ready") {
           this.worker!.removeEventListener("message", handler);
           resolve();
@@ -68,7 +72,9 @@ export class StreamingWebPEncoder {
     if (!this.worker) throw new Error("Encoder not initialized");
 
     return new Promise<void>((resolve, reject) => {
+      this.rejectActive = reject;
       const handler = (e: MessageEvent<FromWorker>) => {
+        this.rejectActive = undefined;
         if (e.data.type === "pushed") {
           this.worker!.removeEventListener("message", handler);
           this.pushedFrames++;
@@ -90,8 +96,12 @@ export class StreamingWebPEncoder {
       };
       this.worker!.addEventListener("message", handler);
 
-      // Transfer the ArrayBuffer to avoid copying (main thread loses access)
-      const buffer = rgba.buffer;
+      // Ensure we transfer exact bounds. Clone if rgba is an offset subarray view
+      // to prevent sending misaligned bytes (Worker reads from offset 0).
+      const buffer = rgba.byteOffset === 0 && rgba.byteLength === rgba.buffer.byteLength
+        ? rgba.buffer
+        : rgba.slice().buffer;
+
       this.worker!.postMessage(
         { type: "push", rgba: buffer, width, height, frameOptions },
         [buffer],
@@ -104,7 +114,9 @@ export class StreamingWebPEncoder {
     if (!this.worker) throw new Error("Encoder not initialized");
 
     return new Promise<Blob>((resolve, reject) => {
+      this.rejectActive = reject;
       const handler = (e: MessageEvent<FromWorker>) => {
+        this.rejectActive = undefined;
         if (e.data.type === "encoded") {
           this.worker!.removeEventListener("message", handler);
 
@@ -129,11 +141,16 @@ export class StreamingWebPEncoder {
     });
   }
 
-  /** Abort and clean up the Worker */
+  /** Abort and clean up the Worker, rejecting any pending operation */
   abort() {
     if (this.worker) {
       this.worker.postMessage({ type: "abort" });
       this.terminate();
+    }
+    // Reject any pending Promise so the caller's for-await-of loop exits cleanly
+    if (this.rejectActive) {
+      this.rejectActive(new Error("Encoder aborted"));
+      this.rejectActive = undefined;
     }
   }
 

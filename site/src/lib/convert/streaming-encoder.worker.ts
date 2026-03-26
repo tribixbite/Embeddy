@@ -89,10 +89,10 @@ self.onmessage = async (e: MessageEvent<ToWorker>) => {
 
         const rgba = new Uint8Array(msg.rgba);
 
-        // push() calls WebPAnimEncoderAdd + emscripten_sleep(0)
-        // The sleep yields the WASM stack, allowing the Worker event loop to process
-        // the next message (progress updates, abort checks, etc.)
-        const ok = encoder.push(rgba, msg.width, msg.height, {
+        // push() calls WebPAnimEncoderAdd then emscripten_sleep(0) via Asyncify.
+        // Must await — Asyncify functions return Promises; calling without await
+        // would trigger "Unwinding while already unwinding" WASM crash on next push.
+        const ok = await encoder.push(rgba, msg.width, msg.height, {
           duration: msg.frameOptions.duration,
           lossless: msg.frameOptions.lossless ?? false,
           quality: msg.frameOptions.quality ?? 75,

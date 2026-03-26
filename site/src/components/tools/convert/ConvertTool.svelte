@@ -167,7 +167,7 @@
 
       await encoder.init(
         {
-          minimize: true,
+          minimize: false, // O(n²) with minimize=true — too slow for 600+ frame streaming
           loop: opts.loops,
           mixed: true,
         },
