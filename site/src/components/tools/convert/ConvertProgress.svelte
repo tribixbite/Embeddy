@@ -16,9 +16,10 @@
     encoding: "Encoding",
   };
 
-  /** Encoding phase has no granular progress — show indeterminate bar */
+  /** Show indeterminate shimmer only when encoding with no real frame progress
+   *  (batch mode). Streaming mode reports actual percent via the decode loop. */
   let indeterminate = $derived(
-    progress.phase === "encoding" && progress.percent < 100,
+    progress.phase === "encoding" && progress.percent === 0 && progress.frame === 0,
   );
 </script>
 

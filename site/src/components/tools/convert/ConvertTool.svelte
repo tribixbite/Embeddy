@@ -175,7 +175,8 @@
           kmin: opts.exactColors ? 3 : 0,
           kmax: opts.exactColors ? 5 : 0,
         },
-        (p) => { progress = p; },
+        // No onProgress here — we manage progress in the loop below to avoid
+        // conflicting updates from the Worker's own progress callback
       );
 
       encoder.setTotalFrames(totalFrames);
@@ -183,22 +184,22 @@
       const delayMs = Math.round(1000 / opts.targetFps);
       let pushed = 0;
 
-      // Stream decode + encode: one frame at a time
+      // Stream decode + encode: one frame at a time.
+      // Decode (seek) is the slow step per frame; encode is fast.
+      // Single 0→95% scale from decode callback, reserve 5% for finalize.
       for await (const frame of streamDecodeVideo(sourceFile, {
         targetFps: opts.targetFps,
         maxFrames: totalFrames,
         crop: opts.crop,
         maxDimension: opts.maxDimension,
       }, (p) => {
-        // Show decode progress in the first 50% of the bar
         progress = {
           phase: "decoding",
-          percent: Math.round(p.percent * 0.5),
+          percent: Math.round(p.percent * 0.95),
           frame: p.frame,
           total: p.total,
         };
       })) {
-        // Push the processed frame to the Worker encoder
         await encoder.pushFrame(
           frame.rgba,
           frame.width,
@@ -212,19 +213,17 @@
           },
         );
         pushed++;
-
-        // Progress: 50-95% for encoding (5% reserved for assembly)
-        progress = {
-          phase: "encoding",
-          percent: 50 + Math.round((pushed / totalFrames) * 45),
-          frame: pushed,
-          total: totalFrames,
-        };
       }
 
       streamingFrameCount = pushed;
 
-      // Finalize — calls WebPAnimEncoderAssemble
+      // Finalize — WebPAnimEncoderAssemble
+      progress = {
+        phase: "encoding",
+        percent: 97,
+        frame: pushed,
+        total: totalFrames,
+      };
       const blob = await encoder.finalize();
       activeEncoder = null;
       return blob;
