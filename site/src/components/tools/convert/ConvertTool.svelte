@@ -169,7 +169,9 @@
         {
           minimize: false, // O(n²) with minimize=true — too slow for 600+ frame streaming
           loop: opts.loops,
-          mixed: true,
+          mixed: false,  // Prevent lossy blend shortcuts that cause ghosting on dark content
+          kmin: 3,       // Keyframe every 3-5 frames to reset error accumulation
+          kmax: 5,
         },
         (p) => { progress = p; },
       );
@@ -204,6 +206,7 @@
             lossless: opts.lossless,
             quality: opts.quality,
             method: 0, // fastest for streaming
+            exact: true, // preserve exact RGB under transparent areas (anti-ghosting)
           },
         );
         pushed++;

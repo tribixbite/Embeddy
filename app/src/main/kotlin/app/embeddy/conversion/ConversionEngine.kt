@@ -164,6 +164,14 @@ class ConversionEngine(private val context: Context) {
                 0L
             }
 
+        // Estimate total frames for frame-count-based progress
+        // (more reliable than stats.time for libwebp_anim encoder)
+        val expectedFrames = if (durationMs > 0) {
+            ((durationMs.toDouble() / 1000.0) * config.fps).toLong()
+        } else {
+            0L
+        }
+
         try {
             // Track the best (smallest) successful output across all attempts.
             // If a later attempt fails, we still have a usable result.
@@ -183,10 +191,21 @@ class ConversionEngine(private val context: Context) {
                 Timber.d("FFmpeg command (q=%d): %s", quality, command)
 
                 val success = executeFfmpeg(command) { stats ->
-                    val progress = if (durationMs > 0) {
-                        (stats.time.toFloat() / durationMs).coerceIn(0f, 1f)
-                    } else {
-                        0f
+                    // Use whichever metric is further along — libwebp_anim
+                    // may not report stats.time correctly, but videoFrameNumber works
+                    val progress = when {
+                        expectedFrames > 0 && durationMs > 0 -> {
+                            val frameProg = stats.videoFrameNumber.toFloat() / expectedFrames
+                            val timeProg = stats.time.toFloat() / durationMs
+                            maxOf(frameProg, timeProg).coerceIn(0f, 1f)
+                        }
+                        expectedFrames > 0 -> {
+                            (stats.videoFrameNumber.toFloat() / expectedFrames).coerceIn(0f, 1f)
+                        }
+                        durationMs > 0 -> {
+                            (stats.time.toFloat() / durationMs).coerceIn(0f, 1f)
+                        }
+                        else -> 0f
                     }
                     trySend(
                         ConversionProgress.Progress(
@@ -459,6 +478,7 @@ class ConversionEngine(private val context: Context) {
             )
 
             val durationMs = (previewDurationSec * 1000).toLong()
+            val expectedFrames = (previewDurationSec * config.fps).toLong()
 
             send(ConversionProgress.Attempt(config.startQuality, 1))
 
@@ -471,9 +491,20 @@ class ConversionEngine(private val context: Context) {
             Timber.d("Preview FFmpeg command (q=%d): %s", config.startQuality, command)
 
             val success = executeFfmpeg(command) { stats ->
-                val progress = if (durationMs > 0) {
-                    (stats.time.toFloat() / durationMs).coerceIn(0f, 1f)
-                } else 0f
+                val progress = when {
+                    expectedFrames > 0 && durationMs > 0 -> {
+                        val frameProg = stats.videoFrameNumber.toFloat() / expectedFrames
+                        val timeProg = stats.time.toFloat() / durationMs
+                        maxOf(frameProg, timeProg).coerceIn(0f, 1f)
+                    }
+                    expectedFrames > 0 -> {
+                        (stats.videoFrameNumber.toFloat() / expectedFrames).coerceIn(0f, 1f)
+                    }
+                    durationMs > 0 -> {
+                        (stats.time.toFloat() / durationMs).coerceIn(0f, 1f)
+                    }
+                    else -> 0f
+                }
                 trySend(
                     ConversionProgress.Progress(
                         fraction = progress,

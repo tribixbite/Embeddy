@@ -32,6 +32,10 @@ export interface InitOptions {
   loop?: number;
   /** Allow mixed lossy/lossless frames. Default: true */
   mixed?: boolean;
+  /** Min keyframe distance (0 = auto). Periodic keyframes reset error accumulation. */
+  kmin?: number;
+  /** Max keyframe distance (0 = auto). */
+  kmax?: number;
 }
 
 export interface FrameOptions {
@@ -43,6 +47,8 @@ export interface FrameOptions {
   quality?: number;
   /** Speed/quality tradeoff 0=fast 6=slow-better. Default: 0 for streaming perf */
   method?: number;
+  /** Preserve exact RGB values under transparent areas (prevents ghosting on dark content) */
+  exact?: boolean;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -76,6 +82,8 @@ self.onmessage = async (e: MessageEvent<ToWorker>) => {
           minimize: msg.options.minimize ?? true,
           loop: msg.options.loop ?? 0,
           mixed: msg.options.mixed ?? true,
+          kmin: msg.options.kmin ?? 0,
+          kmax: msg.options.kmax ?? 0,
         });
 
         if (!ok) throw new Error("WebpEncoder.init() failed");
@@ -97,6 +105,7 @@ self.onmessage = async (e: MessageEvent<ToWorker>) => {
           lossless: msg.frameOptions.lossless ?? false,
           quality: msg.frameOptions.quality ?? 75,
           method: msg.frameOptions.method ?? 0,
+          exact: msg.frameOptions.exact ?? false,
         });
 
         if (!ok) throw new Error(`WebpEncoder.push() failed on frame ${frameIndex}`);
