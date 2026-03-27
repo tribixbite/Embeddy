@@ -58,6 +58,9 @@ export interface ConvertOptions {
    *  lossy delta blending, adds periodic keyframes. Eliminates ghosting
    *  artifacts on dark content but increases file size significantly. */
   exactColors: boolean;
+  /** Minimize output size — reorders chunks for smallest file.
+   *  Slower (O(n²) for many frames) but produces significantly smaller output. */
+  minimizeSize: boolean;
 }
 
 /** Progress callback for long-running operations */

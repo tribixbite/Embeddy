@@ -4,12 +4,17 @@ import android.content.Context
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.Build
 import android.provider.OpenableColumns
 import androidx.exifinterface.media.ExifInterface
+import com.arthenica.ffmpegkit.FFprobeKit
+import com.arthenica.ffmpegkit.ReturnCode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
+import timber.log.Timber
+import java.io.File
 
 /**
  * Fetches and parses metadata from URLs (HTML meta tags via Jsoup) and
@@ -111,14 +116,42 @@ class MetadataEngine {
             extract(MediaMetadataRetriever.METADATA_KEY_LOCATION, "Location")
 
             // Codec info (API 28+)
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 extract(MediaMetadataRetriever.METADATA_KEY_SAMPLERATE, "Sample Rate")
                 extract(MediaMetadataRetriever.METADATA_KEY_BITS_PER_SAMPLE, "Bits Per Sample")
+                extract(MediaMetadataRetriever.METADATA_KEY_IMAGE_COUNT, "Image Count")
+            }
+
+            // Capture framerate
+            extract(MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE, "Capture FPS")
+
+            // Color info (API 30+)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                extract(MediaMetadataRetriever.METADATA_KEY_COLOR_STANDARD, "Color Standard")
+                extract(MediaMetadataRetriever.METADATA_KEY_COLOR_TRANSFER, "Color Transfer")
+                extract(MediaMetadataRetriever.METADATA_KEY_COLOR_RANGE, "Color Range")
+            }
+
+            // Calculate FPS from frame count and duration
+            val frameCount = mediaTags["Frame Count"]?.toLongOrNull() ?: 0L
+            val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                ?.toLongOrNull() ?: 0L
+            if (frameCount > 0 && durationMs > 0) {
+                val fps = frameCount * 1000.0 / durationMs
+                mediaTags["FPS"] = String.format("%.2f", fps)
             }
         } catch (_: Exception) {
             // Not a valid media file for MediaMetadataRetriever
         } finally {
             retriever.release()
+        }
+
+        // FFprobe detailed stream info — codec, pixel format, color, keyframes
+        try {
+            val probeTags = probeWithFfprobe(context, uri)
+            mediaTags.putAll(probeTags)
+        } catch (e: Exception) {
+            Timber.w(e, "FFprobe inspection failed for %s", uri)
         }
 
         // EXIF metadata for images
@@ -260,6 +293,164 @@ class MetadataEngine {
             twitterTags = twitterTags,
             generalTags = generalTags,
         )
+    }
+
+    /**
+     * Use FFprobeKit to extract detailed stream info not available from MediaMetadataRetriever:
+     * codec name/profile, pixel format, bit depth, color space, keyframe interval, etc.
+     */
+    private fun probeWithFfprobe(context: Context, uri: Uri): Map<String, String> {
+        val tags = linkedMapOf<String, String>()
+        val tempFile = copyUriToTemp(context, uri) ?: return tags
+
+        try {
+            val session = FFprobeKit.getMediaInformation(tempFile.absolutePath)
+            if (!ReturnCode.isSuccess(session.returnCode)) return tags
+
+            val info = session.mediaInformation ?: return tags
+
+            // Container format details
+            info.format?.takeIf { it.isNotBlank() }?.let { tags["Format"] = it }
+            info.longFormat?.takeIf { it.isNotBlank() }?.let { tags["Format Name"] = it }
+
+            // Per-stream details
+            info.streams?.forEachIndexed { i, stream ->
+                val prefix = if ((info.streams?.size ?: 0) > 1) "Stream $i " else ""
+                val type = stream.type ?: "unknown"
+
+                stream.codec?.takeIf { it.isNotBlank() }?.let { tags["${prefix}Codec"] = it }
+                stream.codecLong?.takeIf { it.isNotBlank() }?.let { tags["${prefix}Codec (Full)"] = it }
+
+                if (type == "video") {
+                    // Pixel format and color info from stream properties
+                    stream.allProperties?.let { props ->
+                        props.optString("pix_fmt").takeIf { it.isNotBlank() }?.let {
+                            tags["${prefix}Pixel Format"] = it
+                        }
+                        props.optString("profile").takeIf { it.isNotBlank() }?.let {
+                            tags["${prefix}Profile"] = it
+                        }
+                        props.optString("level").takeIf { it != "0" && it.isNotBlank() }?.let {
+                            tags["${prefix}Level"] = it
+                        }
+                        props.optString("color_space").takeIf { it.isNotBlank() && it != "unknown" }?.let {
+                            tags["${prefix}Color Space"] = it
+                        }
+                        props.optString("color_primaries").takeIf { it.isNotBlank() && it != "unknown" }?.let {
+                            tags["${prefix}Color Primaries"] = it
+                        }
+                        props.optString("color_transfer").takeIf { it.isNotBlank() && it != "unknown" }?.let {
+                            tags["${prefix}Color Transfer"] = it
+                        }
+                        props.optString("color_range").takeIf { it.isNotBlank() && it != "unknown" }?.let {
+                            tags["${prefix}Color Range"] = it
+                        }
+                        props.optString("bits_per_raw_sample").takeIf { it.isNotBlank() && it != "0" }?.let {
+                            tags["${prefix}Bit Depth"] = "${it}-bit"
+                        }
+                        props.optString("r_frame_rate").takeIf { it.isNotBlank() }?.let { rate ->
+                            // r_frame_rate is "num/den" format, e.g. "30/1" or "30000/1001"
+                            val parts = rate.split("/")
+                            if (parts.size == 2) {
+                                val num = parts[0].toDoubleOrNull() ?: 0.0
+                                val den = parts[1].toDoubleOrNull() ?: 1.0
+                                if (den > 0) {
+                                    tags["${prefix}Frame Rate"] = String.format("%.3f fps", num / den)
+                                }
+                            }
+                        }
+                        props.optString("avg_frame_rate").takeIf { it.isNotBlank() && it != "0/0" }?.let { rate ->
+                            val parts = rate.split("/")
+                            if (parts.size == 2) {
+                                val num = parts[0].toDoubleOrNull() ?: 0.0
+                                val den = parts[1].toDoubleOrNull() ?: 1.0
+                                if (den > 0 && num > 0) {
+                                    tags["${prefix}Avg Frame Rate"] = String.format("%.3f fps", num / den)
+                                }
+                            }
+                        }
+                        // Keyframe interval from GOP size (if reported)
+                        props.optInt("has_b_frames", -1).takeIf { it >= 0 }?.let {
+                            tags["${prefix}B-Frames"] = it.toString()
+                        }
+                    }
+                }
+            }
+
+            // Probe for keyframe positions using FFprobe packet analysis
+            val keyframeTags = probeKeyframes(tempFile.absolutePath)
+            tags.putAll(keyframeTags)
+        } finally {
+            tempFile.delete()
+        }
+
+        return tags
+    }
+
+    /**
+     * Probe keyframe positions using FFprobe -show_frames.
+     * Reports count and interval summary (e.g. "12 keyframes, avg every 30 frames").
+     */
+    private fun probeKeyframes(filePath: String): Map<String, String> {
+        val tags = linkedMapOf<String, String>()
+        try {
+            // Use FFprobe to count keyframes — select only key frames, video stream
+            val session = FFprobeKit.execute(
+                "-v quiet -select_streams v:0 -show_entries frame=key_frame,pict_type " +
+                "-of csv=p=0 \"$filePath\""
+            )
+            if (!ReturnCode.isSuccess(session.returnCode)) return tags
+
+            val output = session.output ?: return tags
+            val lines = output.trim().lines().filter { it.isNotBlank() }
+            if (lines.isEmpty()) return tags
+
+            var keyCount = 0
+            var totalFrames = 0
+            val keyPositions = mutableListOf<Int>()
+
+            for (line in lines) {
+                val parts = line.split(",")
+                val isKey = parts.firstOrNull()?.trim() == "1"
+                if (isKey) {
+                    keyCount++
+                    keyPositions.add(totalFrames)
+                }
+                totalFrames++
+            }
+
+            if (keyCount > 0) {
+                tags["Keyframes"] = "$keyCount of $totalFrames frames"
+
+                // Calculate average keyframe interval
+                if (keyPositions.size >= 2) {
+                    val intervals = keyPositions.zipWithNext { a, b -> b - a }
+                    val avgInterval = intervals.average()
+                    tags["Avg Keyframe Interval"] = String.format("%.1f frames", avgInterval)
+                }
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Keyframe probe failed")
+        }
+
+        return tags
+    }
+
+    /** Copy a content URI to a temp file for FFprobe access. */
+    private fun copyUriToTemp(context: Context, uri: Uri): File? {
+        return try {
+            val tempDir = File(context.cacheDir, "inspect_temp").also { it.mkdirs() }
+            val tempFile = File(tempDir, "probe_${System.currentTimeMillis()}")
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                tempFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+            tempFile
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to copy URI to temp file for FFprobe")
+            null
+        }
     }
 
     companion object {

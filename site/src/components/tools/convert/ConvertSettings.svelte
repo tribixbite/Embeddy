@@ -221,6 +221,19 @@
       <label class="flex cursor-pointer items-center gap-3">
         <input
           type="checkbox"
+          bind:checked={options.minimizeSize}
+          {disabled}
+          class="h-4 w-4 rounded border-white/20 bg-white/5 text-brand-500 accent-brand-500"
+        />
+        <div>
+          <span class="text-sm text-white/60">Minimize size</span>
+          <p class="text-xs text-white/30">Reorders chunks for smallest file, slower for long videos</p>
+        </div>
+      </label>
+
+      <label class="flex cursor-pointer items-center gap-3">
+        <input
+          type="checkbox"
           bind:checked={options.exactColors}
           {disabled}
           class="h-4 w-4 rounded border-white/20 bg-white/5 text-brand-500 accent-brand-500"

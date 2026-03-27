@@ -63,6 +63,7 @@
     crop: null,
     targetSizeBytes: 0,
     exactColors: false,
+    minimizeSize: true,
   });
 
   /** Accepted file types: GIF, WebP, and common video formats */
@@ -168,7 +169,7 @@
 
       await encoder.init(
         {
-          minimize: false, // O(n²) with minimize=true — too slow for 600+ frame streaming
+          minimize: opts.minimizeSize,
           loop: opts.loops,
           mixed: opts.exactColors ? false : true,
           // Periodic keyframes reset error accumulation (only when exactColors enabled)
