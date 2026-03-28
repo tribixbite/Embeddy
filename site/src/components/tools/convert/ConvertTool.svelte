@@ -3,10 +3,10 @@
    * Convert tool — GIF/video/WebP to animated WebP or GIF.
    * States: idle → decoding → settings → converting → done → error
    *
-   * Two encode paths:
-   *  - Batch: decode all frames → encode (GIF sources, small WebP, short video)
-   *  - Streaming: probe video → decode+encode one frame at a time via Web Worker
-   *    (long/high-res video → WebP, where buffering all frames would OOM)
+   * WebP encoding always uses the streaming encoder (xiaozhuai/webp_encoder WASM)
+   * which exposes all libwebp settings (method, minimize, exact, mixed, kmin/kmax).
+   * For pre-decoded frames (GIF, small video, WebP), frames are pushed to the Worker
+   * from memory. For large videos, frames are decoded lazily via streamDecodeVideo().
    */
   import FileDropZone from "../shared/FileDropZone.svelte";
   import ConvertSettings from "./ConvertSettings.svelte";
@@ -15,7 +15,7 @@
   import { decodeGif } from "../../../lib/convert/gif-decoder";
   import { decodeVideo, probeVideo, streamDecodeVideo } from "../../../lib/convert/video-decoder";
   import { decodeWebP } from "../../../lib/convert/webp-decoder";
-  import { encodeAnimatedWebP } from "../../../lib/convert/encoder";
+  import { cropFrame, resizeFrame, subsampleFrames } from "../../../lib/convert/encoder";
   import { encodeAnimatedGif } from "../../../lib/convert/gif-encoder";
   import { StreamingWebPEncoder } from "../../../lib/convert/streaming-encoder";
   import type {
@@ -152,7 +152,107 @@
   }
 
   /**
-   * Streaming encode: decode video frames one-by-one and push to Worker encoder.
+   * Encode pre-decoded frames to WebP via the streaming Worker encoder.
+   * Handles subsample, crop, resize pipeline then pushes each frame.
+   * All libwebp settings (method, minimize, exact, kmin/kmax) are applied.
+   */
+  async function encodeFramesWebP(
+    inputFrames: DecodedFrame[],
+    width: number,
+    height: number,
+    opts: ConvertOptions,
+    sourceFps: number,
+  ): Promise<Blob> {
+    const encoder = new StreamingWebPEncoder();
+    activeEncoder = encoder;
+
+    try {
+      // Subsample if target FPS is lower than source
+      let workFrames = subsampleFrames(inputFrames, sourceFps, opts.targetFps);
+
+      // Crop all frames if crop is set
+      let outW = width;
+      let outH = height;
+      if (opts.crop) {
+        outW = Math.max(1, Math.round(opts.crop.w * width));
+        outH = Math.max(1, Math.round(opts.crop.h * height));
+        workFrames = workFrames.map((frame, i) => {
+          progress = {
+            phase: "cropping",
+            percent: Math.round((i / workFrames.length) * 100),
+            frame: i + 1,
+            total: workFrames.length,
+          };
+          const cropped = cropFrame(frame.rgba, width, height, opts.crop!);
+          return { rgba: cropped.data, delay: frame.delay };
+        });
+      }
+
+      // Resize all frames if maxDimension is set
+      if (opts.maxDimension > 0 && (outW > opts.maxDimension || outH > opts.maxDimension)) {
+        const scale = Math.min(opts.maxDimension / outW, opts.maxDimension / outH);
+        const newW = Math.round(outW * scale);
+        const newH = Math.round(outH * scale);
+        workFrames = workFrames.map((frame, i) => {
+          progress = {
+            phase: "resizing",
+            percent: Math.round((i / workFrames.length) * 100),
+            frame: i + 1,
+            total: workFrames.length,
+          };
+          const resized = resizeFrame(frame.rgba, outW, outH, opts.maxDimension);
+          return { rgba: resized.data, delay: frame.delay };
+        });
+        outW = newW;
+        outH = newH;
+      }
+
+      const totalFrames = workFrames.length;
+      await encoder.init({
+        minimize: opts.minimizeSize,
+        loop: opts.loops,
+        mixed: opts.exactColors ? false : true,
+        kmin: opts.exactColors ? 3 : 0,
+        kmax: opts.exactColors ? 5 : 0,
+      });
+      encoder.setTotalFrames(totalFrames);
+
+      // Push each frame through the Worker encoder
+      for (let i = 0; i < workFrames.length; i++) {
+        const frame = workFrames[i];
+        progress = {
+          phase: "encoding",
+          percent: Math.round((i / totalFrames) * 95),
+          frame: i + 1,
+          total: totalFrames,
+        };
+        await encoder.pushFrame(
+          frame.rgba,
+          outW,
+          outH,
+          {
+            duration: frame.delay,
+            lossless: opts.lossless,
+            quality: opts.quality,
+            method: opts.method,
+            exact: opts.exactColors,
+          },
+        );
+      }
+
+      progress = { phase: "encoding", percent: 97, frame: totalFrames, total: totalFrames };
+      const blob = await encoder.finalize();
+      activeEncoder = null;
+      return blob;
+    } catch (e) {
+      activeEncoder = null;
+      encoder.abort();
+      throw e;
+    }
+  }
+
+  /**
+   * Streaming encode: lazily decode video frames and push to Worker encoder.
    * Memory usage: O(1 frame + compressed output) instead of O(N frames).
    */
   async function streamingConvert(opts: ConvertOptions): Promise<Blob> {
@@ -162,33 +262,23 @@
     activeEncoder = encoder;
 
     try {
-      // Calculate expected frame count
       const totalFrames = Math.min(
         Math.floor((sourceInfo.totalDuration / 1000) * opts.targetFps),
-        10000, // hard safety cap for streaming mode
+        10000,
       );
 
-      await encoder.init(
-        {
-          minimize: opts.minimizeSize,
-          loop: opts.loops,
-          mixed: opts.exactColors ? false : true,
-          // Periodic keyframes reset error accumulation (only when exactColors enabled)
-          kmin: opts.exactColors ? 3 : 0,
-          kmax: opts.exactColors ? 5 : 0,
-        },
-        // No onProgress here — we manage progress in the loop below to avoid
-        // conflicting updates from the Worker's own progress callback
-      );
-
+      await encoder.init({
+        minimize: opts.minimizeSize,
+        loop: opts.loops,
+        mixed: opts.exactColors ? false : true,
+        kmin: opts.exactColors ? 3 : 0,
+        kmax: opts.exactColors ? 5 : 0,
+      });
       encoder.setTotalFrames(totalFrames);
 
       const delayMs = Math.round(1000 / opts.targetFps);
       let pushed = 0;
 
-      // Stream decode + encode: one frame at a time.
-      // Decode (seek) is the slow step per frame; encode is fast.
-      // Single 0→95% scale from decode callback, reserve 5% for finalize.
       for await (const frame of streamDecodeVideo(sourceFile, {
         targetFps: opts.targetFps,
         maxFrames: totalFrames,
@@ -219,13 +309,7 @@
 
       streamingFrameCount = pushed;
 
-      // Finalize — WebPAnimEncoderAssemble
-      progress = {
-        phase: "encoding",
-        percent: 97,
-        frame: pushed,
-        total: totalFrames,
-      };
+      progress = { phase: "encoding", percent: 97, frame: pushed, total: totalFrames };
       const blob = await encoder.finalize();
       activeEncoder = null;
       return blob;
@@ -237,7 +321,6 @@
   }
 
   async function handleConvert() {
-    // In streaming mode, frames[] is empty — check sourceInfo instead
     if (!sourceInfo || (!frames.length && !streamingMode)) return;
     state = "converting";
     error = "";
@@ -246,56 +329,46 @@
       let blob: Blob;
 
       if (streamingMode && options.outputFormat === "webp") {
-        // Streaming path: decode+encode one frame at a time via Worker
-        // Note: adaptive quality not supported in streaming mode (would require
-        // re-decoding the entire video for each quality attempt)
+        // Large video: lazy decode + encode one frame at a time
         blob = await streamingConvert(options);
       } else if (streamingMode && options.outputFormat === "gif") {
-        // GIF output from large video: not practical (GIF palette quantization
-        // can't easily stream). Fall back to batch with reduced frame cap.
+        // GIF from large video: decode capped frames then GIF-encode
         const decoded = await decodeVideo(sourceFile!, options.targetFps, 300, (p) => { progress = p; });
         frames = decoded.frames;
         blob = await encodeAnimatedGif(
           frames, sourceInfo.width, sourceInfo.height,
           options, sourceInfo.fps, (p) => { progress = p; },
         );
+      } else if (options.outputFormat === "gif") {
+        // GIF output from pre-decoded frames
+        blob = await encodeAnimatedGif(
+          frames, sourceInfo.width, sourceInfo.height,
+          options, sourceInfo.fps, (p) => { progress = p; },
+        );
       } else {
-        // Batch path: all frames already in memory
-        const encode = async (opts: ConvertOptions) => {
-          if (opts.outputFormat === "gif") {
-            return encodeAnimatedGif(
-              frames, sourceInfo!.width, sourceInfo!.height,
-              opts, sourceInfo!.fps, (p) => { progress = p; },
-            );
-          }
-          return encodeAnimatedWebP(
-            frames, sourceInfo!.width, sourceInfo!.height,
-            opts, sourceInfo!.fps, (p) => { progress = p; },
-          );
-        };
+        // WebP output from pre-decoded frames — all settings applied
+        const encode = (opts: ConvertOptions) =>
+          encodeFramesWebP(frames, sourceInfo!.width, sourceInfo!.height, opts, sourceInfo!.fps);
 
         if (options.targetSizeBytes > 0 && !options.lossless) {
-          // Adaptive quality loop: reduce quality until output fits target
+          // Adaptive quality: reduce quality until output fits target
           const qualityStep = 10;
           const minQuality = 5;
           let quality = options.quality;
           let bestBlob: Blob | null = null;
 
           while (quality >= minQuality) {
-            const attemptOpts = { ...options, quality };
-            blob = await encode(attemptOpts);
+            blob = await encode({ ...options, quality });
             bestBlob = blob;
             if (blob.size <= options.targetSizeBytes) break;
             quality -= qualityStep;
           }
-
           blob = bestBlob!;
         } else {
           blob = await encode(options);
         }
       }
 
-      // Clean up previous result
       if (resultUrl) URL.revokeObjectURL(resultUrl);
       resultBlob = blob;
       resultUrl = URL.createObjectURL(blob);

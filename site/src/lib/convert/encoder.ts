@@ -1,20 +1,12 @@
 /**
- * Encode RGBA frames into animated WebP using wasm-webp.
- * Also exports shared utilities (cropFrame, resizeFrame, subsampleFrames)
- * used by gif-encoder.ts.
+ * Shared frame processing utilities: cropFrame, resizeFrame, subsampleFrames.
+ * Used by ConvertTool (WebP via streaming encoder) and gif-encoder.ts.
+ *
+ * WebP encoding is handled exclusively by the streaming Worker encoder
+ * (xiaozhuai/webp_encoder WASM) which exposes all libwebp settings.
  */
 
-import type { DecodedFrame, ConvertOptions, ConvertProgress, CropRect } from "./types";
-
-/** Lazy-loaded wasm-webp module */
-let wasmModule: typeof import("wasm-webp") | null = null;
-
-async function getModule() {
-  if (!wasmModule) {
-    wasmModule = await import("wasm-webp");
-  }
-  return wasmModule;
-}
+import type { DecodedFrame, CropRect } from "./types";
 
 /**
  * Crop a single RGBA frame using normalized CropRect (0-1 fractions).
@@ -125,91 +117,3 @@ export function subsampleFrames(
   return result;
 }
 
-/**
- * Encode decoded frames into an animated WebP blob.
- * Pipeline: subsample → crop → resize → encode
- */
-export async function encodeAnimatedWebP(
-  frames: DecodedFrame[],
-  width: number,
-  height: number,
-  options: ConvertOptions,
-  sourceFps: number,
-  onProgress?: (p: ConvertProgress) => void,
-): Promise<Blob> {
-  const wasm = await getModule();
-
-  // Subsample if target FPS is lower than source
-  let workFrames = subsampleFrames(frames, sourceFps, options.targetFps);
-
-  // Crop all frames if crop is set
-  let outW = width;
-  let outH = height;
-  if (options.crop) {
-    outW = Math.max(1, Math.round(options.crop.w * width));
-    outH = Math.max(1, Math.round(options.crop.h * height));
-    workFrames = workFrames.map((frame, i) => {
-      onProgress?.({
-        phase: "cropping",
-        percent: Math.round((i / workFrames.length) * 100),
-        frame: i + 1,
-        total: workFrames.length,
-      });
-      const cropped = cropFrame(frame.rgba, width, height, options.crop!);
-      return { rgba: cropped.data, delay: frame.delay };
-    });
-  }
-
-  // Resize all frames if maxDimension is set
-  if (options.maxDimension > 0 && (outW > options.maxDimension || outH > options.maxDimension)) {
-    const scale = Math.min(options.maxDimension / outW, options.maxDimension / outH);
-    const newW = Math.round(outW * scale);
-    const newH = Math.round(outH * scale);
-
-    workFrames = workFrames.map((frame, i) => {
-      onProgress?.({
-        phase: "resizing",
-        percent: Math.round((i / workFrames.length) * 100),
-        frame: i + 1,
-        total: workFrames.length,
-      });
-      const resized = resizeFrame(frame.rgba, outW, outH, options.maxDimension);
-      return { rgba: resized.data, delay: frame.delay };
-    });
-
-    outW = newW;
-    outH = newH;
-  }
-
-  // Safety check: estimate total memory for wasm-webp (RGBA frames + encoder overhead)
-  const totalBytes = workFrames.length * outW * outH * 4;
-  const maxWasmBytes = 512 * 1024 * 1024; // 512 MB budget
-  if (totalBytes > maxWasmBytes) {
-    throw new Error(
-      `Frame data too large for browser encoding (${Math.round(totalBytes / 1024 / 1024)} MB). ` +
-      `Reduce max dimension, lower FPS, or trim the input.`
-    );
-  }
-
-  // Build wasm-webp frame array
-  onProgress?.({ phase: "encoding", percent: 0, frame: 0, total: workFrames.length });
-
-  const wasmFrames = workFrames.map((frame) => ({
-    data: frame.rgba,
-    duration: frame.delay,
-    config: {
-      lossless: options.lossless ? 1 : 0,
-      quality: options.quality,
-    },
-  }));
-
-  const result = await wasm.encodeAnimation(outW, outH, true, wasmFrames);
-
-  onProgress?.({ phase: "encoding", percent: 100, frame: workFrames.length, total: workFrames.length });
-
-  if (!result) {
-    throw new Error("WebP encoding failed — encodeAnimation returned null");
-  }
-
-  return new Blob([result.buffer as ArrayBuffer], { type: "image/webp" });
-}
