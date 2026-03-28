@@ -114,7 +114,13 @@ const ogImage = new URL(`${import.meta.env.BASE_URL}og-preview.webp`, Astro.site
     <slot />
     <script is:inline>
       if ("serviceWorker" in navigator) {
-        navigator.serviceWorker.register("/sw.js").catch(() => {});
+        navigator.serviceWorker.register("/sw.js").then((reg) => {
+          // Check for updates every 60s and on visibility change
+          setInterval(() => reg.update(), 60_000);
+          document.addEventListener("visibilitychange", () => {
+            if (!document.hidden) reg.update();
+          });
+        }).catch(() => {});
       }
     </script>
   </body>

@@ -1,5 +1,6 @@
 ---
 import "../styles/global.css";
+import { BUILD_ID } from "../lib/build";
 
 interface Props {
   title: string;
@@ -104,6 +105,7 @@ const fullTitle = `${title} — Embeddy`;
       <div class="mx-auto flex max-w-5xl flex-col items-center gap-4 px-4 py-8 sm:flex-row sm:justify-between sm:px-6">
         <div class="flex items-center gap-3 text-sm text-white/40">
           <span class="font-semibold text-white/60">Embeddy</span>
+          <span class="font-mono text-xs text-white/20">b{BUILD_ID}</span>
           <span>&middot;</span>
           <a
             href="https://www.gnu.org/licenses/gpl-3.0.html"
@@ -129,7 +131,12 @@ const fullTitle = `${title} — Embeddy`;
     </footer>
     <script is:inline>
       if ("serviceWorker" in navigator) {
-        navigator.serviceWorker.register("/sw.js").catch(() => {});
+        navigator.serviceWorker.register("/sw.js").then((reg) => {
+          setInterval(() => reg.update(), 60_000);
+          document.addEventListener("visibilitychange", () => {
+            if (!document.hidden) reg.update();
+          });
+        }).catch(() => {});
       }
     </script>
   </body>
