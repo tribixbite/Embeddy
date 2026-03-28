@@ -1,0 +1,25 @@
+{
+  "name": "Embeddy",
+  "short_name": "Embeddy",
+  "description": "Convert, compress, inspect, and upload media — right in your browser.",
+  "start_url": "/tools/convert",
+  "display": "standalone",
+  "background_color": "#1a1025",
+  "theme_color": "#1a1025",
+  "orientation": "any",
+  "categories": ["utilities", "photo"],
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

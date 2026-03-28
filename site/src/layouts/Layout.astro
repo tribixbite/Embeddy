@@ -88,6 +88,9 @@ const ogImage = new URL(`${import.meta.env.BASE_URL}og-preview.webp`, Astro.site
       rel="stylesheet"
     />
 
+    <!-- PWA -->
+    <link rel="manifest" href={`${import.meta.env.BASE_URL}manifest.json`} />
+
     <!-- Icons -->
     <link
       rel="icon"
@@ -109,5 +112,10 @@ const ogImage = new URL(`${import.meta.env.BASE_URL}og-preview.webp`, Astro.site
     class="min-h-screen bg-dark-950 text-white font-body antialiased"
   >
     <slot />
+    <script is:inline>
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.register("/sw.js").catch(() => {});
+      }
+    </script>
   </body>
 </html>

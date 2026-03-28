@@ -1,188 +1,149 @@
 ---
 import Layout from "../layouts/Layout.astro";
-import FeatureCards from "../components/FeatureCards.svelte";
 import AbiPicker from "../components/AbiPicker.svelte";
 
-const techStack = [
-  { name: "Kotlin 2", color: "text-purple-400 border-purple-400/20 bg-purple-400/10" },
-  { name: "Jetpack Compose", color: "text-green-400 border-green-400/20 bg-green-400/10" },
-  { name: "Material 3", color: "text-blue-400 border-blue-400/20 bg-blue-400/10" },
-  { name: "FFmpeg-kit", color: "text-orange-400 border-orange-400/20 bg-orange-400/10" },
-  { name: "avif-coder", color: "text-pink-400 border-pink-400/20 bg-pink-400/10" },
-  { name: "Coil", color: "text-cyan-400 border-cyan-400/20 bg-cyan-400/10" },
-  { name: "Jsoup", color: "text-yellow-400 border-yellow-400/20 bg-yellow-400/10" },
-  { name: "Media3", color: "text-red-400 border-red-400/20 bg-red-400/10" },
+const tools = [
+  {
+    href: "/tools/convert",
+    label: "Convert",
+    desc: "GIF & video to animated WebP or GIF",
+    icon: "M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 00-3.7-3.7 48.678 48.678 0 00-7.324 0 4.006 4.006 0 00-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3l-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 003.7 3.7 48.656 48.656 0 007.324 0 4.006 4.006 0 003.7-3.7c.017-.22.032-.441.046-.662M4.5 12l3 3m-3-3l-3 3",
+    accent: "from-violet-500/20 to-fuchsia-500/20",
+    glow: "group-hover:shadow-violet-500/10",
+    iconColor: "text-violet-400",
+  },
+  {
+    href: "/tools/squoosh",
+    label: "Squoosh",
+    desc: "Compress images with WASM codecs",
+    icon: "M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.41a2.25 2.25 0 013.182 0l2.909 2.91m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z",
+    accent: "from-emerald-500/20 to-teal-500/20",
+    glow: "group-hover:shadow-emerald-500/10",
+    iconColor: "text-emerald-400",
+  },
+  {
+    href: "/tools/inspect",
+    label: "Inspect",
+    desc: "OG meta tags, EXIF, and embed preview",
+    icon: "M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z",
+    accent: "from-sky-500/20 to-cyan-500/20",
+    glow: "group-hover:shadow-sky-500/10",
+    iconColor: "text-sky-400",
+  },
+  {
+    href: "/tools/upload",
+    label: "Upload",
+    desc: "Anonymous file hosting via 0x0.st",
+    icon: "M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5",
+    accent: "from-amber-500/20 to-orange-500/20",
+    glow: "group-hover:shadow-amber-500/10",
+    iconColor: "text-amber-400",
+  },
 ];
 ---
 
 <Layout>
   <main>
-    <!-- Hero -->
+    <!-- Compact header + tool launcher -->
     <section class="hero-gradient relative overflow-hidden">
-      <!-- Subtle grid pattern overlay -->
-      <div
-        class="absolute inset-0 opacity-[0.03]"
-        style="background-image: url(&quot;data:image/svg+xml,%3Csvg width='40' height='40' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 40L40 0H20L0 20M40 40V20L20 40' fill='none' stroke='white' stroke-width='0.5'/%3E%3C/svg%3E&quot;);"
-      >
+      <div class="absolute inset-0 opacity-[0.03]"
+        style="background-image: url(&quot;data:image/svg+xml,%3Csvg width='40' height='40' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 40L40 0H20L0 20M40 40V20L20 40' fill='none' stroke='white' stroke-width='0.5'/%3E%3C/svg%3E&quot;);">
       </div>
 
-      <div class="relative mx-auto max-w-5xl px-4 pb-20 pt-24 sm:px-6 lg:pt-32">
-        <!-- Badge -->
-        <div class="mb-8 flex justify-center">
-          <span
-            class="inline-flex items-center gap-2 rounded-full border border-brand-500/30 bg-brand-500/10 px-4 py-1.5 text-sm font-medium text-brand-300"
-          >
-            <span class="h-2 w-2 rounded-full bg-brand-400 animate-pulse"></span>
-            v0.1.12 &mdash; Latest Release
-          </span>
+      <div class="relative mx-auto max-w-5xl px-4 pt-12 pb-16 sm:px-6 lg:pt-16">
+        <!-- Branding -->
+        <div class="mb-10 text-center">
+          <h1 class="text-3xl font-bold tracking-tight text-white sm:text-4xl">
+            <span class="bg-gradient-to-r from-brand-400 to-accent bg-clip-text text-transparent">Embeddy</span>
+          </h1>
+          <p class="mt-2 text-sm text-white/50">
+            Media tools in your browser. No install required.
+          </p>
         </div>
 
-        <!-- Title -->
-        <h1
-          class="mx-auto max-w-3xl text-center text-4xl font-bold tracking-tight text-white sm:text-5xl lg:text-6xl"
-        >
-          Swiss-army knife for
-          <span
-            class="bg-gradient-to-r from-brand-400 to-accent bg-clip-text text-transparent"
-          >
-            embeddable media
-          </span>
-          on Android
-        </h1>
+        <!-- Tool launcher grid -->
+        <div class="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+          {tools.map((tool) => (
+            <a
+              href={tool.href}
+              class:list={[
+                "group relative flex flex-col items-center gap-3 rounded-2xl border border-white/[0.08] p-5 sm:p-6",
+                "bg-gradient-to-br backdrop-blur-sm transition-all duration-200",
+                "hover:border-white/15 hover:scale-[1.02] hover:shadow-xl active:scale-[0.98]",
+                tool.accent, tool.glow,
+              ]}
+            >
+              <!-- Icon -->
+              <div class:list={[
+                "flex h-12 w-12 items-center justify-center rounded-xl",
+                "bg-white/[0.06] ring-1 ring-white/[0.08]",
+                "group-hover:bg-white/[0.1] group-hover:ring-white/[0.15] transition-all",
+              ]}>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke-width="1.5"
+                  stroke="currentColor"
+                  class:list={["h-6 w-6", tool.iconColor]}
+                >
+                  <path stroke-linecap="round" stroke-linejoin="round" d={tool.icon} />
+                </svg>
+              </div>
+              <!-- Label -->
+              <div class="text-center">
+                <span class="block text-sm font-semibold text-white">{tool.label}</span>
+                <span class="mt-1 block text-xs text-white/40 leading-snug hidden sm:block">{tool.desc}</span>
+              </div>
+            </a>
+          ))}
+        </div>
+      </div>
+    </section>
 
-        <!-- Subtitle -->
-        <p
-          class="mx-auto mt-6 max-w-2xl text-center text-lg text-white/60 leading-relaxed"
-        >
+    <!-- About -->
+    <section class="border-y border-white/5 bg-white/[0.015]">
+      <div class="mx-auto max-w-5xl px-4 py-12 sm:px-6 text-center">
+        <p class="text-white/50 max-w-2xl mx-auto leading-relaxed">
           Animated WebP converter, image compressor, OG metadata inspector,
-          and anonymous file uploader. On Android and in your browser.
+          and anonymous file uploader. All processing happens client-side —
+          your files never leave your device.
         </p>
-
-        <!-- CTA -->
-        <div class="mt-10 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
-          <a
-            href="https://github.com/tribixbite/Embeddy/releases/latest"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="inline-flex items-center gap-2 rounded-xl bg-brand-500 px-8 py-3.5 font-semibold text-white transition-all hover:bg-brand-400 hover:shadow-lg hover:shadow-brand-500/25"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-              <polyline points="7 10 12 15 17 10"></polyline>
-              <line x1="12" y1="15" x2="12" y2="3"></line>
-            </svg>
-            Download APK
-          </a>
+        <div class="mt-6 flex flex-wrap justify-center gap-3">
           <a
             href="https://github.com/tribixbite/Embeddy"
             target="_blank"
             rel="noopener noreferrer"
-            class="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-8 py-3.5 font-semibold text-white transition-all hover:bg-white/10"
+            class="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/60 transition-colors hover:bg-white/10"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
               <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"></path>
             </svg>
-            View Source
+            Source
+          </a>
+          <a
+            href="https://github.com/tribixbite/Embeddy/releases/latest"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/60 transition-colors hover:bg-white/10"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            Android APK
           </a>
         </div>
       </div>
     </section>
 
-    <!-- Features -->
-    <section class="mx-auto max-w-5xl px-4 py-20 sm:px-6">
-      <div class="mb-12 text-center">
-        <h2 class="text-3xl font-bold text-white sm:text-4xl">
-          Four tabs. Zero friction.
-        </h2>
-        <p class="mt-3 text-white/50">
-          Everything you need for embeddable media, in one compact app.
-        </p>
+    <!-- APK download (compact) -->
+    <section class="mx-auto max-w-5xl px-4 py-14 sm:px-6">
+      <div class="mb-8 text-center">
+        <h2 class="text-2xl font-bold text-white">Get the Android app</h2>
+        <p class="mt-2 text-sm text-white/40">Choose the right APK for your device.</p>
       </div>
-
-      <FeatureCards client:visible />
-    </section>
-
-    <!-- Web Tools CTA -->
-    <section class="border-y border-white/5 bg-white/[0.02]">
-      <div class="mx-auto max-w-5xl px-4 py-16 sm:px-6 text-center">
-        <h2 class="text-2xl font-bold text-white sm:text-3xl">
-          Try in your browser
-        </h2>
-        <p class="mt-3 mb-8 text-white/50">
-          No download needed. All four tools work right here.
-        </p>
-        <div class="flex flex-wrap justify-center gap-3">
-          <a
-            href="/tools/convert"
-            class="inline-flex items-center gap-2 rounded-xl border border-brand-500/30 bg-brand-500/10 px-6 py-3 text-sm font-semibold text-brand-300 transition-all hover:bg-brand-500/20"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-4 w-4">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 00-3.7-3.7 48.678 48.678 0 00-7.324 0 4.006 4.006 0 00-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3l-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 003.7 3.7 48.656 48.656 0 007.324 0 4.006 4.006 0 003.7-3.7c.017-.22.032-.441.046-.662M4.5 12l3 3m-3-3l-3 3" />
-            </svg>
-            Convert
-          </a>
-          <a
-            href="/tools/squoosh"
-            class="inline-flex items-center gap-2 rounded-xl border border-brand-500/30 bg-brand-500/10 px-6 py-3 text-sm font-semibold text-brand-300 transition-all hover:bg-brand-500/20"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-4 w-4">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.41a2.25 2.25 0 013.182 0l2.909 2.91m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
-            </svg>
-            Squoosh
-          </a>
-          <a
-            href="/tools/inspect"
-            class="inline-flex items-center gap-2 rounded-xl border border-brand-500/30 bg-brand-500/10 px-6 py-3 text-sm font-semibold text-brand-300 transition-all hover:bg-brand-500/20"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-4 w-4">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-            </svg>
-            Inspect
-          </a>
-          <a
-            href="/tools/upload"
-            class="inline-flex items-center gap-2 rounded-xl border border-brand-500/30 bg-brand-500/10 px-6 py-3 text-sm font-semibold text-brand-300 transition-all hover:bg-brand-500/20"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-4 w-4">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
-            </svg>
-            Upload
-          </a>
-        </div>
-      </div>
-    </section>
-
-    <!-- Tech Stack -->
-    <section class="border-y border-white/5 bg-white/[0.01]">
-      <div class="mx-auto max-w-5xl px-4 py-16 sm:px-6">
-        <h2 class="mb-8 text-center text-sm font-semibold tracking-widest text-white/40 uppercase">
-          Built with
-        </h2>
-        <div class="flex flex-wrap justify-center gap-3">
-          {
-            techStack.map((tech) => (
-              <span
-                class={`rounded-lg border px-4 py-2 text-sm font-medium ${tech.color}`}
-              >
-                {tech.name}
-              </span>
-            ))
-          }
-        </div>
-      </div>
-    </section>
-
-    <!-- Download -->
-    <section class="mx-auto max-w-5xl px-4 py-20 sm:px-6">
-      <div class="mb-10 text-center">
-        <h2 class="text-3xl font-bold text-white sm:text-4xl">
-          Get Embeddy
-        </h2>
-        <p class="mt-3 text-white/50">
-          Choose the right APK for your device architecture.
-        </p>
-      </div>
-
       <div class="mx-auto max-w-2xl">
         <AbiPicker client:visible />
       </div>

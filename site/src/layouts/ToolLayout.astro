@@ -55,6 +55,9 @@ const fullTitle = `${title} — Embeddy`;
       rel="stylesheet"
     />
 
+    <!-- PWA -->
+    <link rel="manifest" href={`${import.meta.env.BASE_URL}manifest.json`} />
+
     <!-- Icons -->
     <link
       rel="icon"
@@ -124,5 +127,10 @@ const fullTitle = `${title} — Embeddy`;
         </a>
       </div>
     </footer>
+    <script is:inline>
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.register("/sw.js").catch(() => {});
+      }
+    </script>
   </body>
 </html>
