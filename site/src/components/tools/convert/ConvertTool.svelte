@@ -64,6 +64,7 @@
     targetSizeBytes: 0,
     exactColors: false,
     minimizeSize: true,
+    method: 4,
   });
 
   /** Accepted file types: GIF, WebP, and common video formats */
@@ -209,7 +210,7 @@
             duration: delayMs,
             lossless: opts.lossless,
             quality: opts.quality,
-            method: 0, // fastest for streaming
+            method: opts.method,
             exact: opts.exactColors,
           },
         );

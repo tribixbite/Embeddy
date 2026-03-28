@@ -61,6 +61,10 @@ export interface ConvertOptions {
   /** Minimize output size — reorders chunks for smallest file.
    *  Slower (O(n²) for many frames) but produces significantly smaller output. */
   minimizeSize: boolean;
+  /** Compression effort 0-6. Higher = slower but smaller output.
+   *  0 = fastest (minimal compression), 6 = slowest (best compression).
+   *  Default: 4 (good balance). */
+  method: number;
 }
 
 /** Progress callback for long-running operations */

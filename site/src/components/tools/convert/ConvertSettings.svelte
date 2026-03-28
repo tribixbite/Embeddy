@@ -205,8 +205,31 @@
     />
   </div>
 
-  <!-- WebP-only toggles -->
+  <!-- WebP-only settings -->
   {#if options.outputFormat === "webp"}
+    <!-- Compression effort slider -->
+    <div>
+      <div class="mb-2 flex items-center justify-between">
+        <label class="text-xs font-medium text-white/40 uppercase tracking-wider">
+          Compression effort
+        </label>
+        <span class="text-sm font-mono text-white/60">{options.method}</span>
+      </div>
+      <input
+        type="range"
+        min="0"
+        max="6"
+        step="1"
+        bind:value={options.method}
+        {disabled}
+        class="w-full accent-brand-500"
+      />
+      <div class="mt-1 flex justify-between text-xs text-white/30">
+        <span>Fastest</span>
+        <span>Smallest</span>
+      </div>
+    </div>
+
     <div class="space-y-3">
       <label class="flex cursor-pointer items-center gap-3">
         <input

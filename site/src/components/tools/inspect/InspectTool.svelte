@@ -9,6 +9,7 @@
   import EmbedPreview from "./EmbedPreview.svelte";
   import MetadataTable from "./MetadataTable.svelte";
   import { fetchMetadata } from "../../../lib/inspect/proxy";
+  import { parseWebP, webpMetadataToEntries } from "../../../lib/inspect/webp-parser";
   import type { MetadataResult, ExifData } from "../../../lib/inspect/types";
 
   type State = "idle" | "fetching" | "done" | "exif" | "error";
@@ -35,12 +36,17 @@
     }
   }
 
+  /** Check if file is WebP by MIME type or extension */
+  function isWebP(file: File): boolean {
+    return file.type === "image/webp" || file.name.toLowerCase().endsWith(".webp");
+  }
+
   async function handleFile(files: File[]) {
     const file = files[0];
     if (!file) return;
 
-    if (!file.type.startsWith("image/")) {
-      error = "Please select an image file to read EXIF data";
+    if (!file.type.startsWith("image/") && !file.type.startsWith("video/")) {
+      error = "Please select an image or video file to inspect";
       state = "error";
       return;
     }
@@ -51,17 +57,45 @@
     exifFileName = file.name;
 
     try {
-      const exifr = await import("exifr");
-      const parsed = await exifr.parse(file, { translateValues: true });
-      if (!parsed || Object.keys(parsed).length === 0) {
-        error = "No EXIF data found in this image";
-        state = "error";
-        return;
+      if (isWebP(file)) {
+        // WebP: use custom RIFF parser (exifr doesn't support WebP)
+        const buffer = await file.arrayBuffer();
+        const webpMeta = parseWebP(buffer);
+        const entries = webpMetadataToEntries(webpMeta);
+
+        // If the WebP has embedded EXIF, also parse that with exifr
+        if (webpMeta.exifBytes) {
+          try {
+            const exifr = await import("exifr");
+            const exifParsed = await exifr.parse(webpMeta.exifBytes.buffer, {
+              translateValues: true,
+            });
+            if (exifParsed) {
+              for (const [key, value] of Object.entries(exifParsed)) {
+                entries[`EXIF: ${key}`] = String(value);
+              }
+            }
+          } catch {
+            // EXIF parsing failed — just show RIFF metadata
+          }
+        }
+
+        exifData = entries;
+        state = "exif";
+      } else {
+        // Other formats: use exifr
+        const exifr = await import("exifr");
+        const parsed = await exifr.parse(file, { translateValues: true });
+        if (!parsed || Object.keys(parsed).length === 0) {
+          error = "No metadata found in this file";
+          state = "error";
+          return;
+        }
+        exifData = parsed;
+        state = "exif";
       }
-      exifData = parsed;
-      state = "exif";
     } catch (e) {
-      error = e instanceof Error ? e.message : "Failed to read EXIF data";
+      error = e instanceof Error ? e.message : "Failed to read file metadata";
       state = "error";
     }
   }
@@ -100,8 +134,8 @@
     />
   {:else}
     <FileDropZone
-      accept="image/*"
-      label="Drop an image to read its EXIF data"
+      accept="image/*,video/*"
+      label="Drop an image or video to inspect metadata"
       onfile={handleFile}
     />
   {/if}
