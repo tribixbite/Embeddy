@@ -62,9 +62,12 @@
     outputFormat: "webp",
     crop: null,
     targetSizeBytes: 0,
-    exactColors: false,
-    minimizeSize: true,
     method: 4,
+    minimizeSize: true,
+    exact: false,
+    mixed: true,
+    kmin: 0,
+    kmax: 0,
   });
 
   /** Accepted file types: GIF, WebP, and common video formats */
@@ -211,9 +214,9 @@
       await encoder.init({
         minimize: opts.minimizeSize,
         loop: opts.loops,
-        mixed: opts.exactColors ? false : true,
-        kmin: opts.exactColors ? 3 : 0,
-        kmax: opts.exactColors ? 5 : 0,
+        mixed: opts.mixed,
+        kmin: opts.kmin,
+        kmax: opts.kmax,
       });
       encoder.setTotalFrames(totalFrames);
 
@@ -235,7 +238,7 @@
             lossless: opts.lossless,
             quality: opts.quality,
             method: opts.method,
-            exact: opts.exactColors,
+            exact: opts.exact,
           },
         );
       }
@@ -270,9 +273,9 @@
       await encoder.init({
         minimize: opts.minimizeSize,
         loop: opts.loops,
-        mixed: opts.exactColors ? false : true,
-        kmin: opts.exactColors ? 3 : 0,
-        kmax: opts.exactColors ? 5 : 0,
+        mixed: opts.mixed,
+        kmin: opts.kmin,
+        kmax: opts.kmax,
       });
       encoder.setTotalFrames(totalFrames);
 
@@ -301,7 +304,7 @@
             lossless: opts.lossless,
             quality: opts.quality,
             method: opts.method,
-            exact: opts.exactColors,
+            exact: opts.exact,
           },
         );
         pushed++;

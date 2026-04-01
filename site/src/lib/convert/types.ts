@@ -54,17 +54,24 @@ export interface ConvertOptions {
   crop: CropRect | null;
   /** Target file size in bytes (0 = disabled, encode at fixed quality) */
   targetSizeBytes: number;
-  /** Exact colors mode: preserves RGB under transparent areas, disables
-   *  lossy delta blending, adds periodic keyframes. Eliminates ghosting
-   *  artifacts on dark content but increases file size significantly. */
-  exactColors: boolean;
-  /** Minimize output size — reorders chunks for smallest file.
-   *  Slower (O(n²) for many frames) but produces significantly smaller output. */
-  minimizeSize: boolean;
   /** Compression effort 0-6. Higher = slower but smaller output.
    *  0 = fastest (minimal compression), 6 = slowest (best compression).
    *  Default: 4 (good balance). */
   method: number;
+  /** Minimize output size — reorders chunks for smallest file.
+   *  Slower (O(n²) for many frames) but produces significantly smaller output. */
+  minimizeSize: boolean;
+  /** Preserve exact RGB values under transparent areas.
+   *  Prevents ghosting on dark/OLED content but increases file size. */
+  exact: boolean;
+  /** Allow mixed lossy/lossless frames — libwebp picks per-frame whichever is smaller.
+   *  When true, per-frame `lossless` flag is ignored (libwebp overrides it). */
+  mixed: boolean;
+  /** Min keyframe distance (0 = auto). Keyframes reset error accumulation
+   *  and enable seeking. Lower = more keyframes = larger but more scrub-friendly. */
+  kmin: number;
+  /** Max keyframe distance (0 = auto). */
+  kmax: number;
 }
 
 /** Progress callback for long-running operations */

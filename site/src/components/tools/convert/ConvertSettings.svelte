@@ -230,6 +230,44 @@
       </div>
     </div>
 
+    <!-- Keyframe interval -->
+    <div class="grid grid-cols-2 gap-3">
+      <div>
+        <label class="mb-2 block text-xs font-medium text-white/40 uppercase tracking-wider">
+          Kf min <span class="text-white/25">(0 = auto)</span>
+        </label>
+        <input
+          type="number"
+          min="0"
+          max="9999"
+          step="1"
+          bind:value={options.kmin}
+          {disabled}
+          placeholder="0"
+          class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/80 placeholder:text-white/25 focus:border-brand-500/50 focus:outline-none"
+        />
+      </div>
+      <div>
+        <label class="mb-2 block text-xs font-medium text-white/40 uppercase tracking-wider">
+          Kf max <span class="text-white/25">(0 = auto)</span>
+        </label>
+        <input
+          type="number"
+          min="0"
+          max="9999"
+          step="1"
+          bind:value={options.kmax}
+          {disabled}
+          placeholder="0"
+          class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/80 placeholder:text-white/25 focus:border-brand-500/50 focus:outline-none"
+        />
+      </div>
+      <p class="col-span-2 -mt-1 text-xs text-white/30">
+        Keyframe distance — lower = more keyframes, larger file, better seeking
+      </p>
+    </div>
+
+    <!-- Toggle switches -->
     <div class="space-y-3">
       <label class="flex cursor-pointer items-center gap-3">
         <input
@@ -250,20 +288,33 @@
         />
         <div>
           <span class="text-sm text-white/60">Minimize size</span>
-          <p class="text-xs text-white/30">Reorders chunks for smallest file, slower for long videos</p>
+          <p class="text-xs text-white/30">Reorders chunks for smallest file, slower for many frames</p>
         </div>
       </label>
 
       <label class="flex cursor-pointer items-center gap-3">
         <input
           type="checkbox"
-          bind:checked={options.exactColors}
+          bind:checked={options.mixed}
+          {disabled}
+          class="h-4 w-4 rounded border-white/20 bg-white/5 text-brand-500 accent-brand-500"
+        />
+        <div>
+          <span class="text-sm text-white/60">Mixed mode</span>
+          <p class="text-xs text-white/30">Auto-pick lossy/lossless per frame for smallest size</p>
+        </div>
+      </label>
+
+      <label class="flex cursor-pointer items-center gap-3">
+        <input
+          type="checkbox"
+          bind:checked={options.exact}
           {disabled}
           class="h-4 w-4 rounded border-white/20 bg-white/5 text-brand-500 accent-brand-500"
         />
         <div>
           <span class="text-sm text-white/60">Exact colors</span>
-          <p class="text-xs text-white/30">Fixes ghosting on dark content, larger file size</p>
+          <p class="text-xs text-white/30">Preserve RGB under transparent areas, fixes dark-content ghosting</p>
         </div>
       </label>
     </div>
