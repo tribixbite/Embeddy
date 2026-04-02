@@ -138,7 +138,7 @@ self.onmessage = async (e: MessageEvent<ToWorker>) => {
           duration: msg.frameOptions.duration,
           lossless: msg.frameOptions.lossless ?? false,
           quality: msg.frameOptions.quality ?? 75,
-          method: msg.frameOptions.method ?? 0,
+          method: msg.frameOptions.method ?? 4,
           exact: msg.frameOptions.exact ?? false,
           sns_strength: msg.frameOptions.sns_strength ?? 50,
           filter_strength: msg.frameOptions.filter_strength ?? 60,

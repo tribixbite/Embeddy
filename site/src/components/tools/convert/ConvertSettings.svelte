@@ -94,7 +94,7 @@
   <!-- Target file size (optional) -->
   <div>
     <label class="mb-2 block text-xs font-medium text-white/40 uppercase tracking-wider">
-      Target size <span class="text-white/25">(MB, 0 = off)</span>
+      Adaptive target size <span class="text-white/25">(MB, 0 = off)</span>
     </label>
     <input
       type="number"
@@ -112,7 +112,7 @@
     />
     {#if options.targetSizeBytes > 0}
       <p class="mt-1 text-xs text-white/30">
-        Will reduce quality from {options.quality} until output fits
+        Will re-encode at lower quality until output fits
       </p>
     {/if}
   </div>
@@ -328,6 +328,7 @@
         type="button"
         onclick={() => { advancedOpen = !advancedOpen; }}
         class="flex w-full items-center gap-2 text-xs font-medium text-white/40 uppercase tracking-wider hover:text-white/60 transition-colors"
+        aria-expanded={advancedOpen}
         {disabled}
       >
         <span class="inline-block transition-transform duration-150 {advancedOpen ? 'rotate-90' : ''}">&rsaquo;</span>
@@ -539,7 +540,7 @@
           <div class="grid grid-cols-2 gap-3">
             <div>
               <label class="mb-2 block text-xs font-medium text-white/40 uppercase tracking-wider">
-                Target size <span class="text-white/25">(bytes)</span>
+                Encoder target size <span class="text-white/25">(bytes)</span>
               </label>
               <input
                 type="number" min="0" step="1000"
@@ -562,7 +563,7 @@
               />
             </div>
             <p class="col-span-2 -mt-1 text-xs text-white/30">
-              Target size overrides quality; partition limit allows quality degradation to fit partitions
+              Encoder hint — may not be met exactly. Partition limit allows quality degradation to fit partitions
             </p>
           </div>
         </div>

@@ -87,6 +87,34 @@
     emulateJpegSize: 0,
   });
 
+  /** Map camelCase ConvertOptions to snake_case FrameOptions for the WASM encoder */
+  function getWebPFrameOptions(opts: ConvertOptions, duration: number) {
+    return {
+      duration,
+      lossless: opts.lossless,
+      quality: opts.quality,
+      method: opts.method,
+      exact: opts.exact,
+      sns_strength: opts.snsStrength,
+      filter_strength: opts.filterStrength,
+      filter_sharpness: opts.filterSharpness,
+      filter_type: opts.filterType,
+      autofilter: opts.autofilter,
+      alpha_quality: opts.alphaQuality,
+      alpha_compression: opts.alphaCompression,
+      alpha_filtering: opts.alphaFiltering,
+      pass: opts.passes,
+      preprocessing: opts.preprocessing,
+      near_lossless: opts.nearLossless,
+      sharp_yuv: opts.sharpYuv,
+      target_size: opts.targetSize,
+      segments: opts.segments,
+      partition_limit: opts.partitionLimit,
+      low_memory: opts.lowMemory,
+      emulate_jpeg_size: opts.emulateJpegSize,
+    };
+  }
+
   /** Accepted file types: GIF, WebP, and common video formats */
   const acceptTypes = "image/gif,image/webp,video/mp4,video/webm,video/quicktime,video/x-matroska";
 
@@ -250,30 +278,7 @@
           frame.rgba,
           outW,
           outH,
-          {
-            duration: frame.delay,
-            lossless: opts.lossless,
-            quality: opts.quality,
-            method: opts.method,
-            exact: opts.exact,
-            sns_strength: opts.snsStrength,
-            filter_strength: opts.filterStrength,
-            filter_sharpness: opts.filterSharpness,
-            filter_type: opts.filterType,
-            autofilter: opts.autofilter,
-            alpha_quality: opts.alphaQuality,
-            alpha_compression: opts.alphaCompression,
-            alpha_filtering: opts.alphaFiltering,
-            pass: opts.passes,
-            preprocessing: opts.preprocessing,
-            near_lossless: opts.nearLossless,
-            sharp_yuv: opts.sharpYuv,
-            target_size: opts.targetSize,
-            segments: opts.segments,
-            partition_limit: opts.partitionLimit,
-            low_memory: opts.lowMemory,
-            emulate_jpeg_size: opts.emulateJpegSize,
-          },
+          getWebPFrameOptions(opts, frame.delay),
         );
       }
 
@@ -333,30 +338,7 @@
           frame.rgba,
           frame.width,
           frame.height,
-          {
-            duration: delayMs,
-            lossless: opts.lossless,
-            quality: opts.quality,
-            method: opts.method,
-            exact: opts.exact,
-            sns_strength: opts.snsStrength,
-            filter_strength: opts.filterStrength,
-            filter_sharpness: opts.filterSharpness,
-            filter_type: opts.filterType,
-            autofilter: opts.autofilter,
-            alpha_quality: opts.alphaQuality,
-            alpha_compression: opts.alphaCompression,
-            alpha_filtering: opts.alphaFiltering,
-            pass: opts.passes,
-            preprocessing: opts.preprocessing,
-            near_lossless: opts.nearLossless,
-            sharp_yuv: opts.sharpYuv,
-            target_size: opts.targetSize,
-            segments: opts.segments,
-            partition_limit: opts.partitionLimit,
-            low_memory: opts.lowMemory,
-            emulate_jpeg_size: opts.emulateJpegSize,
-          },
+          getWebPFrameOptions(opts, delayMs),
         );
         pushed++;
       }
