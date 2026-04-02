@@ -49,6 +49,40 @@ export interface FrameOptions {
   method?: number;
   /** Preserve exact RGB values under transparent areas (prevents ghosting on dark content) */
   exact?: boolean;
+  /** Spatial Noise Shaping 0-100 */
+  sns_strength?: number;
+  /** Deblocking filter strength 0-100 */
+  filter_strength?: number;
+  /** Filter sharpness 0-7 */
+  filter_sharpness?: number;
+  /** Filter type: 0=simple, 1=strong */
+  filter_type?: number;
+  /** Auto-adjust filter strength */
+  autofilter?: number;
+  /** Alpha quality 0-100 */
+  alpha_quality?: number;
+  /** Alpha compression: 0=none, 1=lossless */
+  alpha_compression?: number;
+  /** Alpha filtering: 0=none, 1=fast, 2=best */
+  alpha_filtering?: number;
+  /** Entropy-analysis passes 1-10 */
+  pass?: number;
+  /** Preprocessing: 0=none, 1=segment-smooth, 2=dithering */
+  preprocessing?: number;
+  /** Near-lossless quality 0-100 (100=off) */
+  near_lossless?: number;
+  /** Sharp YUV conversion */
+  sharp_yuv?: number;
+  /** Target size in bytes (0=off) */
+  target_size?: number;
+  /** Max segments 1-4 */
+  segments?: number;
+  /** Partition limit 0-100 */
+  partition_limit?: number;
+  /** Reduce memory at cost of CPU */
+  low_memory?: number;
+  /** Emulate JPEG size metric */
+  emulate_jpeg_size?: number;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -106,6 +140,23 @@ self.onmessage = async (e: MessageEvent<ToWorker>) => {
           quality: msg.frameOptions.quality ?? 75,
           method: msg.frameOptions.method ?? 0,
           exact: msg.frameOptions.exact ?? false,
+          sns_strength: msg.frameOptions.sns_strength ?? 50,
+          filter_strength: msg.frameOptions.filter_strength ?? 60,
+          filter_sharpness: msg.frameOptions.filter_sharpness ?? 0,
+          filter_type: msg.frameOptions.filter_type ?? 1,
+          autofilter: msg.frameOptions.autofilter ?? 0,
+          alpha_quality: msg.frameOptions.alpha_quality ?? 100,
+          alpha_compression: msg.frameOptions.alpha_compression ?? 1,
+          alpha_filtering: msg.frameOptions.alpha_filtering ?? 1,
+          pass: msg.frameOptions.pass ?? 1,
+          preprocessing: msg.frameOptions.preprocessing ?? 0,
+          near_lossless: msg.frameOptions.near_lossless ?? 100,
+          sharp_yuv: msg.frameOptions.sharp_yuv ?? 0,
+          target_size: msg.frameOptions.target_size ?? 0,
+          segments: msg.frameOptions.segments ?? 4,
+          partition_limit: msg.frameOptions.partition_limit ?? 0,
+          low_memory: msg.frameOptions.low_memory ?? 0,
+          emulate_jpeg_size: msg.frameOptions.emulate_jpeg_size ?? 0,
         });
 
         if (!ok) throw new Error(`WebpEncoder.push() failed on frame ${frameIndex}`);

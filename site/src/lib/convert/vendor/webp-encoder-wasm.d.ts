@@ -30,6 +30,40 @@ export interface WebpFrameOptions {
   method?: number;
   /** Preserve exact RGB under transparent areas. Default: false */
   exact?: boolean;
+  /** Spatial Noise Shaping strength 0-100. Default: 50 */
+  sns_strength?: number;
+  /** Deblocking filter strength 0-100. Default: 60 */
+  filter_strength?: number;
+  /** Filter sharpness 0-7. Default: 0 */
+  filter_sharpness?: number;
+  /** Filter type: 0=simple, 1=strong. Default: 1 */
+  filter_type?: number;
+  /** Auto-adjust filter strength. Default: 0 */
+  autofilter?: number;
+  /** Alpha transparency quality 0-100. Default: 100 */
+  alpha_quality?: number;
+  /** Alpha compression: 0=none, 1=lossless. Default: 1 */
+  alpha_compression?: number;
+  /** Alpha filtering: 0=none, 1=fast, 2=best. Default: 1 */
+  alpha_filtering?: number;
+  /** Entropy-analysis passes 1-10. Default: 1 */
+  pass?: number;
+  /** Preprocessing: 0=none, 1=segment-smooth, 2=dithering. Default: 0 */
+  preprocessing?: number;
+  /** Near-lossless quality 0-100 (100=off). Default: 100 */
+  near_lossless?: number;
+  /** Sharp YUV conversion (0 or 1). Default: 0 */
+  sharp_yuv?: number;
+  /** Target size in bytes (0=off). Default: 0 */
+  target_size?: number;
+  /** Max segments 1-4. Default: 4 */
+  segments?: number;
+  /** Partition limit 0-100 (0=off). Default: 0 */
+  partition_limit?: number;
+  /** Reduce memory usage (0 or 1). Default: 0 */
+  low_memory?: number;
+  /** Emulate JPEG size metric (0 or 1). Default: 0 */
+  emulate_jpeg_size?: number;
 }
 
 export interface WebpEncoderInstance {

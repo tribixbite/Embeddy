@@ -30,6 +30,9 @@
   /** Crop toggle state */
   let cropEnabled = $state(false);
 
+  /** Advanced settings disclosure state */
+  let advancedOpen = $state(false);
+
   /** Initialize crop rect when toggled on */
   function toggleCrop() {
     cropEnabled = !cropEnabled;
@@ -317,6 +320,253 @@
           <p class="text-xs text-white/30">Preserve RGB under transparent areas, fixes dark-content ghosting</p>
         </div>
       </label>
+    </div>
+
+    <!-- Advanced settings (collapsible) -->
+    <div>
+      <button
+        type="button"
+        onclick={() => { advancedOpen = !advancedOpen; }}
+        class="flex w-full items-center gap-2 text-xs font-medium text-white/40 uppercase tracking-wider hover:text-white/60 transition-colors"
+        {disabled}
+      >
+        <span class="inline-block transition-transform duration-150 {advancedOpen ? 'rotate-90' : ''}">&rsaquo;</span>
+        Advanced
+      </button>
+
+      {#if advancedOpen}
+        <div class="mt-4 space-y-5">
+          <!-- SNS strength -->
+          <div>
+            <div class="mb-2 flex items-center justify-between">
+              <label class="text-xs font-medium text-white/40 uppercase tracking-wider">
+                SNS strength
+              </label>
+              <span class="text-sm font-mono text-white/60">{options.snsStrength}</span>
+            </div>
+            <input
+              type="range" min="0" max="100" step="1"
+              bind:value={options.snsStrength}
+              {disabled}
+              class="w-full accent-brand-500"
+            />
+            <div class="mt-1 flex justify-between text-xs text-white/30">
+              <span>Off</span>
+              <span>Aggressive</span>
+            </div>
+          </div>
+
+          <!-- Filter strength -->
+          <div>
+            <div class="mb-2 flex items-center justify-between">
+              <label class="text-xs font-medium text-white/40 uppercase tracking-wider">
+                Filter strength
+              </label>
+              <span class="text-sm font-mono text-white/60">{options.filterStrength}</span>
+            </div>
+            <input
+              type="range" min="0" max="100" step="1"
+              bind:value={options.filterStrength}
+              {disabled}
+              class="w-full accent-brand-500"
+            />
+            <div class="mt-1 flex justify-between text-xs text-white/30">
+              <span>No deblocking</span>
+              <span>Strong</span>
+            </div>
+          </div>
+
+          <!-- Filter sharpness -->
+          <div>
+            <div class="mb-2 flex items-center justify-between">
+              <label class="text-xs font-medium text-white/40 uppercase tracking-wider">
+                Filter sharpness
+              </label>
+              <span class="text-sm font-mono text-white/60">{options.filterSharpness}</span>
+            </div>
+            <input
+              type="range" min="0" max="7" step="1"
+              bind:value={options.filterSharpness}
+              {disabled}
+              class="w-full accent-brand-500"
+            />
+            <div class="mt-1 flex justify-between text-xs text-white/30">
+              <span>Smooth</span>
+              <span>Sharp</span>
+            </div>
+          </div>
+
+          <!-- Alpha quality -->
+          <div>
+            <div class="mb-2 flex items-center justify-between">
+              <label class="text-xs font-medium text-white/40 uppercase tracking-wider">
+                Alpha quality
+              </label>
+              <span class="text-sm font-mono text-white/60">{options.alphaQuality}</span>
+            </div>
+            <input
+              type="range" min="0" max="100" step="1"
+              bind:value={options.alphaQuality}
+              {disabled}
+              class="w-full accent-brand-500"
+            />
+            <div class="mt-1 flex justify-between text-xs text-white/30">
+              <span>Smallest</span>
+              <span>Best alpha</span>
+            </div>
+          </div>
+
+          <!-- Near lossless -->
+          <div>
+            <div class="mb-2 flex items-center justify-between">
+              <label class="text-xs font-medium text-white/40 uppercase tracking-wider">
+                Near lossless
+              </label>
+              <span class="text-sm font-mono text-white/60">{options.nearLossless}</span>
+            </div>
+            <input
+              type="range" min="0" max="100" step="1"
+              bind:value={options.nearLossless}
+              {disabled}
+              class="w-full accent-brand-500"
+            />
+            <div class="mt-1 flex justify-between text-xs text-white/30">
+              <span>Smaller lossless</span>
+              <span>100 = off</span>
+            </div>
+          </div>
+
+          <!-- Passes -->
+          <div>
+            <div class="mb-2 flex items-center justify-between">
+              <label class="text-xs font-medium text-white/40 uppercase tracking-wider">
+                Passes
+              </label>
+              <span class="text-sm font-mono text-white/60">{options.passes}</span>
+            </div>
+            <input
+              type="range" min="1" max="10" step="1"
+              bind:value={options.passes}
+              {disabled}
+              class="w-full accent-brand-500"
+            />
+            <div class="mt-1 flex justify-between text-xs text-white/30">
+              <span>Fast</span>
+              <span>Smallest</span>
+            </div>
+          </div>
+
+          <!-- Segments -->
+          <div>
+            <div class="mb-2 flex items-center justify-between">
+              <label class="text-xs font-medium text-white/40 uppercase tracking-wider">
+                Segments
+              </label>
+              <span class="text-sm font-mono text-white/60">{options.segments}</span>
+            </div>
+            <input
+              type="range" min="1" max="4" step="1"
+              bind:value={options.segments}
+              {disabled}
+              class="w-full accent-brand-500"
+            />
+            <div class="mt-1 flex justify-between text-xs text-white/30">
+              <span>1 (fast)</span>
+              <span>4 (best)</span>
+            </div>
+          </div>
+
+          <!-- Checkbox toggles -->
+          <div class="space-y-3">
+            <label class="flex cursor-pointer items-center gap-3">
+              <input
+                type="checkbox"
+                checked={options.autofilter === 1}
+                onchange={() => { options.autofilter = options.autofilter ? 0 : 1; }}
+                {disabled}
+                class="h-4 w-4 rounded border-white/20 bg-white/5 text-brand-500 accent-brand-500"
+              />
+              <div>
+                <span class="text-sm text-white/60">Auto filter</span>
+                <p class="text-xs text-white/30">Auto-adjust deblocking filter strength</p>
+              </div>
+            </label>
+
+            <label class="flex cursor-pointer items-center gap-3">
+              <input
+                type="checkbox"
+                checked={options.sharpYuv === 1}
+                onchange={() => { options.sharpYuv = options.sharpYuv ? 0 : 1; }}
+                {disabled}
+                class="h-4 w-4 rounded border-white/20 bg-white/5 text-brand-500 accent-brand-500"
+              />
+              <div>
+                <span class="text-sm text-white/60">Sharp YUV</span>
+                <p class="text-xs text-white/30">Better chroma quality on sharp edges</p>
+              </div>
+            </label>
+
+            <label class="flex cursor-pointer items-center gap-3">
+              <input
+                type="checkbox"
+                checked={options.lowMemory === 1}
+                onchange={() => { options.lowMemory = options.lowMemory ? 0 : 1; }}
+                {disabled}
+                class="h-4 w-4 rounded border-white/20 bg-white/5 text-brand-500 accent-brand-500"
+              />
+              <div>
+                <span class="text-sm text-white/60">Low memory</span>
+                <p class="text-xs text-white/30">Reduce memory usage at cost of speed</p>
+              </div>
+            </label>
+
+            <label class="flex cursor-pointer items-center gap-3">
+              <input
+                type="checkbox"
+                checked={options.emulateJpegSize === 1}
+                onchange={() => { options.emulateJpegSize = options.emulateJpegSize ? 0 : 1; }}
+                {disabled}
+                class="h-4 w-4 rounded border-white/20 bg-white/5 text-brand-500 accent-brand-500"
+              />
+              <div>
+                <span class="text-sm text-white/60">Emulate JPEG size</span>
+                <p class="text-xs text-white/30">Map quality to JPEG-equivalent scale</p>
+              </div>
+            </label>
+          </div>
+
+          <!-- Number inputs -->
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="mb-2 block text-xs font-medium text-white/40 uppercase tracking-wider">
+                Target size <span class="text-white/25">(bytes)</span>
+              </label>
+              <input
+                type="number" min="0" step="1000"
+                bind:value={options.targetSize}
+                {disabled}
+                placeholder="0 = off"
+                class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/80 placeholder:text-white/25 focus:border-brand-500/50 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label class="mb-2 block text-xs font-medium text-white/40 uppercase tracking-wider">
+                Partition limit <span class="text-white/25">(0 = off)</span>
+              </label>
+              <input
+                type="number" min="0" max="100" step="1"
+                bind:value={options.partitionLimit}
+                {disabled}
+                placeholder="0"
+                class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/80 placeholder:text-white/25 focus:border-brand-500/50 focus:outline-none"
+              />
+            </div>
+            <p class="col-span-2 -mt-1 text-xs text-white/30">
+              Target size overrides quality; partition limit allows quality degradation to fit partitions
+            </p>
+          </div>
+        </div>
+      {/if}
     </div>
   {/if}
 
