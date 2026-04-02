@@ -36,7 +36,7 @@ class ConversionEngine(private val context: Context) {
      * Primary: MediaMetadataRetriever (fast, no temp file).
      * Fallback: FFprobeKit (copies to temp file, handles edge cases
      * like very-low-bitrate or audio-less files that MMR rejects).
-     * Returns default zeros if both fail — conversion can still proceed.
+     * Throws [IllegalStateException] if both probes fail.
      */
     suspend fun probeInput(uri: Uri): MediaInfo = withContext(Dispatchers.IO) {
         // Try MediaMetadataRetriever first (fast, no temp file needed)
@@ -53,9 +53,10 @@ class ConversionEngine(private val context: Context) {
             Timber.w(e, "FFprobe fallback also failed for %s", uri)
         }
 
-        // Both probes failed — return defaults so the user can still attempt conversion
-        Timber.w("All probes failed for %s, returning default MediaInfo", uri)
-        MediaInfo(width = 0, height = 0, durationMs = 0)
+        // Both probes failed — throw so the UI can show a meaningful error
+        throw IllegalStateException(
+            "Cannot read media info: file may be corrupted, unsupported, or inaccessible"
+        )
     }
 
     /** Probe using Android's MediaMetadataRetriever (fast, but fragile for some files). */
@@ -178,6 +179,7 @@ class ConversionEngine(private val context: Context) {
             var bestOutputSize = Long.MAX_VALUE
             var bestQuality = config.startQuality
             var hasAnyOutput = false
+            var lastFfmpegError: String? = null
 
             while (quality >= config.minQuality) {
                 send(ConversionProgress.Attempt(quality, attempt))
@@ -190,7 +192,7 @@ class ConversionEngine(private val context: Context) {
                 )
                 Timber.d("FFmpeg command (q=%d): %s", quality, command)
 
-                val success = executeFfmpeg(command) { stats ->
+                val ffmpegError = executeFfmpeg(command) { stats ->
                     // Use whichever metric is further along — libwebp_anim
                     // may not report stats.time correctly, but videoFrameNumber works
                     val progress = when {
@@ -217,9 +219,10 @@ class ConversionEngine(private val context: Context) {
                     )
                 }
 
-                if (!success) {
-                    // FFmpeg failed at this quality — don't send Failed yet,
-                    // we may still have output from a prior successful attempt
+                if (ffmpegError != null) {
+                    // FFmpeg failed — save error for reporting, but don't
+                    // send Failed yet if we have output from a prior attempt
+                    lastFfmpegError = ffmpegError
                     break
                 }
 
@@ -268,7 +271,9 @@ class ConversionEngine(private val context: Context) {
                     )
                 )
             } else {
-                send(ConversionProgress.Failed("FFmpeg could not produce output — try a different file or shorter trim"))
+                // Extract a user-friendly reason from FFmpeg's output
+                val reason = extractErrorReason(lastFfmpegError)
+                send(ConversionProgress.Failed(reason))
             }
         } catch (e: Exception) {
             Timber.e(e, "Conversion failed")
@@ -414,21 +419,25 @@ class ConversionEngine(private val context: Context) {
         }
     }
 
-    /** Execute an FFmpeg command with a statistics callback, returns true on success. */
+    /**
+     * Execute an FFmpeg command with a statistics callback.
+     * Returns null on success, or the error message on failure.
+     */
     private suspend fun executeFfmpeg(
         command: String,
         onStatistics: (Statistics) -> Unit,
-    ): Boolean = suspendCancellableCoroutine { cont ->
+    ): String? = suspendCancellableCoroutine { cont ->
         val session = FFmpegKit.executeAsync(
             command,
             { session ->
                 val returnCode = session.returnCode
                 val success = ReturnCode.isSuccess(returnCode)
                 if (!success) {
-                    Timber.e("FFmpeg FAILED (rc=%s): %s", returnCode, session.output?.takeLast(500))
-                }
-                if (cont.isActive) {
-                    cont.resume(success)
+                    val tail = session.output?.takeLast(500) ?: "no output"
+                    Timber.e("FFmpeg FAILED (rc=%s): %s", returnCode, tail)
+                    if (cont.isActive) cont.resume(tail)
+                } else {
+                    if (cont.isActive) cont.resume(null)
                 }
             },
             { log -> Timber.v("FFmpeg: %s", log.message) },
@@ -490,7 +499,7 @@ class ConversionEngine(private val context: Context) {
             )
             Timber.d("Preview FFmpeg command (q=%d): %s", config.startQuality, command)
 
-            val success = executeFfmpeg(command) { stats ->
+            val previewError = executeFfmpeg(command) { stats ->
                 val progress = when {
                     expectedFrames > 0 && durationMs > 0 -> {
                         val frameProg = stats.videoFrameNumber.toFloat() / expectedFrames
@@ -515,7 +524,7 @@ class ConversionEngine(private val context: Context) {
                 )
             }
 
-            if (success && previewOutput.exists() && previewOutput.length() > 0) {
+            if (previewError == null && previewOutput.exists() && previewOutput.length() > 0) {
                 send(
                     ConversionProgress.Complete(
                         outputPath = previewOutput.absolutePath,
@@ -525,7 +534,8 @@ class ConversionEngine(private val context: Context) {
                 )
             } else {
                 previewOutput.delete()
-                send(ConversionProgress.Failed("Preview generation failed"))
+                val reason = if (previewError != null) extractErrorReason(previewError) else "Preview generation failed"
+                send(ConversionProgress.Failed(reason))
             }
         } catch (e: Exception) {
             Timber.e(e, "Preview generation failed")
@@ -538,6 +548,50 @@ class ConversionEngine(private val context: Context) {
 
         close()
     }.flowOn(Dispatchers.IO)
+
+    /**
+     * Extract a user-friendly error reason from FFmpeg's raw output.
+     * Detects common failure patterns and returns a readable message.
+     */
+    private fun extractErrorReason(ffmpegOutput: String?): String {
+        if (ffmpegOutput == null) return "Conversion failed — no output from FFmpeg"
+        return when {
+            "Unknown encoder" in ffmpegOutput ->
+                "Encoder not available — this FFmpeg build may lack the required codec. " +
+                "FFmpeg says: ${ffmpegOutput.substringAfter("Unknown encoder").take(80).trim()}"
+            "No such filter" in ffmpegOutput ->
+                "FFmpeg filter not found: ${ffmpegOutput.substringAfter("No such filter").take(40).trim()}"
+            "Invalid data found" in ffmpegOutput ->
+                "File appears corrupted or uses an unsupported codec"
+            "Permission denied" in ffmpegOutput ->
+                "Cannot access file — permission denied"
+            "does not contain" in ffmpegOutput && "stream" in ffmpegOutput ->
+                "File does not contain a video stream"
+            "Out of memory" in ffmpegOutput || "Cannot allocate" in ffmpegOutput ->
+                "Out of memory — try a shorter clip or lower resolution"
+            else -> {
+                // Last ~120 chars as fallback
+                val tail = ffmpegOutput.takeLast(120).trim()
+                "FFmpeg error: $tail"
+            }
+        }
+    }
+
+    /**
+     * Check if the libwebp_anim encoder is available in this FFmpeg build.
+     * Useful for diagnostics — call once at app startup and log the result.
+     */
+    fun checkEncoderAvailability(): Boolean {
+        val session = FFmpegKit.execute("-hide_banner -encoders")
+        val output = session.output ?: return false
+        val hasWebpAnim = output.contains("libwebp_anim")
+        val hasWebp = output.contains("libwebp")
+        Timber.i("FFmpeg encoder check: libwebp_anim=%b, libwebp=%b", hasWebpAnim, hasWebp)
+        if (!hasWebpAnim) {
+            Timber.w("libwebp_anim encoder NOT available — animated WebP output will fail")
+        }
+        return hasWebpAnim
+    }
 
     /** Cleanup old converted files older than 24 hours. */
     fun cleanupOldFiles() {

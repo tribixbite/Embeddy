@@ -52,7 +52,11 @@ class MainViewModel(
     }
 
     init {
-        viewModelScope.launch(Dispatchers.IO) { engine.cleanupOldFiles() }
+        viewModelScope.launch(Dispatchers.IO) {
+            engine.cleanupOldFiles()
+            // Log available encoders for diagnostics
+            engine.checkEncoderAvailability()
+        }
         // Restore saved config from DataStore
         viewModelScope.launch {
             _config.value = settingsRepo.conversionConfig.first()

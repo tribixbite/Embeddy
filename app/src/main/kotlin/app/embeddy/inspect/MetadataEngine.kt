@@ -441,14 +441,24 @@ class MetadataEngine {
         return try {
             val tempDir = File(context.cacheDir, "inspect_temp").also { it.mkdirs() }
             val tempFile = File(tempDir, "probe_${System.currentTimeMillis()}")
-            context.contentResolver.openInputStream(uri)?.use { input ->
+            val stream = context.contentResolver.openInputStream(uri)
+            if (stream == null) {
+                Timber.w("Cannot open input stream for URI: %s", uri)
+                return null
+            }
+            stream.use { input ->
                 tempFile.outputStream().use { output ->
                     input.copyTo(output)
                 }
             }
+            if (tempFile.length() == 0L) {
+                Timber.w("Copied temp file is empty for URI: %s", uri)
+                tempFile.delete()
+                return null
+            }
             tempFile
         } catch (e: Exception) {
-            Timber.w(e, "Failed to copy URI to temp file for FFprobe")
+            Timber.w(e, "Failed to copy URI to temp file for FFprobe: %s", uri)
             null
         }
     }
