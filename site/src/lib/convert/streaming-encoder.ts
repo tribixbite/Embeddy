@@ -96,11 +96,9 @@ export class StreamingWebPEncoder {
       };
       this.worker!.addEventListener("message", handler);
 
-      // Ensure we transfer exact bounds. Clone if rgba is an offset subarray view
-      // to prevent sending misaligned bytes (Worker reads from offset 0).
-      const buffer = rgba.byteOffset === 0 && rgba.byteLength === rgba.buffer.byteLength
-        ? rgba.buffer
-        : rgba.slice().buffer;
+      // Always copy before transfer — the original frames may be re-encoded
+      // if the user adjusts settings. Transfer neuters the ArrayBuffer.
+      const buffer = rgba.slice().buffer;
 
       this.worker!.postMessage(
         { type: "push", rgba: buffer, width, height, frameOptions },
