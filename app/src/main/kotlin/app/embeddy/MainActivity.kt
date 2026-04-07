@@ -1,5 +1,6 @@
 package app.embeddy
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -29,5 +30,11 @@ class MainActivity : ComponentActivity() {
                 AppScaffold()
             }
         }
+    }
+
+    /** Handle intents when the activity is already running (e.g. share-to while app is open). */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        viewModel.onSharedIntent(intent)
     }
 }
