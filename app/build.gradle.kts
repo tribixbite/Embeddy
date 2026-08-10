@@ -66,6 +66,10 @@ android {
     splits {
         abi {
             isEnable = true
+            // reset() is required — include() ADDS to the default set (every known
+            // ABI), so without it AGP also emits empty mips/mips64/riscv64/armeabi/x86
+            // APKs that contain no FFmpeg .so files and crash on first use.
+            reset()
             include("arm64-v8a", "armeabi-v7a", "x86_64")
             isUniversalApk = true
         }
@@ -86,6 +90,12 @@ android {
     }
 
     packaging {
+        jniLibs {
+            // FFmpeg-kit dlopen()s its native libraries by path, so they must be
+            // extracted to the filesystem at install time. Declared here rather than
+            // via android:extractNativeLibs in the manifest, which AGP deprecates.
+            useLegacyPackaging = true
+        }
         resources {
             excludes += setOf(
                 "/META-INF/{AL2.0,LGPL2.1}",
