@@ -9,6 +9,7 @@ import android.graphics.Rect
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.exifinterface.media.ExifInterface
+import app.embeddy.util.FileInfoUtils
 import com.radzivon.bartoshyk.avif.coder.AvifSpeed
 import com.radzivon.bartoshyk.avif.coder.HeifCoder
 import com.radzivon.bartoshyk.avif.coder.PreciseMode
@@ -38,14 +39,17 @@ class SquooshEngine(private val context: Context) {
     /** Compress an image with the given configuration. */
     suspend fun compress(uri: Uri, config: SquooshConfig): SquooshResult = withContext(Dispatchers.IO) {
         val fileName = queryFileName(uri) ?: "image"
-        val baseName = fileName.substringBeforeLast(".")
+        val baseName = FileInfoUtils.sanitizeFileName(
+            fileName.substringBeforeLast("."),
+            fallback = "image",
+        )
 
-        // Read original file size before decoding
-        val originalSize = context.contentResolver.openInputStream(uri)?.use { it.available().toLong() }
-            ?: context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                val idx = cursor.getColumnIndex(OpenableColumns.SIZE)
-                if (cursor.moveToFirst() && idx >= 0) cursor.getLong(idx) else 0L
-            } ?: 0L
+        // Read original file size. Prefer the provider's SIZE column — InputStream.available()
+        // is only an estimate of what can be read without blocking, so it under-reports for
+        // non-file-backed providers and would skew savingsPercent.
+        val originalSize = FileInfoUtils.queryFileSize(context, uri)?.takeIf { it > 0 }
+            ?: context.contentResolver.openInputStream(uri)?.use { it.available().toLong() }
+            ?: 0L
 
         // Decode with optional downsampling, then apply EXIF rotation so
         // the output matches what the user sees in their gallery app.
@@ -155,16 +159,16 @@ class SquooshEngine(private val context: Context) {
         val srcAspect = source.width.toFloat() / source.height
         val dstAspect = targetW.toFloat() / targetH
 
+        // Round up and floor at the target so truncation can never leave the scaled
+        // bitmap smaller than the crop rect (which would throw from createBitmap).
         val (scaledW, scaledH) = if (srcAspect > dstAspect) {
             // Source is wider — fit height, crop width
-            val h = targetH
-            val w = (source.width * targetH.toFloat() / source.height).toInt()
-            w to h
+            val w = ceilToInt(source.width * targetH.toFloat() / source.height)
+            w.coerceAtLeast(targetW) to targetH
         } else {
             // Source is taller — fit width, crop height
-            val w = targetW
-            val h = (source.height * targetW.toFloat() / source.width).toInt()
-            w to h
+            val h = ceilToInt(source.height * targetW.toFloat() / source.width)
+            targetW to h.coerceAtLeast(targetH)
         }
 
         val scaled = Bitmap.createScaledBitmap(source, scaledW, scaledH, true)
@@ -177,6 +181,8 @@ class SquooshEngine(private val context: Context) {
         if (cropped !== scaled) scaled.recycle()
         return cropped
     }
+
+    private fun ceilToInt(value: Float): Int = kotlin.math.ceil(value.toDouble()).toInt()
 
     /**
      * Decode bitmap from URI with efficient subsampling.

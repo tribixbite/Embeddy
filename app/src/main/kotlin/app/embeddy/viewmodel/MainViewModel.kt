@@ -16,8 +16,11 @@ import app.embeddy.conversion.TrimSegment
 import app.embeddy.util.FileInfoUtils
 import app.embeddy.util.SettingsRepository
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Dispatchers
@@ -40,6 +43,10 @@ class MainViewModel(
 
     private var conversionJob: Job? = null
     private var previewJob: Job? = null
+
+    /** One-shot signal telling the scaffold to bring the Convert tab to the front. */
+    private val _navigateToConvert = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val navigateToConvert: SharedFlow<Unit> = _navigateToConvert.asSharedFlow()
 
     // SavedStateHandle keys for process death restoration
     private companion object {
@@ -154,6 +161,10 @@ class MainViewModel(
         }
         if (uri != null) {
             onFilePicked(uri)
+            // A share that arrives while another tab is open would otherwise load the
+            // file into an invisible Convert tab. No replay is needed: on a cold start
+            // Convert is already the default tab, so only the live-collector case matters.
+            _navigateToConvert.tryEmit(Unit)
         }
     }
 
@@ -294,13 +305,19 @@ class MainViewModel(
 
     /** Generate a ~3-second preview clip using the current settings. */
     fun startPreview() {
-        val ready = _state.value as? ConversionState.Ready ?: return
-        val currentConfig = _config.value
+        // Drop any stale notice from a previous failed preview
+        val ready = (_state.value as? ConversionState.Ready ?: return).copy(notice = null)
+        // Merge overlapping segments here too, so the preview reflects exactly what
+        // startConversion() would encode rather than duplicating frames.
+        val currentConfig = _config.value.let { cfg ->
+            if (cfg.segments.size > 1) cfg.copy(segments = mergeOverlappingSegments(cfg.segments))
+            else cfg
+        }
         val uri = Uri.parse(ready.inputUri)
 
         previewJob?.cancel()
         previewJob = viewModelScope.launch {
-            _state.value = ConversionState.Previewing()
+            _state.value = ConversionState.Previewing(previousReady = ready)
 
             engine.generatePreview(uri, currentConfig).collect { progress ->
                 when (progress) {
@@ -319,8 +336,9 @@ class MainViewModel(
                         )
                     }
                     is ConversionProgress.Failed -> {
-                        // Restore Ready state on failure
-                        _state.value = ready
+                        // Keep the picked file, but surface why the preview didn't render
+                        // instead of silently snapping back to an unchanged Ready card.
+                        _state.value = ready.copy(notice = progress.message)
                     }
                     else -> { /* Attempt, SizeExceeded — ignored for preview */ }
                 }
@@ -332,9 +350,10 @@ class MainViewModel(
     fun cancelPreview() {
         previewJob?.cancel()
         previewJob = null
-        val current = _state.value
-        when (current) {
-            is ConversionState.Previewing -> restoreReadyState()
+        when (val current = _state.value) {
+            // Use the stashed Ready rather than SavedStateHandle — the latter can be
+            // empty, which would leave the UI stuck on the preview spinner forever.
+            is ConversionState.Previewing -> _state.value = current.previousReady
             is ConversionState.PreviewReady -> dismissPreview()
             else -> { /* not previewing */ }
         }

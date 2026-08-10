@@ -42,6 +42,8 @@ class SettingsRepository(private val context: Context) {
         val MAX_DIMENSION = intPreferencesKey("convert_max_dimension")
         val FPS = intPreferencesKey("convert_fps")
         val QUALITY = intPreferencesKey("convert_quality")
+        val MIN_QUALITY = intPreferencesKey("convert_min_quality")
+        val QUALITY_STEP = intPreferencesKey("convert_quality_step")
         val TARGET_SIZE = stringPreferencesKey("convert_target_size") // stored as Long string
         val SHARPEN = booleanPreferencesKey("convert_sharpen")
         val COMPRESSION_LEVEL = intPreferencesKey("convert_compression_level")
@@ -49,6 +51,8 @@ class SettingsRepository(private val context: Context) {
         val COLOR_SPACE = stringPreferencesKey("convert_color_space")
         val DITHER_MODE = stringPreferencesKey("convert_dither_mode")
         val KEYFRAME_INTERVAL = intPreferencesKey("convert_keyframe_interval")
+        val EXACT_WIDTH = intPreferencesKey("convert_exact_width")
+        val EXACT_HEIGHT = intPreferencesKey("convert_exact_height")
     }
 
     /** Flow of saved SquooshConfig, falls back to defaults for missing keys. */
@@ -75,6 +79,10 @@ class SettingsRepository(private val context: Context) {
             maxDimension = prefs[ConvertKeys.MAX_DIMENSION] ?: preset.maxDimension,
             fps = prefs[ConvertKeys.FPS] ?: preset.fps,
             startQuality = prefs[ConvertKeys.QUALITY] ?: preset.startQuality,
+            minQuality = prefs[ConvertKeys.MIN_QUALITY] ?: preset.minQuality,
+            qualityStep = prefs[ConvertKeys.QUALITY_STEP] ?: preset.qualityStep,
+            exactWidth = prefs[ConvertKeys.EXACT_WIDTH] ?: 0,
+            exactHeight = prefs[ConvertKeys.EXACT_HEIGHT] ?: 0,
             targetSizeBytes = prefs[ConvertKeys.TARGET_SIZE]?.toLongOrNull()
                 ?: preset.targetSizeBytes,
             sharpen = prefs[ConvertKeys.SHARPEN] ?: preset.sharpen,
@@ -109,6 +117,10 @@ class SettingsRepository(private val context: Context) {
             prefs[ConvertKeys.MAX_DIMENSION] = config.maxDimension
             prefs[ConvertKeys.FPS] = config.fps
             prefs[ConvertKeys.QUALITY] = config.startQuality
+            prefs[ConvertKeys.MIN_QUALITY] = config.minQuality
+            prefs[ConvertKeys.QUALITY_STEP] = config.qualityStep
+            prefs[ConvertKeys.EXACT_WIDTH] = config.exactWidth
+            prefs[ConvertKeys.EXACT_HEIGHT] = config.exactHeight
             prefs[ConvertKeys.TARGET_SIZE] = config.targetSizeBytes.toString()
             prefs[ConvertKeys.SHARPEN] = config.sharpen
             prefs[ConvertKeys.COMPRESSION_LEVEL] = config.compressionLevel

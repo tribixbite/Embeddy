@@ -3,6 +3,7 @@ package app.embeddy.conversion
 import android.content.Context
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import app.embeddy.util.FileInfoUtils
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.FFprobeKit
 import com.arthenica.ffmpegkit.ReturnCode
@@ -15,6 +16,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.io.File
+import java.util.Locale
 import java.util.UUID
 import kotlin.coroutines.resume
 
@@ -147,13 +149,15 @@ class ConversionEngine(private val context: Context) {
         // Copy input to a temp file so FFmpeg can access it directly
         val inputFile = copyUriToTemp(inputUri)
         val tempOutput = File(tempDir, "temp_${UUID.randomUUID()}.webp")
-        val finalOutput = File(cacheDir, "${outputName}_embeddy.webp")
+        val safeName = FileInfoUtils.sanitizeFileName(outputName, fallback = "output")
+        val finalOutput = File(cacheDir, "${safeName}_embeddy.webp")
 
         var quality = config.startQuality
+        val minQuality = config.effectiveMinQuality
         var attempt = 1
         val startTime = System.currentTimeMillis()
-        Timber.d("Starting conversion: %s → %s (q=%d, target=%d bytes)",
-            inputFile.name, finalOutput.name, quality, config.targetSizeBytes)
+        Timber.d("Starting conversion: %s → %s (q=%d, min=%d, target=%d bytes)",
+            inputFile.name, finalOutput.name, quality, minQuality, config.targetSizeBytes)
 
         // Get duration for progress calculation.
         // In stitch mode, FFmpeg outputs only the kept segments so use their
@@ -181,7 +185,7 @@ class ConversionEngine(private val context: Context) {
             var hasAnyOutput = false
             var lastFfmpegError: String? = null
 
-            while (quality >= config.minQuality) {
+            while (quality >= minQuality) {
                 send(ConversionProgress.Attempt(quality, attempt))
 
                 val command = buildFfmpegCommand(
@@ -251,7 +255,7 @@ class ConversionEngine(private val context: Context) {
                 }
 
                 // Doesn't fit — reduce quality and retry
-                val sizeMb = String.format("%.1f", fileSize / 1_000_000.0)
+                val sizeMb = String.format(Locale.getDefault(), "%.1f", fileSize / 1_000_000.0)
                 send(ConversionProgress.SizeExceeded(fileSize, quality, sizeMb))
                 quality -= config.qualityStep
                 attempt++
@@ -285,6 +289,14 @@ class ConversionEngine(private val context: Context) {
 
         close()
     }.flowOn(Dispatchers.IO)
+
+    /**
+     * Format a millisecond timestamp as an FFmpeg seconds argument.
+     * Always uses [Locale.US] — FFmpeg only accepts `.` as the decimal separator,
+     * and the default locale would emit `1,500` on e.g. de-DE/fr-FR devices.
+     */
+    private fun formatSeconds(millis: Long): String =
+        String.format(Locale.US, "%.3f", millis / 1000.0)
 
     /**
      * Build the core video filter chain (scale, fps, denoise, sharpen, dither).
@@ -360,14 +372,12 @@ class ConversionEngine(private val context: Context) {
         return buildString {
             append("-y ")
             if (effectiveStart > 0) {
-                val ss = String.format("%.3f", effectiveStart / 1000.0)
-                append("-ss $ss ")
+                append("-ss ${formatSeconds(effectiveStart)} ")
             }
             append("-i \"$inputPath\" ")
             if (effectiveEnd > 0) {
-                val endSec = (effectiveEnd - effectiveStart) / 1000.0
-                val to = String.format("%.3f", endSec)
-                append("-to $to ")
+                // -to is an output option here, so it is relative to the seek point
+                append("-to ${formatSeconds(effectiveEnd - effectiveStart)} ")
             }
             append("-vf \"$filters\" ")
             appendEncoderFlags(config, quality)
@@ -399,10 +409,11 @@ class ConversionEngine(private val context: Context) {
 
         val filterGraph = buildString {
             config.segments.forEachIndexed { i, seg ->
-                val start = String.format("%.3f", seg.startMs / 1000.0)
-                val end = String.format("%.3f", seg.endMs / 1000.0)
                 // Trim each segment and reset PTS (no per-segment filters)
-                append("[0:v]trim=$start:$end,setpts=PTS-STARTPTS[v$i];")
+                append(
+                    "[0:v]trim=${formatSeconds(seg.startMs)}:${formatSeconds(seg.endMs)}," +
+                        "setpts=PTS-STARTPTS[v$i];"
+                )
             }
             // Concatenate all segments, then apply filters to the combined stream
             val inputs = (0 until n).joinToString("") { "[v$it]" }

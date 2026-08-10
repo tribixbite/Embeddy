@@ -39,6 +39,16 @@ data class ConversionConfig(
     val ditherMode: DitherMode = DitherMode.NONE, // Bayer/Floyd-Steinberg for palette reduction
     val keyframeInterval: Int = 0,          // -g flag: force keyframe every N frames (0=auto)
 ) {
+    /**
+     * Quality floor the adaptive loop may descend to.
+     *
+     * The quality slider lets the user pick a [startQuality] below a preset's
+     * [minQuality]; without this clamp the adaptive loop in ConversionEngine would
+     * never execute a single attempt and the conversion would fail outright.
+     */
+    val effectiveMinQuality: Int
+        get() = minQuality.coerceAtMost(startQuality)
+
     /** Total kept duration in ms across all segments (or single trim range). */
     val totalKeptDurationMs: Long
         get() = if (segments.isNotEmpty()) {
@@ -89,6 +99,8 @@ sealed interface ConversionState {
         val durationMs: Long = 0,
         val width: Int = 0,
         val height: Int = 0,
+        /** Transient message (e.g. a failed preview) shown alongside the file info. */
+        val notice: String? = null,
     ) : ConversionState
 
     data class Converting(
@@ -120,6 +132,8 @@ sealed interface ConversionState {
     data class Previewing(
         val progress: Float = 0f,
         val elapsedMs: Long = 0,
+        /** Stash the Ready state so cancelling always has somewhere to return to. */
+        val previousReady: Ready,
     ) : ConversionState
 
     /** Preview clip generated, ready to display. */

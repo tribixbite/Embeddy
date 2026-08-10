@@ -3,6 +3,7 @@ package app.embeddy.util
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import java.util.Locale
 
 /** Shared file info queries — avoids duplicating ContentResolver boilerplate across ViewModels. */
 object FileInfoUtils {
@@ -40,8 +41,31 @@ object FileInfoUtils {
 
     /** Format bytes to human-readable string. */
     fun formatFileSize(bytes: Long): String = when {
-        bytes >= 1_000_000 -> String.format("%.1f MB", bytes / 1_000_000.0)
-        bytes >= 1_000 -> String.format("%.1f KB", bytes / 1_000.0)
+        bytes >= 1_000_000 -> String.format(Locale.getDefault(), "%.1f MB", bytes / 1_000_000.0)
+        bytes >= 1_000 -> String.format(Locale.getDefault(), "%.1f KB", bytes / 1_000.0)
         else -> "$bytes B"
     }
+
+    /**
+     * Make a content-provider display name safe to use as a path component.
+     *
+     * `DISPLAY_NAME` is attacker-controlled for third-party providers, so a name
+     * containing `/` or `..` would otherwise let `File(dir, name)` escape the cache
+     * directory. Also strips characters that break FFmpeg's quoted command strings.
+     */
+    fun sanitizeFileName(name: String, fallback: String = "file"): String {
+        val cleaned = name
+            .substringAfterLast('/')
+            .substringAfterLast('\\')
+            .replace(UNSAFE_NAME_CHARS, "_")
+            .trim('.', ' ')
+            .take(MAX_NAME_LENGTH)
+        return cleaned.ifBlank { fallback }
+    }
+
+    /** Anything outside this set is replaced — covers quotes, separators, and control chars. */
+    private val UNSAFE_NAME_CHARS = Regex("""[^A-Za-z0-9._\- ]""")
+
+    /** Keep well under common filesystem limits once suffixes are appended. */
+    private const val MAX_NAME_LENGTH = 120
 }

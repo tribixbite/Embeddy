@@ -19,8 +19,9 @@ class CleanupWorker(
         val cutoff = System.currentTimeMillis() - 24 * 60 * 60 * 1000
         var deleted = 0
 
-        // Clean each cache subdirectory used by engines
-        listOf("converted", "temp", "squoosh_out").forEach { dirName ->
+        // Clean every cache subdirectory the engines write to. Keep this list in sync
+        // with ConversionEngine, SquooshEngine, UploadEngine and MetadataEngine.
+        CACHE_DIRS.forEach { dirName ->
             val dir = File(applicationContext.cacheDir, dirName)
             dir.listFiles()?.filter { it.lastModified() < cutoff }?.forEach { file ->
                 if (file.delete()) deleted++
@@ -29,5 +30,15 @@ class CleanupWorker(
 
         Timber.d("CleanupWorker: deleted %d stale cache files", deleted)
         return Result.success()
+    }
+
+    private companion object {
+        val CACHE_DIRS = listOf(
+            "converted",     // ConversionEngine final output
+            "temp",          // ConversionEngine input copies + previews
+            "squoosh_out",   // SquooshEngine output
+            "upload_temp",   // UploadEngine staged uploads
+            "inspect_temp",  // MetadataEngine FFprobe copies
+        )
     }
 }

@@ -283,6 +283,25 @@ private fun ReadyCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
+            // Transient notice (e.g. a preview that failed to render)
+            state.notice?.let { notice ->
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.Top) {
+                    Icon(
+                        Icons.Outlined.Warning,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = notice,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+
             Spacer(Modifier.height(8.dp))
 
             TextButton(onClick = onChangePick) {

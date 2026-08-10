@@ -69,6 +69,36 @@ class ConversionConfigTest {
         assertEquals(5500L, config.totalKeptDurationMs)
     }
 
+    // ── ConversionConfig.effectiveMinQuality ──
+
+    @Test
+    fun `effectiveMinQuality keeps the preset floor when start quality is above it`() {
+        val config = ConversionConfig.fromPreset(Preset.DISCORD)
+        assertEquals(70, config.startQuality)
+        assertEquals(50, config.effectiveMinQuality)
+    }
+
+    @Test
+    fun `effectiveMinQuality clamps to start quality when the user drops below the floor`() {
+        // The slider allows 30 while the Discord preset's floor is 50 — without the
+        // clamp the adaptive loop would run zero attempts and the conversion would fail.
+        val config = ConversionConfig.fromPreset(Preset.DISCORD).copy(startQuality = 30)
+        assertEquals(30, config.effectiveMinQuality)
+        assertTrue(config.startQuality >= config.effectiveMinQuality)
+    }
+
+    @Test
+    fun `effectiveMinQuality never exceeds start quality for any preset at slider minimum`() {
+        // 30 is the lowest value the quality slider in SettingsPanel can produce.
+        Preset.entries.forEach { preset ->
+            val config = ConversionConfig.fromPreset(preset).copy(startQuality = 30)
+            assertTrue(
+                "${preset.name} would run zero encode attempts",
+                config.startQuality >= config.effectiveMinQuality,
+            )
+        }
+    }
+
     // ── Preset.fromPreset ──
 
     @Test

@@ -5,8 +5,8 @@ import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
-import android.provider.OpenableColumns
 import androidx.exifinterface.media.ExifInterface
+import app.embeddy.util.FileInfoUtils
 import com.arthenica.ffmpegkit.FFprobeKit
 import com.arthenica.ffmpegkit.ReturnCode
 import kotlinx.coroutines.Dispatchers
@@ -15,6 +15,7 @@ import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import timber.log.Timber
 import java.io.File
+import java.util.Locale
 
 /**
  * Fetches and parses metadata from URLs (HTML meta tags via Jsoup) and
@@ -51,15 +52,8 @@ class MetadataEngine {
         val generalTags = linkedMapOf<String, String>()
         val mediaTags = linkedMapOf<String, String>()
 
-        // Query basic file info
-        val fileName = context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-            val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-            if (cursor.moveToFirst() && idx >= 0) cursor.getString(idx) else null
-        } ?: "Unknown"
-        val fileSize = context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-            val idx = cursor.getColumnIndex(OpenableColumns.SIZE)
-            if (cursor.moveToFirst() && idx >= 0) cursor.getLong(idx) else null
-        } ?: 0L
+        // Query basic file info (single cursor for both name and size)
+        val (fileName, fileSize) = FileInfoUtils.queryFileInfo(context, uri)
         val mimeType = context.contentResolver.getType(uri) ?: "unknown"
 
         generalTags["File Name"] = fileName
@@ -138,7 +132,7 @@ class MetadataEngine {
                 ?.toLongOrNull() ?: 0L
             if (frameCount > 0 && durationMs > 0) {
                 val fps = frameCount * 1000.0 / durationMs
-                mediaTags["FPS"] = String.format("%.2f", fps)
+                mediaTags["FPS"] = String.format(Locale.getDefault(), "%.2f", fps)
             }
         } catch (_: Exception) {
             // Not a valid media file for MediaMetadataRetriever
@@ -355,7 +349,8 @@ class MetadataEngine {
                                 val num = parts[0].toDoubleOrNull() ?: 0.0
                                 val den = parts[1].toDoubleOrNull() ?: 1.0
                                 if (den > 0) {
-                                    tags["${prefix}Frame Rate"] = String.format("%.3f fps", num / den)
+                                    tags["${prefix}Frame Rate"] =
+                                        String.format(Locale.getDefault(), "%.3f fps", num / den)
                                 }
                             }
                         }
@@ -365,7 +360,8 @@ class MetadataEngine {
                                 val num = parts[0].toDoubleOrNull() ?: 0.0
                                 val den = parts[1].toDoubleOrNull() ?: 1.0
                                 if (den > 0 && num > 0) {
-                                    tags["${prefix}Avg Frame Rate"] = String.format("%.3f fps", num / den)
+                                    tags["${prefix}Avg Frame Rate"] =
+                                        String.format(Locale.getDefault(), "%.3f fps", num / den)
                                 }
                             }
                         }
@@ -390,14 +386,19 @@ class MetadataEngine {
     /**
      * Probe keyframe positions using FFprobe -show_frames.
      * Reports count and interval summary (e.g. "12 keyframes, avg every 30 frames").
+     *
+     * Only the first [KEYFRAME_SAMPLE_SECONDS] of the file are analysed. `-show_frames`
+     * walks every packet in the stream, so probing a full-length video would block the
+     * Inspect tab for minutes and buffer the whole frame dump in memory.
      */
     private fun probeKeyframes(filePath: String): Map<String, String> {
         val tags = linkedMapOf<String, String>()
         try {
             // Use FFprobe to count keyframes — select only key frames, video stream
             val session = FFprobeKit.execute(
-                "-v quiet -select_streams v:0 -show_entries frame=key_frame,pict_type " +
-                "-of csv=p=0 \"$filePath\""
+                "-v quiet -read_intervals %+$KEYFRAME_SAMPLE_SECONDS " +
+                    "-select_streams v:0 -show_entries frame=key_frame,pict_type " +
+                    "-of csv=p=0 \"$filePath\""
             )
             if (!ReturnCode.isSuccess(session.returnCode)) return tags
 
@@ -420,13 +421,15 @@ class MetadataEngine {
             }
 
             if (keyCount > 0) {
-                tags["Keyframes"] = "$keyCount of $totalFrames frames"
+                tags["Keyframes"] =
+                    "$keyCount of $totalFrames frames (first ${KEYFRAME_SAMPLE_SECONDS}s)"
 
                 // Calculate average keyframe interval
                 if (keyPositions.size >= 2) {
                     val intervals = keyPositions.zipWithNext { a, b -> b - a }
                     val avgInterval = intervals.average()
-                    tags["Avg Keyframe Interval"] = String.format("%.1f frames", avgInterval)
+                    tags["Avg Keyframe Interval"] =
+                        String.format(Locale.getDefault(), "%.1f frames", avgInterval)
                 }
             }
         } catch (e: Exception) {
@@ -466,11 +469,11 @@ class MetadataEngine {
     companion object {
         private const val USER_AGENT = "Embeddy/1.0 (Link Preview Bot)"
 
-        private fun formatFileSize(bytes: Long): String = when {
-            bytes >= 1_000_000 -> String.format("%.1f MB", bytes / 1_000_000.0)
-            bytes >= 1_000 -> String.format("%.1f KB", bytes / 1_000.0)
-            else -> "$bytes B"
-        }
+        /** How much of the video to walk when sampling keyframe cadence. */
+        private const val KEYFRAME_SAMPLE_SECONDS = 30
+
+        private fun formatFileSize(bytes: Long): String =
+            FileInfoUtils.formatFileSize(bytes)
     }
 }
 

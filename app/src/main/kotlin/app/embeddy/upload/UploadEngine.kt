@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.exifinterface.media.ExifInterface
+import app.embeddy.util.FileInfoUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -189,8 +190,14 @@ class UploadEngine(private val context: Context) {
         mimeType: String,
         file: File,
     ) {
+        // Escape quotes and strip CR/LF — an unsanitized display name would otherwise
+        // let a malicious content provider inject extra multipart headers.
+        val safeFileName = fileName
+            .replace("\r", "")
+            .replace("\n", "")
+            .replace("\"", "'")
         val header = "--$boundary\r\n" +
-            "Content-Disposition: form-data; name=\"$fieldName\"; filename=\"$fileName\"\r\n" +
+            "Content-Disposition: form-data; name=\"$fieldName\"; filename=\"$safeFileName\"\r\n" +
             "Content-Type: $mimeType\r\n\r\n"
         output.write(header.toByteArray())
         file.inputStream().use { it.copyTo(output) }
@@ -215,7 +222,8 @@ class UploadEngine(private val context: Context) {
         mimeType in setOf("image/jpeg", "image/png", "image/webp", "image/heif", "image/heic")
 
     private fun copyToTemp(uri: Uri, fileName: String): File {
-        val tempFile = File(tempDir, "upload_${System.currentTimeMillis()}_$fileName")
+        val safeName = FileInfoUtils.sanitizeFileName(fileName)
+        val tempFile = File(tempDir, "upload_${System.currentTimeMillis()}_$safeName")
         context.contentResolver.openInputStream(uri)?.use { input ->
             tempFile.outputStream().use { output -> input.copyTo(output) }
         } ?: throw UploadException("Cannot read file")
