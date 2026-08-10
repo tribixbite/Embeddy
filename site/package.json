@@ -24,10 +24,14 @@
     "dev": "astro dev",
     "build": "astro check && astro build",
     "preview": "astro preview",
+    "test": "bun test src",
     "astro": "astro"
   },
   "optionalDependencies": {
     "@rollup/rollup-android-arm64": "^4.59.0"
   },
-  "type": "module"
+  "type": "module",
+  "devDependencies": {
+    "@types/bun": "1.3.14"
+  }
 }

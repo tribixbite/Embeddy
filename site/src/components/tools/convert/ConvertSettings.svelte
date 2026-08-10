@@ -12,17 +12,29 @@
     info,
     disabled = false,
     sourcePreviewUrl = "",
+    streamingMode = false,
     onconvert,
   }: {
     options: ConvertOptions;
     info: SourceInfo;
     disabled?: boolean;
     sourcePreviewUrl?: string;
+    /** True when frames are decoded lazily — the adaptive re-encode loop can't run */
+    streamingMode?: boolean;
     onconvert: () => void;
   } = $props();
 
   /** Show quality slider in lossy WebP mode or always for GIF */
   let showQuality = $derived(options.outputFormat === "gif" || !options.lossless);
+
+  /**
+   * The adaptive target-size loop re-encodes buffered frames at decreasing quality.
+   * It only applies to lossy WebP output from pre-decoded frames — showing the field
+   * in the other modes would promise behaviour the pipeline silently ignores.
+   */
+  let showTargetSize = $derived(
+    options.outputFormat === "webp" && !options.lossless && !streamingMode,
+  );
 
   /** Show target FPS control for video and WebP sources (GIFs have intrinsic timing) */
   let showFps = $derived(info.format === "video" || info.format === "webp");
@@ -91,31 +103,34 @@
     </div>
   {/if}
 
-  <!-- Target file size (optional) -->
-  <div>
-    <label class="mb-2 block text-xs font-medium text-white/40 uppercase tracking-wider">
-      Adaptive target size <span class="text-white/25">(MB, 0 = off)</span>
-    </label>
-    <input
-      type="number"
-      min="0"
-      max="100"
-      step="0.5"
-      value={options.targetSizeBytes > 0 ? +(options.targetSizeBytes / 1_000_000).toFixed(1) : ""}
-      oninput={(e) => {
-        const mb = parseFloat((e.target as HTMLInputElement).value);
-        options.targetSizeBytes = mb > 0 ? Math.round(mb * 1_000_000) : 0;
-      }}
-      {disabled}
-      placeholder="Off"
-      class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/80 placeholder:text-white/25 focus:border-brand-500/50 focus:outline-none"
-    />
-    {#if options.targetSizeBytes > 0}
-      <p class="mt-1 text-xs text-white/30">
-        Will re-encode at lower quality until output fits
-      </p>
-    {/if}
-  </div>
+  <!-- Target file size (lossy WebP from buffered frames only) -->
+  {#if showTargetSize}
+    <div>
+      <label for="cv-target-size" class="mb-2 block text-xs font-medium text-white/40 uppercase tracking-wider">
+        Adaptive target size <span class="text-white/25">(MB, 0 = off)</span>
+      </label>
+      <input
+        id="cv-target-size"
+        type="number"
+        min="0"
+        max="100"
+        step="0.5"
+        value={options.targetSizeBytes > 0 ? +(options.targetSizeBytes / 1_000_000).toFixed(1) : ""}
+        oninput={(e) => {
+          const mb = parseFloat((e.target as HTMLInputElement).value);
+          options.targetSizeBytes = mb > 0 ? Math.round(mb * 1_000_000) : 0;
+        }}
+        {disabled}
+        placeholder="Off"
+        class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/80 placeholder:text-white/25 focus:border-brand-500/50 focus:outline-none"
+      />
+      {#if options.targetSizeBytes > 0}
+        <p class="mt-1 text-xs text-white/30">
+          Will re-encode at lower quality until output fits
+        </p>
+      {/if}
+    </div>
+  {/if}
 
   <!-- Crop section -->
   <div>
@@ -477,8 +492,92 @@
             </div>
           </div>
 
+          <!-- Filter type -->
+          <div>
+            <span class="mb-2 block text-xs font-medium text-white/40 uppercase tracking-wider">
+              Filter type
+            </span>
+            <div class="flex gap-2">
+              {#each [{ v: 0, label: "Simple" }, { v: 1, label: "Strong" }] as opt}
+                <button
+                  type="button"
+                  aria-pressed={options.filterType === opt.v}
+                  class="rounded-lg px-3 py-1.5 text-xs font-medium transition-colors
+                    {options.filterType === opt.v
+                      ? 'bg-brand-500 text-white'
+                      : 'bg-white/5 text-white/50 hover:bg-white/10'}"
+                  onclick={() => { options.filterType = opt.v; }}
+                  {disabled}
+                >
+                  {opt.label}
+                </button>
+              {/each}
+            </div>
+            <p class="mt-1 text-xs text-white/30">Strong is slower but reduces blocking artifacts</p>
+          </div>
+
+          <!-- Alpha filtering -->
+          <div>
+            <span class="mb-2 block text-xs font-medium text-white/40 uppercase tracking-wider">
+              Alpha filtering
+            </span>
+            <div class="flex gap-2">
+              {#each [{ v: 0, label: "None" }, { v: 1, label: "Fast" }, { v: 2, label: "Best" }] as opt}
+                <button
+                  type="button"
+                  aria-pressed={options.alphaFiltering === opt.v}
+                  class="rounded-lg px-3 py-1.5 text-xs font-medium transition-colors
+                    {options.alphaFiltering === opt.v
+                      ? 'bg-brand-500 text-white'
+                      : 'bg-white/5 text-white/50 hover:bg-white/10'}"
+                  onclick={() => { options.alphaFiltering = opt.v; }}
+                  {disabled}
+                >
+                  {opt.label}
+                </button>
+              {/each}
+            </div>
+          </div>
+
+          <!-- Preprocessing -->
+          <div>
+            <span class="mb-2 block text-xs font-medium text-white/40 uppercase tracking-wider">
+              Preprocessing
+            </span>
+            <div class="flex flex-wrap gap-2">
+              {#each [{ v: 0, label: "None" }, { v: 1, label: "Segment smooth" }, { v: 2, label: "Dithering" }] as opt}
+                <button
+                  type="button"
+                  aria-pressed={options.preprocessing === opt.v}
+                  class="rounded-lg px-3 py-1.5 text-xs font-medium transition-colors
+                    {options.preprocessing === opt.v
+                      ? 'bg-brand-500 text-white'
+                      : 'bg-white/5 text-white/50 hover:bg-white/10'}"
+                  onclick={() => { options.preprocessing = opt.v; }}
+                  {disabled}
+                >
+                  {opt.label}
+                </button>
+              {/each}
+            </div>
+          </div>
+
           <!-- Checkbox toggles -->
           <div class="space-y-3">
+            <label class="flex cursor-pointer items-center gap-3">
+              <input
+                type="checkbox"
+                checked={options.alphaCompression === 1}
+                onchange={() => { options.alphaCompression = options.alphaCompression ? 0 : 1; }}
+                {disabled}
+                class="h-4 w-4 rounded border-white/20 bg-white/5 text-brand-500 accent-brand-500"
+              />
+              <div>
+                <span class="text-sm text-white/60">Compress alpha</span>
+                <p class="text-xs text-white/30">Lossless alpha compression — off stores the raw channel</p>
+              </div>
+            </label>
+
             <label class="flex cursor-pointer items-center gap-3">
               <input
                 type="checkbox"
@@ -577,8 +676,10 @@
     <span>{info.frameCount} frames</span>
     <span>{info.fps} fps</span>
     <span>{(info.totalDuration / 1000).toFixed(1)}s</span>
-    {#if info.frameCount >= 1500}
-      <span class="text-yellow-400/70">frame cap reached</span>
+    {#if info.frameCapped}
+      <span class="text-yellow-400/70" title="Decoding stopped at the memory budget — the output will be shorter than the source">
+        truncated at frame limit
+      </span>
     {/if}
   </div>
 

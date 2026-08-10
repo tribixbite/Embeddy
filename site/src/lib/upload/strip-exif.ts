@@ -4,13 +4,27 @@
  */
 
 /**
+ * Whether [stripExif] can actually remove metadata from this file.
+ *
+ * piexifjs only understands JPEG. PNG/WebP/HEIC can also carry EXIF, so the UI
+ * must not promise stripping for them — it would silently pass the file through
+ * with its GPS data intact.
+ */
+export function canStripExif(file: File): boolean {
+  return (
+    file.type === "image/jpeg" ||
+    file.type === "image/jpg" ||
+    /\.jpe?g$/.test(file.name.toLowerCase())
+  );
+}
+
+/**
  * Strip EXIF metadata from a JPEG file.
  * Returns a new File without EXIF data.
- * Non-JPEG files are returned as-is (EXIF is only in JPEG).
+ * Non-JPEG files are returned as-is (piexifjs only supports JPEG).
  */
 export async function stripExif(file: File): Promise<File> {
-  // Only JPEG files have EXIF data that piexifjs can handle
-  if (!file.type.startsWith("image/jpeg") && !file.name.toLowerCase().match(/\.jpe?g$/)) {
+  if (!canStripExif(file)) {
     return file;
   }
 

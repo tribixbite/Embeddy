@@ -46,7 +46,8 @@ export async function decodeVideo(
     const memoryMaxFrames = Math.max(30, Math.floor(memoryBudget / bytesPerFrame));
 
     const frameInterval = 1 / targetFps;
-    const totalFrames = Math.min(Math.floor(duration * targetFps), maxFrames, memoryMaxFrames);
+    const availableFrames = Math.floor(duration * targetFps);
+    const totalFrames = Math.min(availableFrames, maxFrames, memoryMaxFrames);
     const delayMs = Math.round(1000 / targetFps);
 
     // Canvas for frame capture
@@ -58,6 +59,9 @@ export async function decodeVideo(
       | OffscreenCanvasRenderingContext2D
       | CanvasRenderingContext2D;
     if (!ctx) throw new Error("Could not create canvas context");
+
+    // Frame 0 seeks to t=0, which never fires 'seeked' — make sure pixels exist first
+    await waitForFrameData(video);
 
     const frames: DecodedFrame[] = [];
 
@@ -92,12 +96,45 @@ export async function decodeVideo(
         totalDuration: Math.round(duration * 1000),
         fps: targetFps,
         format: "video",
+        // The memory budget can silently cut a long/high-res video short —
+        // surface it so the settings panel can warn instead of quietly truncating.
+        frameCapped: totalFrames < availableFrames,
       },
     };
   } finally {
     detachVideo(video);
     URL.revokeObjectURL(url);
   }
+}
+
+/**
+ * Wait until the video has decoded pixel data available for the current position.
+ *
+ * `loadedmetadata` only guarantees readyState >= HAVE_METADATA (1). Calling
+ * drawImage() at that point is a silent no-op, which produced a blank first frame
+ * because seekTo(0) short-circuits (currentTime is already 0, so no 'seeked' fires).
+ */
+function waitForFrameData(video: HTMLVideoElement): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (video.readyState >= 2 /* HAVE_CURRENT_DATA */) {
+      resolve();
+      return;
+    }
+    const cleanup = () => {
+      video.removeEventListener("loadeddata", onLoaded);
+      video.removeEventListener("error", onError);
+    };
+    const onLoaded = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = () => {
+      cleanup();
+      reject(new Error("Failed to decode video data"));
+    };
+    video.addEventListener("loadeddata", onLoaded);
+    video.addEventListener("error", onError);
+  });
 }
 
 /**
@@ -170,6 +207,10 @@ export async function probeVideo(
 
   const frameCount = Math.floor(duration * targetFps);
 
+  // Release the decoder now that metadata is read. The object URL stays valid —
+  // the caller reuses it for the crop preview and owns revoking it.
+  detachVideo(video);
+
   return {
     info: {
       width,
@@ -178,6 +219,7 @@ export async function probeVideo(
       totalDuration: Math.round(duration * 1000),
       fps: targetFps,
       format: "video",
+      frameCapped: false,
     },
     // Caller must call URL.revokeObjectURL(videoUrl) when done
     videoUrl: url,
@@ -259,6 +301,9 @@ export async function* streamDecodeVideo(
       outW = Math.round(outW * scale);
       outH = Math.round(outH * scale);
     }
+
+    // Frame 0 seeks to t=0, which never fires 'seeked' — make sure pixels exist first
+    await waitForFrameData(video);
 
     for (let i = 0; i < totalFrames; i++) {
       const seekTime = i * frameInterval;

@@ -28,7 +28,7 @@ export async function decodeWebP(
   // Prefer ImageDecoder API — gives direct per-frame access with proper timing
   if (typeof ImageDecoder !== "undefined") {
     try {
-      return await decodeWithImageDecoder(file, isAnimated, maxFrames, onProgress);
+      return await decodeWithImageDecoder(file, maxFrames, onProgress);
     } catch (e) {
       console.warn("ImageDecoder failed, falling back to canvas capture:", e);
     }
@@ -48,7 +48,6 @@ export async function decodeWebP(
  */
 async function decodeWithImageDecoder(
   file: File,
-  isAnimated: boolean,
   maxFrames: number,
   onProgress?: (p: ConvertProgress) => void,
 ): Promise<{ frames: DecodedFrame[]; info: SourceInfo }> {
@@ -64,7 +63,8 @@ async function decodeWithImageDecoder(
   if (!track) throw new Error("No image track found in WebP");
 
   // Memory-aware cap applied after first frame dimensions are known
-  let totalFrames = Math.min(track.frameCount, maxFrames);
+  const sourceFrames = track.frameCount;
+  let totalFrames = Math.min(sourceFrames, maxFrames);
   onProgress?.({ phase: "decoding", percent: 0, frame: 0, total: totalFrames });
 
   // Decode all frames to get dimensions from first frame
@@ -139,6 +139,7 @@ async function decodeWithImageDecoder(
       totalDuration,
       fps,
       format: "webp",
+      frameCapped: frames.length < sourceFrames,
     },
   };
 }
@@ -184,7 +185,15 @@ async function decodeWithCanvas(
       onProgress?.({ phase: "decoding", percent: 100, frame: 1, total: 1 });
       return {
         frames: [{ rgba: firstRgba, delay: 0 }],
-        info: { width, height, frameCount: 1, totalDuration: 0, fps: 0, format: "webp" },
+        info: {
+          width,
+          height,
+          frameCount: 1,
+          totalDuration: 0,
+          fps: 0,
+          format: "webp",
+          frameCapped: false,
+        },
       };
     }
 
@@ -235,7 +244,16 @@ async function decodeWithCanvas(
 
     return {
       frames,
-      info: { width, height, frameCount: frames.length, totalDuration, fps: targetFps, format: "webp" },
+      info: {
+        width,
+        height,
+        frameCount: frames.length,
+        totalDuration,
+        fps: targetFps,
+        format: "webp",
+        // The capture loop stops at maxFrames or MAX_CAPTURE_DURATION_S
+        frameCapped: frames.length >= maxFrames,
+      },
     };
   } finally {
     URL.revokeObjectURL(url);

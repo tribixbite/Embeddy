@@ -30,6 +30,11 @@
   /** Memory threshold for batch decode — above this, use streaming path */
   const BATCH_MEMORY_LIMIT = 512 * 1024 * 1024; // 512 MB
 
+  /** Quality decrement per attempt when an adaptive target size is set */
+  const ADAPTIVE_QUALITY_STEP = 10;
+  /** Lowest quality the adaptive loop will try before giving up */
+  const ADAPTIVE_MIN_QUALITY = 5;
+
   let state: State = $state("idle");
   let error = $state("");
   let sourceFile: File | null = $state(null);
@@ -165,6 +170,11 @@
         frames = decoded.frames;
         sourceInfo = decoded.info;
         options.outputFormat = "gif";
+        // Match the GIF branch: default to the source's own rate so the output
+        // preserves timing instead of silently dropping frames to the 10 fps default.
+        if (decoded.info.fps > 0) {
+          options.targetFps = Math.min(30, Math.max(1, Math.round(decoded.info.fps)));
+        }
       } else if (file.type.startsWith("video/")) {
         // Probe first to decide batch vs streaming
         const { info, videoUrl } = await probeVideo(file, options.targetFps);
@@ -368,12 +378,16 @@
         // Large video: lazy decode + encode one frame at a time
         blob = await streamingConvert(options);
       } else if (streamingMode && options.outputFormat === "gif") {
-        // GIF from large video: decode capped frames then GIF-encode
+        // GIF from large video: decode capped frames then GIF-encode.
+        // The frames come back already sampled at options.targetFps, so pass that
+        // as the source FPS — sourceInfo.fps is the value probed before the user
+        // touched the slider and would make encodeAnimatedGif subsample a second time.
         const decoded = await decodeVideo(sourceFile!, options.targetFps, 300, (p) => { progress = p; });
         frames = decoded.frames;
+        sourceInfo = decoded.info;
         blob = await encodeAnimatedGif(
-          frames, sourceInfo.width, sourceInfo.height,
-          options, sourceInfo.fps, (p) => { progress = p; },
+          frames, decoded.info.width, decoded.info.height,
+          options, decoded.info.fps, (p) => { progress = p; },
         );
       } else if (options.outputFormat === "gif") {
         // GIF output from pre-decoded frames
@@ -387,19 +401,17 @@
           encodeFramesWebP(frames, sourceInfo!.width, sourceInfo!.height, opts, sourceInfo!.fps);
 
         if (options.targetSizeBytes > 0 && !options.lossless) {
-          // Adaptive quality: reduce quality until output fits target
-          const qualityStep = 10;
-          const minQuality = 5;
+          // Adaptive quality: reduce quality until output fits target.
+          // Always encode at least once — the slider goes down to 1, so a
+          // `while (quality >= MIN)` guard could skip the loop entirely.
           let quality = options.quality;
-          let bestBlob: Blob | null = null;
-
-          while (quality >= minQuality) {
-            blob = await encode({ ...options, quality });
-            bestBlob = blob;
-            if (blob.size <= options.targetSizeBytes) break;
-            quality -= qualityStep;
-          }
-          blob = bestBlob!;
+          let attempt: Blob;
+          do {
+            attempt = await encode({ ...options, quality });
+            if (attempt.size <= options.targetSizeBytes) break;
+            quality -= ADAPTIVE_QUALITY_STEP;
+          } while (quality >= ADAPTIVE_MIN_QUALITY);
+          blob = attempt;
         } else {
           blob = await encode(options);
         }
@@ -481,6 +493,7 @@
       info={sourceInfo}
       disabled={state === "converting"}
       {sourcePreviewUrl}
+      {streamingMode}
       onconvert={handleConvert}
     />
 

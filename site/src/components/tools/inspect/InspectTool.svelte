@@ -67,7 +67,10 @@
         if (webpMeta.exifBytes) {
           try {
             const exifr = await import("exifr");
-            const exifParsed = await exifr.parse(webpMeta.exifBytes.buffer, {
+            // Pass the Uint8Array view, not `.buffer` — the view is a window into the
+            // whole file, so `.buffer` would hand exifr the RIFF header at offset 0
+            // instead of the EXIF chunk.
+            const exifParsed = await exifr.parse(webpMeta.exifBytes, {
               translateValues: true,
             });
             if (exifParsed) {

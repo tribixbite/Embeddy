@@ -18,3 +18,15 @@ output/
 tools/aapt2-arm64/
 /tools/
 !site/src/**/tools/
+
+# Node / Astro
+node_modules/
+.astro/
+dist/
+site/dist/
+
+# Kotlin incremental compilation metadata
+.kotlin/
+
+# Literal "~" dirs created by the bun-on-termux wrapper's HOME handling
+**/~/

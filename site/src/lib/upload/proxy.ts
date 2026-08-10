@@ -8,6 +8,14 @@ import type { UploadHost, UploadResult, UploadProgress } from "./types";
 /** Base URL for the Cloudflare Worker API */
 const API_BASE = "https://api.embeddy.link";
 
+/** Handle returned alongside the upload promise so the caller can cancel. */
+export interface UploadHandle {
+  /** Resolves with the hosted URL, or rejects on error/cancellation. */
+  result: Promise<UploadResult>;
+  /** Abort the in-flight request. */
+  cancel: () => void;
+}
+
 /**
  * Upload a file via the CF Worker relay.
  * Uses XMLHttpRequest for upload progress events.
@@ -16,9 +24,10 @@ export function uploadFile(
   file: File,
   host: UploadHost,
   onProgress?: (progress: UploadProgress) => void,
-): Promise<UploadResult> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
+): UploadHandle {
+  const xhr = new XMLHttpRequest();
+
+  const result = new Promise<UploadResult>((resolve, reject) => {
     const startTime = Date.now();
 
     const formData = new FormData();
@@ -39,19 +48,28 @@ export function uploadFile(
     });
 
     xhr.addEventListener("load", () => {
+      let payload: { url?: string; error?: string } | null = null;
+      try {
+        payload = JSON.parse(xhr.responseText);
+      } catch {
+        payload = null;
+      }
+
       if (xhr.status >= 200 && xhr.status < 300) {
-        try {
-          const data = JSON.parse(xhr.responseText);
-          resolve({
-            url: data.url,
-            host,
-            durationMs: Date.now() - startTime,
-          });
-        } catch {
+        if (!payload?.url) {
           reject(new Error("Invalid response from server"));
+          return;
         }
+        resolve({
+          url: payload.url,
+          host,
+          durationMs: Date.now() - startTime,
+        });
       } else {
-        reject(new Error(xhr.responseText || `Upload failed (HTTP ${xhr.status})`));
+        // The relay returns { error } — surface that rather than raw JSON
+        reject(
+          new Error(payload?.error || `Upload failed (HTTP ${xhr.status})`),
+        );
       }
     });
 
@@ -65,4 +83,6 @@ export function uploadFile(
 
     xhr.send(formData);
   });
+
+  return { result, cancel: () => xhr.abort() };
 }

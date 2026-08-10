@@ -34,6 +34,11 @@ export interface SourceInfo {
   fps: number;
   /** Source format */
   format: "gif" | "video" | "webp";
+  /**
+   * True when the decoder stopped early because of the frame/memory budget,
+   * so `frameCount` is less than the source actually contains.
+   */
+  frameCapped: boolean;
 }
 
 /** Encoding options for the output */

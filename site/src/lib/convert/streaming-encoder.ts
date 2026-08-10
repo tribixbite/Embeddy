@@ -39,12 +39,15 @@ export class StreamingWebPEncoder {
     return new Promise<void>((resolve, reject) => {
       this.rejectActive = reject;
       const handler = (e: MessageEvent<FromWorker>) => {
-        this.rejectActive = undefined;
         if (e.data.type === "ready") {
+          this.rejectActive = undefined;
           this.worker!.removeEventListener("message", handler);
           resolve();
         } else if (e.data.type === "error") {
+          this.rejectActive = undefined;
           this.worker!.removeEventListener("message", handler);
+          // A Worker that failed to initialise is unusable — don't leak it
+          this.terminate();
           reject(new Error(e.data.message));
         }
       };
@@ -74,8 +77,8 @@ export class StreamingWebPEncoder {
     return new Promise<void>((resolve, reject) => {
       this.rejectActive = reject;
       const handler = (e: MessageEvent<FromWorker>) => {
-        this.rejectActive = undefined;
         if (e.data.type === "pushed") {
+          this.rejectActive = undefined;
           this.worker!.removeEventListener("message", handler);
           this.pushedFrames++;
 
@@ -90,7 +93,10 @@ export class StreamingWebPEncoder {
 
           resolve();
         } else if (e.data.type === "error") {
+          this.rejectActive = undefined;
           this.worker!.removeEventListener("message", handler);
+          // The WASM encoder released its state on error — the Worker can't continue
+          this.terminate();
           reject(new Error(e.data.message));
         }
       };
@@ -114,6 +120,7 @@ export class StreamingWebPEncoder {
     return new Promise<Blob>((resolve, reject) => {
       this.rejectActive = reject;
       const handler = (e: MessageEvent<FromWorker>) => {
+        if (e.data.type !== "encoded" && e.data.type !== "error") return;
         this.rejectActive = undefined;
         if (e.data.type === "encoded") {
           this.worker!.removeEventListener("message", handler);

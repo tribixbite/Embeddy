@@ -102,11 +102,17 @@ export function parseWebP(buffer: ArrayBuffer): WebPMetadata {
 
   while (offset + 8 <= fileSize) {
     const chunkId = readFourCC(dv, offset);
-    const chunkSize = dv.getUint32(offset + 4, true); // little-endian
+    const declaredSize = dv.getUint32(offset + 4, true); // little-endian
     const dataStart = offset + 8;
 
-    // Chunks are padded to even byte boundaries
-    const nextChunk = dataStart + chunkSize + (chunkSize % 2);
+    // A truncated or hostile file can declare a chunk larger than the data that
+    // actually follows. Clamp before reading — DataView/Uint8Array both throw
+    // RangeError past the end, which would abort the whole inspection.
+    const chunkSize = Math.min(declaredSize, fileSize - dataStart);
+
+    // Chunks are padded to even byte boundaries (use the declared size so the
+    // walk stays aligned with the container's own layout)
+    const nextChunk = dataStart + declaredSize + (declaredSize % 2);
 
     switch (chunkId) {
       case "VP8X": {
@@ -230,9 +236,9 @@ export function parseWebP(buffer: ArrayBuffer): WebPMetadata {
       // ICCP, ALPH — we just note their presence (already tracked via VP8X flags)
     }
 
+    // Guard against a malformed size that fails to advance the cursor
+    if (nextChunk <= offset) break;
     offset = nextChunk;
-    // Safety: bail if we're stuck or past end
-    if (nextChunk <= offset - 1 && nextChunk !== offset) break;
   }
 
   // If no ANMF frames found but not animated, it's a still image
