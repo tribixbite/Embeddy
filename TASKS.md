@@ -53,9 +53,88 @@
   - ViewModels auto-restore on init, persist on every setting change
   - Trim values excluded from persistence (per-file, not user preferences)
 
+## Phase 5: Full Audit (2026-08-10)
+
+Audit of the Android app, the Astro site and the Cloudflare Worker.
+
+### Android — correctness
+- [x] **5.1** ConversionEngine ran zero encode attempts when `startQuality` was below
+  the preset's `minQuality` (slider allows 30, Discord's floor is 50), so every
+  conversion failed with "no output from FFmpeg". Added `effectiveMinQuality`.
+- [x] **5.2** FFmpeg `-ss`/`-to`/`trim` timestamps used the default locale, emitting
+  `1,500` on comma-decimal devices. Pinned to `Locale.US`.
+- [x] **5.3** `cancelPreview()` restored from SavedStateHandle, which can be empty and
+  left the UI stuck on the spinner. `Previewing` now carries `previousReady`.
+- [x] **5.4** Preview failures silently reverted to an unchanged Ready card; they now
+  surface the reason via `Ready.notice`.
+- [x] **5.5** `startPreview()` now merges overlapping segments like `startConversion()`.
+- [x] **5.6** SquooshEngine read the original size from `InputStream.available()`
+  (an estimate), skewing `savingsPercent`. Prefer the provider's SIZE column.
+- [x] **5.7** `centerCrop` could throw when truncation left the scaled bitmap a pixel
+  short of the crop rect.
+
+### Android — security & resources
+- [x] **5.8** `DISPLAY_NAME` is provider-controlled and flowed unsanitized into
+  `File(dir, name)` and multipart headers. Added `FileInfoUtils.sanitizeFileName`.
+- [x] **5.9** `probeKeyframes` walked every packet in the file, hanging Inspect on
+  long videos. Samples the first 30s via `-read_intervals`.
+- [x] **5.10** CleanupWorker missed `upload_temp` and `inspect_temp`.
+- [x] **5.11** SettingsRepository dropped `minQuality`, `qualityStep` and exact dims.
+- [x] **5.12** No `launchMode`, so `onNewIntent` never fired and a share while running
+  started a second activity. Set `singleTask`; a share now also surfaces Convert.
+- [x] **5.13** `splits.abi.include()` without `reset()` built 9 APKs instead of 4;
+  five had no FFmpeg `.so` files and would crash on first conversion.
+
+### Web — Convert pipeline
+- [x] **5.14** Adaptive target-size loop dereferenced a null blob below quality 5.
+- [x] **5.15** Video frame 0 was blank — `seekTo(0)` short-circuits, so `drawImage`
+  ran at readyState 1. Verified against a pre-fix build (mean luma 0.0 → 123.7).
+- [x] **5.16** Large-video → GIF subsampled twice (half speed, half the frames).
+- [x] **5.17** `decodeGif` had no memory cap (a long 1080p GIF is ~8 GB of RGBA) and
+  blocked the main thread so progress never painted.
+- [x] **5.18** Implemented GIF disposal method 3 (restore to previous).
+- [x] **5.19** `SourceInfo.frameCapped` replaces the `frameCount >= 1500` guess.
+- [x] **5.20** Target-size field hidden in the modes that ignore it.
+- [x] **5.21** StreamingWebPEncoder leaked its Worker on init/push failure.
+- [x] **5.22** Exposed the 4 encoder flags that had no UI: filter type, alpha
+  filtering, alpha compression, preprocessing.
+
+### Web — Inspect & Upload
+- [x] **5.23** exifr received the whole file instead of the EXIF chunk view, so WebP
+  EXIF was parsed from the RIFF header.
+- [x] **5.24** `parseWebP` read chunk payloads using the declared size — a truncated
+  file threw RangeError and aborted the inspection.
+- [x] **5.25** Added the host size pre-check the app already had, plus upload cancel.
+- [x] **5.26** EXIF stripping is JPEG-only but the toggle showed for every image.
+
+### Worker
+- [x] **5.27** SSRF: `redirect: "follow"` let an allowed URL 302 to a private IP.
+  Redirects are now followed manually with every hop revalidated; the blocklist
+  covers IPv6, CGNAT, bare-integer/hex IPv4 encodings and URL credentials.
+- [x] **5.28** `/api/inspect` buffered the whole upstream body (now 2 MB cap);
+  `/api/upload` rejects oversized bodies up front.
+- [x] **5.29** Header comment claimed rate limiting that was never implemented.
+
+### Site
+- [x] **5.30** Service worker precached extensionless shell paths that GitHub Pages
+  301s, breaking offline deep links. Also guards non-GET and cross-origin.
+- [x] **5.31** `softwareVersion` was hardcoded; now read from version.properties.
+
+### Tests added
+- 63 Android unit tests (was 47) — `FileInfoUtilsTest`, quality-floor regressions
+- 32 Worker SSRF tests (`bun test` in worker/)
+- 10 site WebP-parser tests (`bun test` in site/)
+- Browser E2E: GIF→WebP, GIF→GIF, WebM→WebP, MP4→WebP all produce valid output
+
 ## Compromises / Known Issues
 
-- No unit tests yet (engine logic, metadata parsing)
-- No logging framework (Timber etc)
-- Cleanup functions only run on init, not scheduled
-- Tab state lost on process death
+- **Not verified on-device**: no ADB device was reachable during the audit
+  (wireless debugging off), so the Android fixes are covered by unit tests and
+  compilation only. The share-intent routing (5.12), preview-cancel (5.3) and
+  quality-floor (5.1) fixes should be smoke-tested on hardware.
+- Site/worker have no CI test step yet — `bun test` must be run manually.
+- Web upload has no resume; a cancelled upload restarts from zero.
+- `decodeWithCanvas` (WebP fallback for browsers without ImageDecoder) still
+  relies on timed capture and can miss frames in background tabs.
+- FFmpeg-kit is archived upstream and its FFmpeg 6.0 build cannot decode
+  animated WebP, so the Android Convert tab accepts only video and GIF input.
