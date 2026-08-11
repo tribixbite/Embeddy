@@ -18,7 +18,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Gate the deploy on the site's own tests — a broken build should never ship.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install
+        working-directory: site
+        run: bun install --frozen-lockfile
+
+      - name: Unit tests
+        working-directory: site
+        run: bun test src
+
+      - name: Typecheck
+        working-directory: site
+        run: bunx astro check
+
   build:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

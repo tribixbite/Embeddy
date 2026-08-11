@@ -48,6 +48,8 @@
   const HANDLE_SIZE = 12;
   const HANDLE_HIT = 22;
 
+  const ASPECT_MODES: AspectMode[] = ["free", "1:1", "16:9", "4:3", "custom"];
+
   /** Handle positions for rendering (normalized 0-1) */
   let handles = $derived.by(() => {
     const { x, y, w, h } = crop;
@@ -205,22 +207,32 @@
 
 <!-- Aspect ratio chips -->
 <div class="mb-3 flex flex-wrap items-center gap-2">
-  <span class="text-xs font-medium text-white/40 uppercase tracking-wider">Aspect</span>
-  {#each ["free", "1:1", "16:9", "4:3", "custom"] as mode}
-    <button
-      class="rounded-lg px-3 py-1 text-xs font-medium transition-colors
-        {aspectMode === mode
-          ? 'bg-brand-500 text-white'
-          : 'bg-white/5 text-white/50 hover:bg-white/10'}"
-      onclick={() => applyAspect(mode as AspectMode)}
-      {disabled}
-    >
-      {mode === "free" ? "Free" : mode === "custom" ? "Custom" : mode}
-    </button>
-  {/each}
+  <span id="crop-aspect-label" class="text-xs font-medium text-white/40 uppercase tracking-wider">
+    Aspect
+  </span>
+  <div role="radiogroup" aria-labelledby="crop-aspect-label" class="flex flex-wrap gap-2">
+    {#each ASPECT_MODES as mode}
+      <button
+        type="button"
+        role="radio"
+        aria-checked={aspectMode === mode}
+        tabindex={aspectMode === mode ? 0 : -1}
+        class="rounded-lg px-3 py-1 text-xs font-medium transition-colors
+          {aspectMode === mode
+            ? 'bg-brand-500 text-white'
+            : 'bg-white/5 text-white/50 hover:bg-white/10'}"
+        onclick={() => applyAspect(mode)}
+        {disabled}
+      >
+        {mode === "free" ? "Free" : mode === "custom" ? "Custom" : mode}
+      </button>
+    {/each}
+  </div>
   {#if aspectMode === "custom"}
     <div class="flex items-center gap-1">
+      <label class="sr-only" for="crop-aspect-w">Custom aspect width</label>
       <input
+        id="crop-aspect-w"
         type="number"
         min="1"
         max="99"
@@ -229,8 +241,10 @@
         class="w-12 rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-center text-xs text-white/70"
         {disabled}
       />
-      <span class="text-xs text-white/30">:</span>
+      <span class="text-xs text-white/30" aria-hidden="true">:</span>
+      <label class="sr-only" for="crop-aspect-h">Custom aspect height</label>
       <input
+        id="crop-aspect-h"
         type="number"
         min="1"
         max="99"

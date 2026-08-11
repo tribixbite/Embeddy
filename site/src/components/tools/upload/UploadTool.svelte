@@ -24,6 +24,8 @@
   let stripExifEnabled = $state(true);
   /** Active upload, kept so the user can cancel mid-transfer */
   let activeUpload: UploadHandle | null = null;
+  /** Shown while an automatic retry is in flight */
+  let retryNotice = $state("");
 
   /** Size limit for the selected host — checked before spending bandwidth */
   let hostLimit = $derived(HOST_LIMITS[host]);
@@ -70,10 +72,17 @@
 
     state = "uploading";
     progress = { loaded: 0, total: fileToUpload.size, percent: 0 };
+    retryNotice = "";
 
-    const handle = uploadFile(fileToUpload, host, (p) => {
-      progress = p;
-    });
+    const handle = uploadFile(
+      fileToUpload,
+      host,
+      (p) => { progress = p; },
+      (attempt, total) => {
+        retryNotice = `Connection failed — retrying (attempt ${attempt} of ${total})`;
+        progress = { loaded: 0, total: fileToUpload.size, percent: 0 };
+      },
+    );
     activeUpload = handle;
 
     try {
@@ -93,6 +102,7 @@
     activeUpload = null;
     state = selectedFile ? "ready" : "idle";
     error = "";
+    retryNotice = "";
     progress = { loaded: 0, total: 0, percent: 0 };
   }
 
@@ -171,6 +181,9 @@
     </div>
   {:else if state === "uploading"}
     <UploadProgressBar {progress} />
+    {#if retryNotice}
+      <p class="text-center text-xs text-yellow-400/70" role="status">{retryNotice}</p>
+    {/if}
     <button
       onclick={cancelUpload}
       class="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-medium text-white/60 transition-colors hover:bg-white/10"

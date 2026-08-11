@@ -1,0 +1,85 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  worker:
+    name: Worker (SSRF + typecheck)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install
+        working-directory: worker
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        working-directory: worker
+        run: bun run typecheck
+
+      - name: Unit tests
+        working-directory: worker
+        run: bun test
+
+  site:
+    name: Site (unit tests + astro check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install
+        working-directory: site
+        run: bun install --frozen-lockfile
+
+      - name: Unit tests
+        working-directory: site
+        run: bun test src
+
+      # astro check also generates .astro/types.d.ts, so it must run after install
+      - name: Typecheck
+        working-directory: site
+        run: bunx astro check
+
+  android:
+    name: Android unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Unit tests
+        run: ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
+
+      - name: Upload test report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-test-report
+          path: app/build/reports/tests/testDebugUnitTest/
+          retention-days: 7

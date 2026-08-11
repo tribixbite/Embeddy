@@ -41,6 +41,11 @@ jobs:
           echo "version_name=${VERSION_MAJOR}.${VERSION_MINOR}.${BUILD_NUM}" >> "$GITHUB_OUTPUT"
           echo "version_code=$((VERSION_MAJOR * 10000 + VERSION_MINOR * 100 + BUILD_NUM))" >> "$GITHUB_OUTPUT"
 
+      # Run the unit tests before producing artifacts — a failing suite should
+      # block the release rather than be discovered after the tag exists.
+      - name: Unit tests
+        run: ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
+
       - name: Build Release APKs
         env:
           BUILD_NUMBER: ${{ github.run_number }}

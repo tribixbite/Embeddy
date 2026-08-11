@@ -2,10 +2,17 @@
   /**
    * Settings panel for the Convert tool.
    * Output format selector, quality, crop overlay, max dimension,
-   * target FPS, loop count, lossless toggle.
+   * target FPS, loop count, lossless toggle, and the full libwebp flag set.
+   *
+   * Controls are built from RangeField/NumberField/ToggleGroup so every input
+   * carries a real label association and the segmented groups expose radiogroup
+   * semantics.
    */
   import type { ConvertOptions, SourceInfo } from "../../../lib/convert/types";
   import CropOverlay from "./CropOverlay.svelte";
+  import RangeField from "../shared/RangeField.svelte";
+  import NumberField from "../shared/NumberField.svelte";
+  import ToggleGroup from "../shared/ToggleGroup.svelte";
 
   let {
     options = $bindable(),
@@ -54,82 +61,78 @@
       options.crop = null;
     }
   }
+
+  /** Target size is edited in MB but stored in bytes */
+  let targetSizeMb = $derived(
+    options.targetSizeBytes > 0 ? +(options.targetSizeBytes / 1_000_000).toFixed(1) : 0,
+  );
+  function setTargetSizeMb(mb: number) {
+    options.targetSizeBytes = mb > 0 ? Math.round(mb * 1_000_000) : 0;
+  }
+
+  /** libwebp int-as-bool fields render as checkboxes but store 0/1 */
+  function toggleFlag(current: number): number {
+    return current ? 0 : 1;
+  }
+
+  const FORMAT_OPTIONS = [
+    { value: "webp" as const, label: "WebP" },
+    { value: "gif" as const, label: "GIF" },
+  ];
+  const FILTER_TYPE_OPTIONS = [
+    { value: 0, label: "Simple" },
+    { value: 1, label: "Strong" },
+  ];
+  const ALPHA_FILTER_OPTIONS = [
+    { value: 0, label: "None" },
+    { value: 1, label: "Fast" },
+    { value: 2, label: "Best" },
+  ];
+  const PREPROCESSING_OPTIONS = [
+    { value: 0, label: "None" },
+    { value: 1, label: "Segment smooth" },
+    { value: 2, label: "Dithering" },
+  ];
 </script>
 
 <div class="space-y-5 rounded-2xl border border-white/8 bg-white/[0.03] p-5">
-  <!-- Output format -->
-  <div>
-    <label class="mb-2 block text-xs font-medium text-white/40 uppercase tracking-wider">
-      Output Format
-    </label>
-    <div class="flex gap-2">
-      {#each ["webp", "gif"] as fmt}
-        <button
-          class="rounded-lg px-4 py-2 text-sm font-medium transition-colors
-            {options.outputFormat === fmt
-              ? 'bg-brand-500 text-white'
-              : 'bg-white/5 text-white/50 hover:bg-white/10'}"
-          onclick={() => { options.outputFormat = fmt as "webp" | "gif"; }}
-          {disabled}
-        >
-          {fmt.toUpperCase()}
-        </button>
-      {/each}
-    </div>
-  </div>
+  <ToggleGroup
+    label="Output format"
+    bind:value={options.outputFormat}
+    options={FORMAT_OPTIONS}
+    {disabled}
+  />
 
-  <!-- Quality slider -->
   {#if showQuality}
-    <div>
-      <div class="mb-2 flex items-center justify-between">
-        <label class="text-xs font-medium text-white/40 uppercase tracking-wider">
-          {options.outputFormat === "gif" ? "Color quality" : "Quality"}
-        </label>
-        <span class="text-sm font-mono text-white/60">{options.quality}</span>
-      </div>
-      <input
-        type="range"
-        min="1"
-        max="100"
-        step="1"
-        bind:value={options.quality}
-        {disabled}
-        class="w-full accent-brand-500"
-      />
-      <div class="mt-1 flex justify-between text-xs text-white/30">
-        <span>{options.outputFormat === "gif" ? "Fewer colors" : "Smallest"}</span>
-        <span>{options.outputFormat === "gif" ? "More colors" : "Best quality"}</span>
-      </div>
-    </div>
+    <RangeField
+      id="cv-quality"
+      label={options.outputFormat === "gif" ? "Color quality" : "Quality"}
+      bind:value={options.quality}
+      min={1}
+      max={100}
+      {disabled}
+      minHint={options.outputFormat === "gif" ? "Fewer colors" : "Smallest"}
+      maxHint={options.outputFormat === "gif" ? "More colors" : "Best quality"}
+    />
   {/if}
 
   <!-- Target file size (lossy WebP from buffered frames only) -->
   {#if showTargetSize}
-    <div>
-      <label for="cv-target-size" class="mb-2 block text-xs font-medium text-white/40 uppercase tracking-wider">
-        Adaptive target size <span class="text-white/25">(MB, 0 = off)</span>
-      </label>
-      <input
-        id="cv-target-size"
-        type="number"
-        min="0"
-        max="100"
-        step="0.5"
-        value={options.targetSizeBytes > 0 ? +(options.targetSizeBytes / 1_000_000).toFixed(1) : ""}
-        oninput={(e) => {
-          const mb = parseFloat((e.target as HTMLInputElement).value);
-          options.targetSizeBytes = mb > 0 ? Math.round(mb * 1_000_000) : 0;
-        }}
-        {disabled}
-        placeholder="Off"
-        class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/80 placeholder:text-white/25 focus:border-brand-500/50 focus:outline-none"
-      />
-      {#if options.targetSizeBytes > 0}
-        <p class="mt-1 text-xs text-white/30">
-          Will re-encode at lower quality until output fits
-        </p>
-      {/if}
-    </div>
+    <NumberField
+      id="cv-target-size"
+      label="Adaptive target size"
+      hint=" (MB, 0 = off)"
+      value={targetSizeMb}
+      onchange={setTargetSizeMb}
+      min={0}
+      max={100}
+      step={0.5}
+      {disabled}
+      placeholder="Off"
+      help={options.targetSizeBytes > 0
+        ? "Will re-encode at lower quality until output fits"
+        : undefined}
+    />
   {/if}
 
   <!-- Crop section -->
@@ -164,122 +167,72 @@
     {/if}
   </div>
 
-  <!-- Max dimension -->
-  <div>
-    <label class="mb-2 block text-xs font-medium text-white/40 uppercase tracking-wider">
-      Max dimension <span class="text-white/25">(0 = no resize)</span>
-    </label>
-    <input
-      type="number"
-      min="0"
-      max="4096"
-      step="1"
-      bind:value={options.maxDimension}
-      {disabled}
-      placeholder="0"
-      class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/80 placeholder:text-white/25 focus:border-brand-500/50 focus:outline-none"
-    />
-  </div>
+  <NumberField
+    id="cv-max-dimension"
+    label="Max dimension"
+    hint=" (0 = no resize)"
+    bind:value={options.maxDimension}
+    min={0}
+    max={4096}
+    {disabled}
+  />
 
-  <!-- Target FPS (video/WebP only) -->
   {#if showFps}
-    <div>
-      <div class="mb-2 flex items-center justify-between">
-        <label class="text-xs font-medium text-white/40 uppercase tracking-wider">
-          Target FPS
-        </label>
-        <span class="text-sm font-mono text-white/60">{options.targetFps}</span>
-      </div>
-      <input
-        type="range"
-        min="1"
-        max="30"
-        step="1"
-        bind:value={options.targetFps}
-        {disabled}
-        class="w-full accent-brand-500"
-      />
-      <div class="mt-1 flex justify-between text-xs text-white/30">
-        <span>1 fps</span>
-        <span>30 fps</span>
-      </div>
-    </div>
+    <RangeField
+      id="cv-fps"
+      label="Target FPS"
+      bind:value={options.targetFps}
+      min={1}
+      max={30}
+      {disabled}
+      display={`${options.targetFps}`}
+      minHint="1 fps"
+      maxHint="30 fps"
+    />
   {/if}
 
-  <!-- Loop count -->
-  <div>
-    <label class="mb-2 block text-xs font-medium text-white/40 uppercase tracking-wider">
-      Loop count <span class="text-white/25">(0 = infinite)</span>
-    </label>
-    <input
-      type="number"
-      min="0"
-      max="65535"
-      step="1"
-      bind:value={options.loops}
-      {disabled}
-      placeholder="0"
-      class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/80 placeholder:text-white/25 focus:border-brand-500/50 focus:outline-none"
-    />
-  </div>
+  <NumberField
+    id="cv-loops"
+    label="Loop count"
+    hint=" (0 = infinite)"
+    bind:value={options.loops}
+    min={0}
+    max={65535}
+    {disabled}
+  />
 
   <!-- WebP-only settings -->
   {#if options.outputFormat === "webp"}
-    <!-- Compression effort slider -->
-    <div>
-      <div class="mb-2 flex items-center justify-between">
-        <label class="text-xs font-medium text-white/40 uppercase tracking-wider">
-          Compression effort
-        </label>
-        <span class="text-sm font-mono text-white/60">{options.method}</span>
-      </div>
-      <input
-        type="range"
-        min="0"
-        max="6"
-        step="1"
-        bind:value={options.method}
-        {disabled}
-        class="w-full accent-brand-500"
-      />
-      <div class="mt-1 flex justify-between text-xs text-white/30">
-        <span>Fastest</span>
-        <span>Smallest</span>
-      </div>
-    </div>
+    <RangeField
+      id="cv-method"
+      label="Compression effort"
+      bind:value={options.method}
+      min={0}
+      max={6}
+      {disabled}
+      minHint="Fastest"
+      maxHint="Smallest"
+    />
 
-    <!-- Keyframe interval -->
     <div class="grid grid-cols-2 gap-3">
-      <div>
-        <label class="mb-2 block text-xs font-medium text-white/40 uppercase tracking-wider">
-          Kf min <span class="text-white/25">(0 = auto)</span>
-        </label>
-        <input
-          type="number"
-          min="0"
-          max="9999"
-          step="1"
-          bind:value={options.kmin}
-          {disabled}
-          placeholder="0"
-          class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/80 placeholder:text-white/25 focus:border-brand-500/50 focus:outline-none"
-        />
-      </div>
-      <div>
-        <label class="mb-2 block text-xs font-medium text-white/40 uppercase tracking-wider">
-          Kf max <span class="text-white/25">(0 = auto)</span>
-        </label>
-        <input
-          type="number"
-          min="0"
-          max="9999"
-          step="1"
-          bind:value={options.kmax}
-          {disabled}
-          placeholder="0"
-          class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/80 placeholder:text-white/25 focus:border-brand-500/50 focus:outline-none"
-        />
-      </div>
+      <NumberField
+        id="cv-kmin"
+        label="Kf min"
+        hint=" (0 = auto)"
+        bind:value={options.kmin}
+        min={0}
+        max={9999}
+        {disabled}
+      />
+      <NumberField
+        id="cv-kmax"
+        label="Kf max"
+        hint=" (0 = auto)"
+        bind:value={options.kmax}
+        min={0}
+        max={9999}
+        {disabled}
+      />
       <p class="col-span-2 -mt-1 text-xs text-white/30">
         Keyframe distance — lower = more keyframes, larger file, better seeking
       </p>
@@ -344,223 +297,113 @@
         onclick={() => { advancedOpen = !advancedOpen; }}
         class="flex w-full items-center gap-2 text-xs font-medium text-white/40 uppercase tracking-wider hover:text-white/60 transition-colors"
         aria-expanded={advancedOpen}
+        aria-controls="cv-advanced"
         {disabled}
       >
-        <span class="inline-block transition-transform duration-150 {advancedOpen ? 'rotate-90' : ''}">&rsaquo;</span>
+        <span class="inline-block transition-transform duration-150 {advancedOpen ? 'rotate-90' : ''}" aria-hidden="true">&rsaquo;</span>
         Advanced
       </button>
 
       {#if advancedOpen}
-        <div class="mt-4 space-y-5">
-          <!-- SNS strength -->
-          <div>
-            <div class="mb-2 flex items-center justify-between">
-              <label class="text-xs font-medium text-white/40 uppercase tracking-wider">
-                SNS strength
-              </label>
-              <span class="text-sm font-mono text-white/60">{options.snsStrength}</span>
-            </div>
-            <input
-              type="range" min="0" max="100" step="1"
-              bind:value={options.snsStrength}
-              {disabled}
-              class="w-full accent-brand-500"
-            />
-            <div class="mt-1 flex justify-between text-xs text-white/30">
-              <span>Off</span>
-              <span>Aggressive</span>
-            </div>
-          </div>
+        <div id="cv-advanced" class="mt-4 space-y-5">
+          <RangeField
+            id="cv-sns"
+            label="SNS strength"
+            bind:value={options.snsStrength}
+            min={0}
+            max={100}
+            {disabled}
+            minHint="Off"
+            maxHint="Aggressive"
+          />
 
-          <!-- Filter strength -->
-          <div>
-            <div class="mb-2 flex items-center justify-between">
-              <label class="text-xs font-medium text-white/40 uppercase tracking-wider">
-                Filter strength
-              </label>
-              <span class="text-sm font-mono text-white/60">{options.filterStrength}</span>
-            </div>
-            <input
-              type="range" min="0" max="100" step="1"
-              bind:value={options.filterStrength}
-              {disabled}
-              class="w-full accent-brand-500"
-            />
-            <div class="mt-1 flex justify-between text-xs text-white/30">
-              <span>No deblocking</span>
-              <span>Strong</span>
-            </div>
-          </div>
+          <RangeField
+            id="cv-filter-strength"
+            label="Filter strength"
+            bind:value={options.filterStrength}
+            min={0}
+            max={100}
+            {disabled}
+            minHint="No deblocking"
+            maxHint="Strong"
+          />
 
-          <!-- Filter sharpness -->
-          <div>
-            <div class="mb-2 flex items-center justify-between">
-              <label class="text-xs font-medium text-white/40 uppercase tracking-wider">
-                Filter sharpness
-              </label>
-              <span class="text-sm font-mono text-white/60">{options.filterSharpness}</span>
-            </div>
-            <input
-              type="range" min="0" max="7" step="1"
-              bind:value={options.filterSharpness}
-              {disabled}
-              class="w-full accent-brand-500"
-            />
-            <div class="mt-1 flex justify-between text-xs text-white/30">
-              <span>Smooth</span>
-              <span>Sharp</span>
-            </div>
-          </div>
+          <RangeField
+            id="cv-filter-sharpness"
+            label="Filter sharpness"
+            bind:value={options.filterSharpness}
+            min={0}
+            max={7}
+            {disabled}
+            minHint="Smooth"
+            maxHint="Sharp"
+          />
 
-          <!-- Alpha quality -->
-          <div>
-            <div class="mb-2 flex items-center justify-between">
-              <label class="text-xs font-medium text-white/40 uppercase tracking-wider">
-                Alpha quality
-              </label>
-              <span class="text-sm font-mono text-white/60">{options.alphaQuality}</span>
-            </div>
-            <input
-              type="range" min="0" max="100" step="1"
-              bind:value={options.alphaQuality}
-              {disabled}
-              class="w-full accent-brand-500"
-            />
-            <div class="mt-1 flex justify-between text-xs text-white/30">
-              <span>Smallest</span>
-              <span>Best alpha</span>
-            </div>
-          </div>
+          <RangeField
+            id="cv-alpha-quality"
+            label="Alpha quality"
+            bind:value={options.alphaQuality}
+            min={0}
+            max={100}
+            {disabled}
+            minHint="Smallest"
+            maxHint="Best alpha"
+          />
 
-          <!-- Near lossless -->
-          <div>
-            <div class="mb-2 flex items-center justify-between">
-              <label class="text-xs font-medium text-white/40 uppercase tracking-wider">
-                Near lossless
-              </label>
-              <span class="text-sm font-mono text-white/60">{options.nearLossless}</span>
-            </div>
-            <input
-              type="range" min="0" max="100" step="1"
-              bind:value={options.nearLossless}
-              {disabled}
-              class="w-full accent-brand-500"
-            />
-            <div class="mt-1 flex justify-between text-xs text-white/30">
-              <span>Smaller lossless</span>
-              <span>100 = off</span>
-            </div>
-          </div>
+          <RangeField
+            id="cv-near-lossless"
+            label="Near lossless"
+            bind:value={options.nearLossless}
+            min={0}
+            max={100}
+            {disabled}
+            minHint="Smaller lossless"
+            maxHint="100 = off"
+          />
 
-          <!-- Passes -->
-          <div>
-            <div class="mb-2 flex items-center justify-between">
-              <label class="text-xs font-medium text-white/40 uppercase tracking-wider">
-                Passes
-              </label>
-              <span class="text-sm font-mono text-white/60">{options.passes}</span>
-            </div>
-            <input
-              type="range" min="1" max="10" step="1"
-              bind:value={options.passes}
-              {disabled}
-              class="w-full accent-brand-500"
-            />
-            <div class="mt-1 flex justify-between text-xs text-white/30">
-              <span>Fast</span>
-              <span>Smallest</span>
-            </div>
-          </div>
+          <RangeField
+            id="cv-passes"
+            label="Passes"
+            bind:value={options.passes}
+            min={1}
+            max={10}
+            {disabled}
+            minHint="Fast"
+            maxHint="Smallest"
+          />
 
-          <!-- Segments -->
-          <div>
-            <div class="mb-2 flex items-center justify-between">
-              <label class="text-xs font-medium text-white/40 uppercase tracking-wider">
-                Segments
-              </label>
-              <span class="text-sm font-mono text-white/60">{options.segments}</span>
-            </div>
-            <input
-              type="range" min="1" max="4" step="1"
-              bind:value={options.segments}
-              {disabled}
-              class="w-full accent-brand-500"
-            />
-            <div class="mt-1 flex justify-between text-xs text-white/30">
-              <span>1 (fast)</span>
-              <span>4 (best)</span>
-            </div>
-          </div>
+          <RangeField
+            id="cv-segments"
+            label="Segments"
+            bind:value={options.segments}
+            min={1}
+            max={4}
+            {disabled}
+            minHint="1 (fast)"
+            maxHint="4 (best)"
+          />
 
-          <!-- Filter type -->
-          <div>
-            <span class="mb-2 block text-xs font-medium text-white/40 uppercase tracking-wider">
-              Filter type
-            </span>
-            <div class="flex gap-2">
-              {#each [{ v: 0, label: "Simple" }, { v: 1, label: "Strong" }] as opt}
-                <button
-                  type="button"
-                  aria-pressed={options.filterType === opt.v}
-                  class="rounded-lg px-3 py-1.5 text-xs font-medium transition-colors
-                    {options.filterType === opt.v
-                      ? 'bg-brand-500 text-white'
-                      : 'bg-white/5 text-white/50 hover:bg-white/10'}"
-                  onclick={() => { options.filterType = opt.v; }}
-                  {disabled}
-                >
-                  {opt.label}
-                </button>
-              {/each}
-            </div>
-            <p class="mt-1 text-xs text-white/30">Strong is slower but reduces blocking artifacts</p>
-          </div>
+          <ToggleGroup
+            label="Filter type"
+            bind:value={options.filterType}
+            options={FILTER_TYPE_OPTIONS}
+            {disabled}
+            help="Strong is slower but reduces blocking artifacts"
+          />
 
-          <!-- Alpha filtering -->
-          <div>
-            <span class="mb-2 block text-xs font-medium text-white/40 uppercase tracking-wider">
-              Alpha filtering
-            </span>
-            <div class="flex gap-2">
-              {#each [{ v: 0, label: "None" }, { v: 1, label: "Fast" }, { v: 2, label: "Best" }] as opt}
-                <button
-                  type="button"
-                  aria-pressed={options.alphaFiltering === opt.v}
-                  class="rounded-lg px-3 py-1.5 text-xs font-medium transition-colors
-                    {options.alphaFiltering === opt.v
-                      ? 'bg-brand-500 text-white'
-                      : 'bg-white/5 text-white/50 hover:bg-white/10'}"
-                  onclick={() => { options.alphaFiltering = opt.v; }}
-                  {disabled}
-                >
-                  {opt.label}
-                </button>
-              {/each}
-            </div>
-          </div>
+          <ToggleGroup
+            label="Alpha filtering"
+            bind:value={options.alphaFiltering}
+            options={ALPHA_FILTER_OPTIONS}
+            {disabled}
+          />
 
-          <!-- Preprocessing -->
-          <div>
-            <span class="mb-2 block text-xs font-medium text-white/40 uppercase tracking-wider">
-              Preprocessing
-            </span>
-            <div class="flex flex-wrap gap-2">
-              {#each [{ v: 0, label: "None" }, { v: 1, label: "Segment smooth" }, { v: 2, label: "Dithering" }] as opt}
-                <button
-                  type="button"
-                  aria-pressed={options.preprocessing === opt.v}
-                  class="rounded-lg px-3 py-1.5 text-xs font-medium transition-colors
-                    {options.preprocessing === opt.v
-                      ? 'bg-brand-500 text-white'
-                      : 'bg-white/5 text-white/50 hover:bg-white/10'}"
-                  onclick={() => { options.preprocessing = opt.v; }}
-                  {disabled}
-                >
-                  {opt.label}
-                </button>
-              {/each}
-            </div>
-          </div>
+          <ToggleGroup
+            label="Preprocessing"
+            bind:value={options.preprocessing}
+            options={PREPROCESSING_OPTIONS}
+            {disabled}
+          />
 
           <!-- Checkbox toggles -->
           <div class="space-y-3">
@@ -568,7 +411,7 @@
               <input
                 type="checkbox"
                 checked={options.alphaCompression === 1}
-                onchange={() => { options.alphaCompression = options.alphaCompression ? 0 : 1; }}
+                onchange={() => { options.alphaCompression = toggleFlag(options.alphaCompression); }}
                 {disabled}
                 class="h-4 w-4 rounded border-white/20 bg-white/5 text-brand-500 accent-brand-500"
               />
@@ -582,7 +425,7 @@
               <input
                 type="checkbox"
                 checked={options.autofilter === 1}
-                onchange={() => { options.autofilter = options.autofilter ? 0 : 1; }}
+                onchange={() => { options.autofilter = toggleFlag(options.autofilter); }}
                 {disabled}
                 class="h-4 w-4 rounded border-white/20 bg-white/5 text-brand-500 accent-brand-500"
               />
@@ -596,7 +439,7 @@
               <input
                 type="checkbox"
                 checked={options.sharpYuv === 1}
-                onchange={() => { options.sharpYuv = options.sharpYuv ? 0 : 1; }}
+                onchange={() => { options.sharpYuv = toggleFlag(options.sharpYuv); }}
                 {disabled}
                 class="h-4 w-4 rounded border-white/20 bg-white/5 text-brand-500 accent-brand-500"
               />
@@ -610,7 +453,7 @@
               <input
                 type="checkbox"
                 checked={options.lowMemory === 1}
-                onchange={() => { options.lowMemory = options.lowMemory ? 0 : 1; }}
+                onchange={() => { options.lowMemory = toggleFlag(options.lowMemory); }}
                 {disabled}
                 class="h-4 w-4 rounded border-white/20 bg-white/5 text-brand-500 accent-brand-500"
               />
@@ -624,7 +467,7 @@
               <input
                 type="checkbox"
                 checked={options.emulateJpegSize === 1}
-                onchange={() => { options.emulateJpegSize = options.emulateJpegSize ? 0 : 1; }}
+                onchange={() => { options.emulateJpegSize = toggleFlag(options.emulateJpegSize); }}
                 {disabled}
                 class="h-4 w-4 rounded border-white/20 bg-white/5 text-brand-500 accent-brand-500"
               />
@@ -635,32 +478,26 @@
             </label>
           </div>
 
-          <!-- Number inputs -->
           <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="mb-2 block text-xs font-medium text-white/40 uppercase tracking-wider">
-                Encoder target size <span class="text-white/25">(bytes)</span>
-              </label>
-              <input
-                type="number" min="0" step="1000"
-                bind:value={options.targetSize}
-                {disabled}
-                placeholder="0 = off"
-                class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/80 placeholder:text-white/25 focus:border-brand-500/50 focus:outline-none"
-              />
-            </div>
-            <div>
-              <label class="mb-2 block text-xs font-medium text-white/40 uppercase tracking-wider">
-                Partition limit <span class="text-white/25">(0 = off)</span>
-              </label>
-              <input
-                type="number" min="0" max="100" step="1"
-                bind:value={options.partitionLimit}
-                {disabled}
-                placeholder="0"
-                class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/80 placeholder:text-white/25 focus:border-brand-500/50 focus:outline-none"
-              />
-            </div>
+            <NumberField
+              id="cv-encoder-target"
+              label="Encoder target size"
+              hint=" (bytes)"
+              bind:value={options.targetSize}
+              min={0}
+              step={1000}
+              {disabled}
+              placeholder="0 = off"
+            />
+            <NumberField
+              id="cv-partition-limit"
+              label="Partition limit"
+              hint=" (0 = off)"
+              bind:value={options.partitionLimit}
+              min={0}
+              max={100}
+              {disabled}
+            />
             <p class="col-span-2 -mt-1 text-xs text-white/30">
               Encoder hint — may not be met exactly. Partition limit allows quality degradation to fit partitions
             </p>
