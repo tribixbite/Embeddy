@@ -50,6 +50,7 @@ import app.embeddy.ui.components.OutputPreviewCard
 import app.embeddy.ui.components.PreviewCard
 import app.embeddy.ui.components.SettingsPanel
 import app.embeddy.ui.components.VideoTrimPlayer
+import app.embeddy.util.FileInfoUtils
 import app.embeddy.util.SizeEstimation
 import app.embeddy.viewmodel.InspectViewModel
 import app.embeddy.viewmodel.MainViewModel
@@ -270,7 +271,11 @@ private fun ReadyCard(
 
             Spacer(Modifier.height(8.dp))
 
-            val sizeMb = String.format("%.1f MB", state.fileSize / 1_000_000.0)
+            // Some providers report a NULL size column, which would otherwise render
+            // as a misleading "0.0 MB" for a multi-megabyte file.
+            val sizeLabel = if (state.fileSize > 0) {
+                FileInfoUtils.formatFileSize(state.fileSize)
+            } else "Unknown size"
             val duration = if (state.durationMs > 0) {
                 val secs = state.durationMs / 1000
                 "${secs / 60}m ${secs % 60}s"
@@ -278,7 +283,7 @@ private fun ReadyCard(
             val resolution = if (state.width > 0) "${state.width}x${state.height}" else "N/A"
 
             Text(
-                text = "$sizeMb · $resolution · $duration",
+                text = "$sizeLabel · $resolution · $duration",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
