@@ -166,7 +166,7 @@
           options.targetFps = Math.round(decoded.info.fps);
         }
       } else if (isWebP(file)) {
-        const decoded = await decodeWebP(file, options.targetFps, 1500, (p) => { progress = p; });
+        const decoded = await decodeWebP(file, 1500, (p) => { progress = p; });
         frames = decoded.frames;
         sourceInfo = decoded.info;
         options.outputFormat = "gif";

@@ -1,13 +1,12 @@
 /**
  * Decode animated/static WebP files into RGBA frames.
  * Primary: WebCodecs ImageDecoder API (reliable per-frame access).
- * Fallback: <img> + canvas timed capture for older browsers.
+ * Fallback: split the RIFF container and decode each frame as a still image —
+ * used on Firefox, which ships no ImageDecoder.
  */
 
 import type { DecodedFrame, SourceInfo, ConvertProgress } from "./types";
-
-/** Maximum capture duration in seconds to prevent runaway loops (canvas fallback) */
-const MAX_CAPTURE_DURATION_S = 30;
+import { splitAnimatedWebP, type WebPFrame } from "./webp-frames";
 
 /**
  * Decode a WebP file into RGBA frames.
@@ -18,24 +17,27 @@ const MAX_CAPTURE_DURATION_S = 30;
  */
 export async function decodeWebP(
   file: File,
-  targetFps = 10,
   maxFrames = 1500,
   onProgress?: (p: ConvertProgress) => void,
 ): Promise<{ frames: DecodedFrame[]; info: SourceInfo }> {
-  // Detect animation from RIFF header before choosing decode path
-  const isAnimated = await detectAnimatedFromHeader(file);
-
   // Prefer ImageDecoder API — gives direct per-frame access with proper timing
   if (typeof ImageDecoder !== "undefined") {
     try {
       return await decodeWithImageDecoder(file, maxFrames, onProgress);
     } catch (e) {
-      console.warn("ImageDecoder failed, falling back to canvas capture:", e);
+      console.warn("ImageDecoder failed, falling back to container split:", e);
     }
   }
 
-  // Fallback: canvas capture (unreliable for animated WebP in some contexts)
-  return decodeWithCanvas(file, isAnimated, targetFps, maxFrames, onProgress);
+  // Fallback (Firefox): split the container and decode each frame as a still.
+  const buffer = await file.arrayBuffer();
+  const frameSet = splitAnimatedWebP(buffer);
+  if (frameSet) {
+    return decodeFromContainer(frameSet, maxFrames, onProgress);
+  }
+
+  // Not animated (or unparseable) — decode as a single still image
+  return decodeStill(file, onProgress);
 }
 
 // ---------------------------------------------------------------------------
@@ -145,175 +147,133 @@ async function decodeWithImageDecoder(
 }
 
 // ---------------------------------------------------------------------------
-// Canvas capture fallback — for browsers without ImageDecoder
+// Container-split fallback — for browsers without ImageDecoder (Firefox)
 // ---------------------------------------------------------------------------
 
 /**
- * Decode WebP using <img> element drawn to canvas at timed intervals.
- * Unreliable for animated WebP when the browser isn't actively rendering
- * the image animation (e.g. background tabs, automated testing).
+ * Composite frames extracted from the RIFF container.
+ *
+ * Each ANMF frame is decoded independently as a still image, then drawn onto a
+ * persistent canvas honouring its offset, blend method and disposal method —
+ * the same model GIF uses. Frame timing comes from the container, so nothing
+ * depends on the browser actually animating an <img>.
  */
-async function decodeWithCanvas(
-  file: File,
-  isAnimated: boolean,
-  targetFps: number,
+async function decodeFromContainer(
+  frameSet: NonNullable<ReturnType<typeof splitAnimatedWebP>>,
   maxFrames: number,
   onProgress?: (p: ConvertProgress) => void,
 ): Promise<{ frames: DecodedFrame[]; info: SourceInfo }> {
-  const url = URL.createObjectURL(file);
+  const { width, height } = frameSet;
 
-  try {
-    const img = await loadImage(url);
-    const { naturalWidth: width, naturalHeight: height } = img;
-    if (!width || !height) throw new Error("Could not determine WebP dimensions");
+  // Same 512 MB RGBA budget the other decoders use
+  const bytesPerFrame = width * height * 4;
+  const memoryMax = Math.max(30, Math.floor((512 * 1024 * 1024) / bytesPerFrame));
+  const limit = Math.min(frameSet.frames.length, maxFrames, memoryMax);
 
-    const canvas =
-      typeof OffscreenCanvas !== "undefined"
-        ? new OffscreenCanvas(width, height)
-        : createFallbackCanvas(width, height);
-    const ctx = canvas.getContext("2d") as
-      | OffscreenCanvasRenderingContext2D
-      | CanvasRenderingContext2D;
-    if (!ctx) throw new Error("Could not create canvas context");
+  const canvas =
+    typeof OffscreenCanvas !== "undefined"
+      ? new OffscreenCanvas(width, height)
+      : createFallbackCanvas(width, height);
+  const ctx = canvas.getContext("2d") as
+    | OffscreenCanvasRenderingContext2D
+    | CanvasRenderingContext2D;
+  if (!ctx) throw new Error("Could not create canvas context");
 
-    // Capture first frame
-    ctx.drawImage(img, 0, 0, width, height);
-    const firstFrameData = ctx.getImageData(0, 0, width, height);
-    const firstRgba = new Uint8Array(firstFrameData.data.buffer);
+  const frames: DecodedFrame[] = [];
+  let totalDuration = 0;
 
-    if (!isAnimated) {
-      onProgress?.({ phase: "decoding", percent: 100, frame: 1, total: 1 });
-      return {
-        frames: [{ rgba: firstRgba, delay: 0 }],
-        info: {
-          width,
-          height,
-          frameCount: 1,
-          totalDuration: 0,
-          fps: 0,
-          format: "webp",
-          frameCapped: false,
-        },
-      };
+  for (let i = 0; i < limit; i++) {
+    const frame: WebPFrame = frameSet.frames[i]!;
+
+    onProgress?.({
+      phase: "decoding",
+      percent: Math.round((i / limit) * 100),
+      frame: i + 1,
+      total: limit,
+    });
+
+    const bitmap = await createImageBitmap(
+      new Blob([frame.bytes as unknown as BlobPart], { type: "image/webp" }),
+    );
+
+    // "replace" overwrites the region outright; "blend" composites with alpha
+    if (frame.blend === "replace") {
+      ctx.clearRect(frame.x, frame.y, frame.width, frame.height);
     }
+    ctx.drawImage(bitmap, frame.x, frame.y);
+    bitmap.close();
 
-    // Animated: capture frames at targetFps via timed intervals
-    const delayMs = Math.round(1000 / targetFps);
-    const frames: DecodedFrame[] = [{ rgba: firstRgba, delay: delayMs }];
-    let totalDuration = delayMs;
-    let duplicateCount = 0;
-    const maxDuplicates = targetFps * 2; // 2s of identical frames → stop
+    const composited = ctx.getImageData(0, 0, width, height);
+    // WebP frame durations of 0 render as fast as possible; match the 20ms
+    // floor the GIF decoder applies so downstream FPS math stays sane.
+    const delay = Math.max(frame.duration, 20);
+    frames.push({ rgba: new Uint8Array(composited.data.buffer), delay });
+    totalDuration += delay;
 
-    onProgress?.({ phase: "decoding", percent: 0, frame: 1, total: maxFrames });
-
-    for (let i = 1; i < maxFrames; i++) {
-      await sleep(delayMs);
-      ctx.clearRect(0, 0, width, height);
-      ctx.drawImage(img, 0, 0, width, height);
-      const frameData = ctx.getImageData(0, 0, width, height);
-      const rgba = new Uint8Array(frameData.data.buffer);
-
-      if (framesEqual(rgba, frames[frames.length - 1].rgba)) {
-        duplicateCount++;
-        if (duplicateCount >= maxDuplicates) break;
-      } else {
-        duplicateCount = 0;
-      }
-
-      frames.push({ rgba, delay: delayMs });
-      totalDuration += delayMs;
-
-      onProgress?.({
-        phase: "decoding",
-        percent: Math.round((i / maxFrames) * 100),
-        frame: i + 1,
-        total: maxFrames,
-      });
-
-      if (totalDuration >= MAX_CAPTURE_DURATION_S * 1000) break;
+    if (frame.dispose === "background") {
+      ctx.clearRect(frame.x, frame.y, frame.width, frame.height);
     }
-
-    // Trim trailing duplicate frames
-    while (
-      frames.length > 1 &&
-      framesEqual(frames[frames.length - 1].rgba, frames[frames.length - 2].rgba)
-    ) {
-      frames.pop();
-      totalDuration -= delayMs;
-    }
-
-    return {
-      frames,
-      info: {
-        width,
-        height,
-        frameCount: frames.length,
-        totalDuration,
-        fps: targetFps,
-        format: "webp",
-        // The capture loop stops at maxFrames or MAX_CAPTURE_DURATION_S
-        frameCapped: frames.length >= maxFrames,
-      },
-    };
-  } finally {
-    URL.revokeObjectURL(url);
   }
+
+  const fps =
+    frames.length > 1 && totalDuration > 0
+      ? Math.round((frames.length / totalDuration) * 1000)
+      : 0;
+
+  return {
+    frames,
+    info: {
+      width,
+      height,
+      frameCount: frames.length,
+      totalDuration,
+      fps,
+      format: "webp",
+      frameCapped: limit < frameSet.frames.length,
+    },
+  };
+}
+
+/** Decode a non-animated WebP as a single frame. */
+async function decodeStill(
+  file: File,
+  onProgress?: (p: ConvertProgress) => void,
+): Promise<{ frames: DecodedFrame[]; info: SourceInfo }> {
+  const bitmap = await createImageBitmap(file);
+  const { width, height } = bitmap;
+
+  const canvas =
+    typeof OffscreenCanvas !== "undefined"
+      ? new OffscreenCanvas(width, height)
+      : createFallbackCanvas(width, height);
+  const ctx = canvas.getContext("2d") as
+    | OffscreenCanvasRenderingContext2D
+    | CanvasRenderingContext2D;
+  if (!ctx) throw new Error("Could not create canvas context");
+
+  ctx.drawImage(bitmap, 0, 0);
+  bitmap.close();
+
+  const imageData = ctx.getImageData(0, 0, width, height);
+  onProgress?.({ phase: "decoding", percent: 100, frame: 1, total: 1 });
+
+  return {
+    frames: [{ rgba: new Uint8Array(imageData.data.buffer), delay: 0 }],
+    info: {
+      width,
+      height,
+      frameCount: 1,
+      totalDuration: 0,
+      fps: 0,
+      format: "webp",
+      frameCapped: false,
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/** Load an image element and wait for it to be fully decoded */
-function loadImage(src: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error("Failed to load WebP image"));
-    img.src = src;
-  });
-}
-
-/**
- * Detect if a WebP is animated by parsing the RIFF container header.
- * Animated WebPs have a VP8X chunk where bit 1 of the flags byte is set.
- */
-async function detectAnimatedFromHeader(file: File): Promise<boolean> {
-  try {
-    // VP8X chunk starts at byte 12: "RIFF" (4) + size (4) + "WEBP" (4)
-    // VP8X chunk: "VP8X" (4) + chunk_size (4) + flags (4)
-    // Animation flag is bit 1 (0x02) of the flags byte at offset 20
-    const header = new Uint8Array(await file.slice(0, 21).arrayBuffer());
-    const riff = String.fromCharCode(header[0], header[1], header[2], header[3]);
-    const webp = String.fromCharCode(header[8], header[9], header[10], header[11]);
-    if (riff === "RIFF" && webp === "WEBP") {
-      const chunkId = String.fromCharCode(header[12], header[13], header[14], header[15]);
-      if (chunkId === "VP8X") {
-        return (header[20] & 0x02) !== 0;
-      }
-      // No VP8X chunk → simple lossy/lossless WebP, not animated
-      return false;
-    }
-  } catch (_) {
-    // Header parsing failed — assume not animated
-  }
-  return false;
-}
-
-/** Fast pixel-level equality check (samples every 100th pixel for speed) */
-function framesEqual(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i += 400) {
-    if (a[i] !== b[i] || a[i + 1] !== b[i + 1] || a[i + 2] !== b[i + 2]) {
-      return false;
-    }
-  }
-  return true;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 function createFallbackCanvas(w: number, h: number): HTMLCanvasElement {
   const c = document.createElement("canvas");
