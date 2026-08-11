@@ -148,11 +148,35 @@ real, then re-checked on the fixed build.
 Device left with the fixed debug build installed; per-app locale reset, test
 media deleted, foreground app restored.
 
+## Phase 6: Closing the Known Gaps (2026-08-11)
+
+- [x] **6.1** CI ran no tests at all. Added a Tests workflow (worker, site,
+  Android); `pages.yml` gates the deploy on the site suite and `release.yml`
+  runs the unit tests before building APKs.
+- [x] **6.2** Accessibility: 28 labels in the Convert panel, one associated.
+  Extracted `RangeField`/`NumberField`/`ToggleGroup` (698 → 535 lines) so the
+  fix lives in one place. Segmented selectors are now radiogroups with
+  `aria-checked` and arrow-key navigation. Verified in-browser: 26 controls all
+  resolve an accessible name, 4/4 groups named, 10/10 radios expose state.
+- [x] **6.3** Upload retry with linear backoff, 4xx classified as permanent so
+  an oversized file fails immediately. Writing the tests caught a bug: cancelling
+  before the first XHR registered reported the underlying error and never aborted.
+- [x] **6.4** Animated WebP no longer decoded by timed capture. `splitAnimatedWebP`
+  re-wraps each ANMF chunk as a still image; verified against the reference
+  decoder — 0/2304000 pixels differ on a 30-frame lossy file.
+- [x] **6.5** Android accepts animated WebP via the same container-splitting
+  technique plus the FFmpeg concat demuxer, working around ffmpeg-kit's inability
+  to demux the format. Verified on device: 30 frames in, 30 frames out.
+
 ## Compromises / Known Issues
 
-- Site/worker have no CI test step yet — `bun test` must be run manually.
-- Web upload has no resume; a cancelled upload restarts from zero.
-- `decodeWithCanvas` (WebP fallback for browsers without ImageDecoder) still
-  relies on timed capture and can miss frames in background tabs.
-- FFmpeg-kit is archived upstream and its FFmpeg 6.0 build cannot decode
-  animated WebP, so the Android Convert tab accepts only video and GIF input.
+- **Web upload cannot resume.** 0x0.st and catbox.moe expose no resumable
+  protocol (no tus, no `Range` PUT), so an interrupted transfer has to restart.
+  Mitigated with automatic retry, but a genuine resume needs a different host.
+- **Animated-WebP alpha differs by ≤4/255 from the reference decoder** on
+  translucent pixels, in the browsers that use the fallback path. This is canvas
+  premultiplied-alpha rounding — every opaque pixel is bit-identical and the
+  delta persists across all `premultiplyAlpha` modes — not a parsing error.
+- **Android WebP frame timing is rounded to milliseconds** by the FFmpeg concat
+  script (3 decimal places on seconds), so a 30-frame clip can drift ~30ms overall.
+- The Android Convert tab still can't read animated AVIF; no decoder is bundled.
