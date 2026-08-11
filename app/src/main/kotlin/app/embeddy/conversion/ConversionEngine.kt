@@ -41,6 +41,14 @@ class ConversionEngine(private val context: Context) {
      * Throws [IllegalStateException] if both probes fail.
      */
     suspend fun probeInput(uri: Uri): MediaInfo = withContext(Dispatchers.IO) {
+        // Animated WebP first — neither MediaMetadataRetriever nor this FFmpeg
+        // build reports its real frame count or duration.
+        try {
+            probeAnimatedWebP(uri)?.let { return@withContext it }
+        } catch (e: Exception) {
+            Timber.w(e, "Animated WebP probe failed for %s", uri)
+        }
+
         // Try MediaMetadataRetriever first (fast, no temp file needed)
         try {
             return@withContext probeWithRetriever(uri)
@@ -58,6 +66,27 @@ class ConversionEngine(private val context: Context) {
         // Both probes failed — throw so the UI can show a meaningful error
         throw IllegalStateException(
             "Cannot read media info: file may be corrupted, unsupported, or inaccessible"
+        )
+    }
+
+    /**
+     * Probe an animated WebP straight from its RIFF container.
+     * Returns null for anything that isn't one.
+     */
+    private fun probeAnimatedWebP(uri: Uri): MediaInfo? {
+        val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            ?: return null
+        if (!WebPFrameSplitter.isAnimatedWebP(bytes)) return null
+        val frameSet = WebPFrameSplitter.split(bytes) ?: return null
+
+        return MediaInfo(
+            width = frameSet.width,
+            height = frameSet.height,
+            durationMs = frameSet.totalDurationMs.toLong(),
+            bitrate = 0,
+            rotation = 0,
+            mimeType = "image/webp",
+            frameCount = frameSet.frames.size,
         )
     }
 
@@ -152,6 +181,16 @@ class ConversionEngine(private val context: Context) {
         val safeName = FileInfoUtils.sanitizeFileName(outputName, fallback = "output")
         val finalOutput = File(cacheDir, "${safeName}_embeddy.webp")
 
+        // Animated WebP can't be demuxed by this FFmpeg build — pre-decode it to
+        // a PNG sequence and feed that in via the concat demuxer instead.
+        val frameDir = File(tempDir, "frames_${UUID.randomUUID()}").also { it.mkdirs() }
+        val extracted = try {
+            extractAnimatedWebP(inputFile, frameDir)
+        } catch (e: Exception) {
+            Timber.w(e, "Animated WebP extraction failed, falling back to direct decode")
+            null
+        }
+
         var quality = config.startQuality
         val minQuality = config.effectiveMinQuality
         var attempt = 1
@@ -193,6 +232,7 @@ class ConversionEngine(private val context: Context) {
                     outputPath = tempOutput.absolutePath,
                     config = config,
                     quality = quality,
+                    concatScript = extracted?.concatScript,
                 )
                 Timber.d("FFmpeg command (q=%d): %s", quality, command)
 
@@ -285,6 +325,7 @@ class ConversionEngine(private val context: Context) {
         } finally {
             tempOutput.delete()
             inputFile.delete()
+            frameDir.deleteRecursively()
         }
 
         close()
@@ -357,8 +398,16 @@ class ConversionEngine(private val context: Context) {
         outputPath: String,
         config: ConversionConfig,
         quality: Int,
+        /** Set when the input was pre-decoded to a PNG sequence (animated WebP) */
+        concatScript: File? = null,
     ): String {
         val filters = buildVideoFilters(config)
+
+        // Pre-decoded frame sequence: read via the concat demuxer so each frame
+        // keeps its own duration, then apply the usual filter chain.
+        if (concatScript != null) {
+            return buildConcatCommand(concatScript, outputPath, config, quality, filters)
+        }
 
         // Multi-segment stitching mode: use complex filtergraph with concat
         if (config.segments.size > 1) {
@@ -383,6 +432,35 @@ class ConversionEngine(private val context: Context) {
             appendEncoderFlags(config, quality)
             append("\"$outputPath\"")
         }
+    }
+
+    /**
+     * Build an FFmpeg command that reads a pre-decoded PNG sequence.
+     *
+     * Used for animated WebP, which FFmpeg 6.0 cannot demux. Trimming is applied
+     * on the output side since the concat demuxer has no seekable timeline.
+     */
+    private fun buildConcatCommand(
+        concatScript: File,
+        outputPath: String,
+        config: ConversionConfig,
+        quality: Int,
+        filters: String,
+    ): String = buildString {
+        append("-y ")
+        append("-f concat -safe 0 ")
+        val effectiveStart = config.segments.firstOrNull()?.startMs ?: config.trimStartMs
+        val effectiveEnd = config.segments.firstOrNull()?.endMs ?: config.trimEndMs
+        if (effectiveStart > 0) {
+            append("-ss ${formatSeconds(effectiveStart)} ")
+        }
+        append("-i \"${concatScript.absolutePath}\" ")
+        if (effectiveEnd > effectiveStart) {
+            append("-to ${formatSeconds(effectiveEnd - effectiveStart)} ")
+        }
+        append("-vf \"$filters\" ")
+        appendEncoderFlags(config, quality)
+        append("\"$outputPath\"")
     }
 
     /**
@@ -458,6 +536,36 @@ class ConversionEngine(private val context: Context) {
         cont.invokeOnCancellation {
             session.cancel()
         }
+    }
+
+    /**
+     * Pre-decode an animated WebP into a PNG sequence, or return null when the
+     * input isn't one. Only the RIFF header is read for files that aren't WebP,
+     * so this costs nothing for the common video/GIF case.
+     */
+    private fun extractAnimatedWebP(
+        inputFile: File,
+        frameDir: File,
+    ): AnimatedWebPExtractor.Extracted? {
+        // Cheap header sniff before loading the whole file into memory.
+        // readNBytes-style loop: a single read() may return a short count.
+        val header = ByteArray(WEBP_HEADER_BYTES)
+        var filled = 0
+        inputFile.inputStream().use { stream ->
+            while (filled < WEBP_HEADER_BYTES) {
+                val n = stream.read(header, filled, WEBP_HEADER_BYTES - filled)
+                if (n < 0) break
+                filled += n
+            }
+        }
+        if (filled < WEBP_HEADER_BYTES) {
+            Timber.d("Input too small for a WebP header (%d bytes)", filled)
+            return null
+        }
+        if (!WebPFrameSplitter.isAnimatedWebP(header)) return null
+
+        Timber.d("Input is an animated WebP — pre-decoding frames for FFmpeg")
+        return AnimatedWebPExtractor(frameDir).extract(inputFile.readBytes())
     }
 
     /** Copy a content:// URI to a temp file for FFmpeg access. */
@@ -608,7 +716,13 @@ class ConversionEngine(private val context: Context) {
     fun cleanupOldFiles() {
         val cutoff = System.currentTimeMillis() - 24 * 60 * 60 * 1000
         cacheDir.listFiles()?.filter { it.lastModified() < cutoff }?.forEach { it.delete() }
-        tempDir.listFiles()?.forEach { it.delete() }
+        // deleteRecursively so abandoned frame_* extraction dirs go too
+        tempDir.listFiles()?.forEach { it.deleteRecursively() }
+    }
+
+    private companion object {
+        /** Enough to cover RIFF + size + WEBP + VP8X header and its flags byte. */
+        const val WEBP_HEADER_BYTES = 21
     }
 }
 

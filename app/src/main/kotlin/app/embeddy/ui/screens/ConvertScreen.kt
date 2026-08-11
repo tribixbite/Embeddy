@@ -55,6 +55,9 @@ import app.embeddy.util.SizeEstimation
 import app.embeddy.viewmodel.InspectViewModel
 import app.embeddy.viewmodel.MainViewModel
 
+/** Input formats the Convert tab can decode: video, GIF, and animated WebP. */
+private val CONVERT_MIME_TYPES = arrayOf("video/*", "image/gif", "image/webp")
+
 @Composable
 fun ConvertScreen(
     viewModel: MainViewModel = viewModel(),
@@ -81,7 +84,7 @@ fun ConvertScreen(
             is ConversionState.Idle -> {
                 MediaPickerCard(
                     onClick = {
-                        filePicker.launch(arrayOf("video/*", "image/gif"))
+                        filePicker.launch(CONVERT_MIME_TYPES)
                     },
                 )
                 SettingsPanel(
@@ -94,7 +97,7 @@ fun ConvertScreen(
             is ConversionState.Picking -> {
                 MediaPickerCard(
                     onClick = {
-                        filePicker.launch(arrayOf("video/*", "image/gif"))
+                        filePicker.launch(CONVERT_MIME_TYPES)
                     },
                 )
             }
@@ -104,7 +107,7 @@ fun ConvertScreen(
                 ReadyCard(
                     state = s,
                     onChangePick = {
-                        filePicker.launch(arrayOf("video/*", "image/gif"))
+                        filePicker.launch(CONVERT_MIME_TYPES)
                     },
                     onInspect = {
                         // Navigate to inspect tab with this file's URI

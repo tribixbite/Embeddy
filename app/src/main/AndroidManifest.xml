@@ -29,15 +29,16 @@
             </intent-filter>
 
             <!--
-              Accept shared media files. Deliberately limited to video and GIF:
-              the bundled FFmpeg build decodes only the first frame of an animated
-              WebP, so advertising image/webp here would silently drop frames.
+              Accept shared media files. Animated WebP is pre-decoded by
+              AnimatedWebPExtractor before FFmpeg sees it, since this FFmpeg
+              build cannot demux the format itself.
             -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="video/*" />
                 <data android:mimeType="image/gif" />
+                <data android:mimeType="image/webp" />
             </intent-filter>
 
             <!-- Open media files directly -->
@@ -46,6 +47,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="video/*" />
                 <data android:mimeType="image/gif" />
+                <data android:mimeType="image/webp" />
             </intent-filter>
         </activity>
 
