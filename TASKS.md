@@ -126,12 +126,30 @@ Audit of the Android app, the Astro site and the Cloudflare Worker.
 - 10 site WebP-parser tests (`bun test` in site/)
 - Browser E2E: GIF→WebP, GIF→GIF, WebM→WebP, MP4→WebP all produce valid output
 
+### On-device verification (Saga, Android 13 / SDK 33, arm64-v8a)
+
+Each fix was checked against a deliberately reverted build to confirm the bug was
+real, then re-checked on the fixed build.
+
+- [x] **5.1 quality floor** — pre-fix: `q=30, min=50`, zero FFmpeg invocations,
+  "Conversion failed — no output from FFmpeg". Fixed: `q=30, min=30` → complete.
+- [x] **5.2 FFmpeg locale** — verified under a `de-DE` per-app locale
+  (`cmd locale set-app-locales`). Pre-fix emitted `-ss 0,469 -to 3,000` and
+  FFmpeg returned **"Invalid duration"** (rc=1). Fixed emits `-ss 0.463`, and the
+  UI still shows localized text ("0,07 MB"), which is the intended split.
+- [x] **5.3 preview cancel** — cancelled a 1280x720 @ 30fps preview mid-render;
+  returned cleanly to Ready with the file intact, no stuck spinner.
+- [x] **5.12 share routing** — `am start` reported "intent has been delivered to
+  currently running top-most instance", exactly one MainActivity instance, and
+  the app switched Upload → Convert with the file loaded.
+- [x] **5.32** New: MediaStore rows can report `_size=NULL`, which rendered an
+  11 MB video as "0.0 MB". Now shows "Unknown size".
+
+Device left with the fixed debug build installed; per-app locale reset, test
+media deleted, foreground app restored.
+
 ## Compromises / Known Issues
 
-- **Not verified on-device**: no ADB device was reachable during the audit
-  (wireless debugging off), so the Android fixes are covered by unit tests and
-  compilation only. The share-intent routing (5.12), preview-cancel (5.3) and
-  quality-floor (5.1) fixes should be smoke-tested on hardware.
 - Site/worker have no CI test step yet — `bun test` must be run manually.
 - Web upload has no resume; a cancelled upload restarts from zero.
 - `decodeWithCanvas` (WebP fallback for browsers without ImageDecoder) still
