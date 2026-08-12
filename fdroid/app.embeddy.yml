@@ -27,12 +27,65 @@ Builds:
     versionCode: 143
     commit: v0.1.43
     subdir: app
+
+    # FFmpeg is compiled from source rather than taken from Maven Central.
+    # This mirrors com.fadcam's accepted recipe, which builds the same srclib at
+    # the same pinned commit with the same NDK — a configuration already proven
+    # on the buildserver — differing only in the enabled-library set.
+    #
+    # /home/embeddy exists because ffmpeg-kit's build breaks on long paths; the
+    # srclib is moved somewhere short before building. Same reason FadCam uses
+    # /home/faded.
+    sudo:
+      - apt-get update
+      - apt-get install -y make autoconf automake libtool pkg-config curl doxygen
+        nasm cmake gcc gperf texinfo yasm bison autogen wget autopoint meson
+        ninja-build ragel groff gtk-doc-tools libtasn1-6-dev libtasn1-bin
+        libgnutls28-dev libunistring-dev
+      - mkdir -p /home/embeddy/
+      - chown vagrant /home/embeddy/
+    srclibs:
+      - anonfaded-ffmpeg-kit-16KB@d633c47ca4b47acfc07542e9566b04dfe061af82
+    ndk: r27
+    # Building FFmpeg for three ABIs is slow; comparable recipes use this ceiling.
+    timeout: 10800
+
+    build:
+      # Enabled libraries are deliberately minimal — only libwebp is needed.
+      # Everything else this app asks FFmpeg for (scale, fps, crop, unsharp,
+      # hqdn3d, palettegen, paletteuse, trim, setpts, concat) is built in, and
+      # video decoding goes through the platform via android-media-codec.
+      #
+      # --enable-libwebp is load-bearing. FFmpeg's configure probes libwebpmux
+      # with check_pkg_config rather than require_pkg_config, so without it the
+      # libwebp_anim encoder is silently omitted and every conversion fails at
+      # runtime with "Unknown encoder 'libwebp_anim'".
+      #
+      # --enable-gpl is required by exactly one filter, hqdn3d (denoise); every
+      # other filter used here is LGPL-clean. The app is GPL-3.0-only so GPL
+      # FFmpeg is fine. If denoise is ever dropped, drop --enable-gpl with it.
+      #
+      # x86 is disabled because the app ships arm64-v8a, armeabi-v7a and x86_64
+      # only. arm-v7a-neon is a separate ffmpeg-kit variant we do not ship.
+      - mv $$anonfaded-ffmpeg-kit-16KB$$ /home/embeddy/ffmpeg-kit
+      - pushd /home/embeddy/ffmpeg-kit
+      - JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 ANDROID_SDK_ROOT=$$SDK$$
+        ANDROID_NDK_ROOT=$$NDK$$
+        ./android.sh --disable-x86 --disable-arm-v7a-neon
+        --enable-libwebp --enable-gpl --enable-android-media-codec
+        --api-level=26
+      - popd
+      - mkdir -p libs
+      - mv /home/embeddy/ffmpeg-kit/prebuilt/bundle-android-aar/ffmpeg-kit/*.aar
+        libs/ffmpeg-kit.aar
+
     gradle:
       - yes
-    # The project builds per-ABI splits plus a universal APK by default, but
-    # F-Droid publishes exactly one APK per build entry. -PsingleApk disables
-    # splitting so the build emits a single APK carrying every ABI. This is a
-    # supported flag in app/build.gradle.kts, not a patch applied at build time.
+    # -PsingleApk: the project emits per-ABI splits plus a universal APK by
+    # default, but F-Droid publishes exactly one APK per build entry. Both this
+    # and the libs/ffmpeg-kit.aar pickup above are supported paths in
+    # app/build.gradle.kts, so this recipe never patches the build script —
+    # a sed patch would silently stop applying when those lines are reformatted.
     gradleprops:
       - singleApk
 
@@ -42,55 +95,29 @@ MaintainerNotes: |
     the published versionName/versionCode without any environment variables.
     Building a tag without BUILD_NUMBER set is the supported path.
 
-    Native code: FFmpeg is consumed as a prebuilt AAR from Maven Central
-    (com.moizhassan.ffmpeg:ffmpeg-kit-16kb, source at
-    https://github.com/moizhassankh/ffmpeg-kit-android-16KB). This is a
-    community rebuild of arthenica/ffmpeg-kit, which was retired on 2025-01-06
-    and had its binaries pulled from Maven Central on 2025-04-01. The rebuild
-    exists to add 16 KB page-size support required by API 35.
+    Native code: FFmpeg is built from source by this recipe. Nothing about that
+    requires patching the app's build script — app/build.gradle.kts picks up
+    app/libs/ffmpeg-kit.aar when the file exists and falls back to the Maven
+    coordinate otherwise, and -PsingleApk is a supported flag. Both are exercised
+    upstream, so a reformat of the build script cannot silently break this recipe
+    the way a sed patch would.
 
-    AVIF encoding uses com.github.awxkee:avif-coder via JitPack.
+    The AAR carries no POM, so ffmpeg-kit's transitive dependency
+    com.arthenica:smart-exception-java is declared explicitly on that code path.
 
-    Both are prebuilt FLOSS binaries from repositories listed in scanner.py's
-    allowed_repos. Precedent for a prebuilt FFmpeg from Maven Central: Seal
-    (com.junkfood.seal) and YTDLnis (com.deniscerri.ytdl) both consume a
-    third-party republished FFmpeg AAR as a plain gradle dependency.
+    Why this srclib: upstream arthenica/ffmpeg-kit was retired on 2025-01-06 and
+    its binaries were pulled from Maven Central on 2025-04-01. anonfaded-ffmpeg-kit-16KB
+    is a maintained fork adding the 16 KB page-size support API 35 requires, and
+    it is already in fdroiddata — com.fadcam builds this exact commit with this
+    exact NDK, so the toolchain is proven rather than assumed.
 
-    Note the artifact's POM declares LGPL-3.0 but the binary is built
-    --enable-gpl --enable-version3, i.e. GPL-3.0. That is compatible with this
-    app's GPL-3.0-only licence, but the artifact metadata is wrong.
+    Ordinary (non-F-Droid) builds still resolve
+    com.moizhassan.ffmpeg:ffmpeg-kit-16kb from Maven Central. Reviewers should
+    note that artifact declares LGPL-3.0 in its POM while being built
+    --enable-gpl, i.e. actually GPL-3.0. It is not used by this recipe.
 
-    If a source build is preferred, it does not need a new srclib — the existing
-    anonfaded-ffmpeg-kit-16KB srclib works, and FadCam's accepted recipe already
-    proves --enable-libwebp (which this app requires for libwebp_anim) builds on
-    the buildserver. Replace the Builds entry above with:
-
-      sudo:
-        - apt-get update
-        - apt-get install -y make autoconf automake libtool pkg-config curl
-          nasm cmake gcc gperf texinfo yasm bison autogen wget autopoint meson
-          ninja-build ragel groff gtk-doc-tools libtasn1-6-dev libtasn1-bin
-          libgnutls28-dev libunistring-dev
-      timeout: 10800
-      ndk: r27
-      srclibs:
-        - anonfaded-ffmpeg-kit-16KB@<pinned-commit>
-      prebuild:
-        # point the gradle dependency at the AAR built below
-        - sed -i -e '/^ffmpeg-kit = /d' ../gradle/libs.versions.toml
-        - sed -i -e 's|implementation(libs.ffmpeg.kit)|implementation(files("libs/ffmpeg-kit.aar"))\n    implementation("com.arthenica:smart-exception-java:0.2.1")|' build.gradle.kts
-        - sdkmanager "ndk;27.3.13750724"
-      build:
-        - pushd $$anonfaded-ffmpeg-kit-16KB$$
-        - ANDROID_SDK_ROOT=$$SDK$$ ANDROID_NDK_ROOT=$$SDK$$/ndk/27.3.13750724
-          ./android.sh --enable-libwebp --enable-gpl --api-level=26
-        - popd
-        - mkdir -p libs
-        - mv $$anonfaded-ffmpeg-kit-16KB$$/prebuilt/bundle-android-aar/ffmpeg-kit/*.aar libs/ffmpeg-kit.aar
-
-    --enable-libwebp is load-bearing: without it FFmpeg's configure silently
-    disables the libwebp_anim encoder (check_pkg_config, not require_pkg_config)
-    and every conversion fails with "Unknown encoder 'libwebp_anim'".
+    AVIF encoding uses com.github.awxkee:avif-coder via JitPack, which is in
+    scanner.py's allowed_repos.
 
     No Google Play Services, no analytics, no ads, no tracking. Network access
     is limited to URLs the user types (Inspect) and files the user chooses to

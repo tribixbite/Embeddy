@@ -30,3 +30,8 @@ site/dist/
 
 # Literal "~" dirs created by the bun-on-termux wrapper's HOME handling
 **/~/
+
+# Locally built FFmpeg AAR (F-Droid produces this on its buildserver).
+# Must never be committed: F-Droid requires in-repo binaries be deleted and
+# rebuilt, and it is ~80 MB.
+/app/libs/*.aar

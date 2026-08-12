@@ -17,6 +17,16 @@ val versionMinor = System.getenv("VERSION_MINOR")?.toIntOrNull()
 val versionPatch = buildNumber
     ?: (versionProps["VERSION_PATCH"] as String).toInt()
 
+/**
+ * A locally built ffmpeg-kit AAR, or null to use the Maven coordinate.
+ *
+ * F-Droid compiles FFmpeg from source on its buildserver and places the AAR
+ * here; see fdroid/README.md. Resolved once so the choice is logged exactly
+ * once per configuration rather than per dependency block.
+ */
+val localFfmpegAar: File? = file("libs/ffmpeg-kit.aar").takeIf { it.isFile }
+    ?.also { logger.lifecycle("ffmpeg-kit: using local AAR at ${it.relativeTo(rootDir)}") }
+
 android {
     namespace = "app.embeddy"
     compileSdk = libs.versions.compileSdk.get().toInt()
@@ -131,8 +141,21 @@ dependencies {
     implementation(libs.compose.material.icons.extended)
     debugImplementation(libs.compose.ui.tooling)
 
-    // Media processing
-    implementation(libs.ffmpeg.kit)
+    // Media processing.
+    //
+    // FFmpeg normally comes from Maven Central, but F-Droid builds it from
+    // source and drops the result at app/libs/ffmpeg-kit.aar. Detecting that
+    // file keeps the F-Droid recipe free of sed-patching this build script —
+    // a patch that silently stops applying whenever these lines are reformatted.
+    //
+    // The AAR carries no POM, so ffmpeg-kit's transitive smart-exception-java
+    // has to be declared by hand on that path.
+    if (localFfmpegAar != null) {
+        implementation(files(localFfmpegAar))
+        implementation(libs.smart.exception.java)
+    } else {
+        implementation(libs.ffmpeg.kit)
+    }
     implementation(libs.avif.coder)
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.ui)

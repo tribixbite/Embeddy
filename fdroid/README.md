@@ -9,8 +9,9 @@ a manual step against F-Droid's own infrastructure and has not been done — see
 | Requirement | Status |
 |---|---|
 | FOSS licence | GPL-3.0-only (`LICENSE`) |
-| Public source, git tags per release | `v0.1.40`, tags match `^v[0-9.]+$` |
+| Public source, git tags per release | tags match `^v[0-9.]+$` |
 | Reproducible version from a tag | Fixed — see [Versioning](#versioning) |
+| Native code built from source | FFmpeg compiled by the recipe |
 | Single APK per build | `./gradlew assembleRelease -PsingleApk` |
 | Listing text, changelogs, screenshots | `fastlane/metadata/android/en-US/` |
 | Build recipe | `fdroid/app.embeddy.yml` (draft) |
@@ -34,21 +35,23 @@ git checkout v0.1.40
 ./gradlew assembleRelease -PsingleApk    # -> versionName 0.1.40, versionCode 140
 ```
 
-## Dependency provenance — the reviewer's likely question
+## Dependency provenance
 
-Two dependencies ship prebuilt native code. Both are free-licensed and come from
-repositories F-Droid lists as trusted for prebuilt FLOSS binaries (Maven Central,
-Google Maven, OSS Sonatype, OSS JFrog, JitPack.io, Clojars), so neither is
-disqualifying on its face. Neither is built from source by F-Droid, which a
-reviewer may still raise.
+**FFmpeg is built from source by the recipe** — see [Decision](#decision-build-from-source)
+below for how and why. AVIF encoding still uses a prebuilt,
+`com.github.awxkee:avif-coder` via JitPack, which is in `scanner.py`'s
+`allowed_repos`; JitPack builds from public GitHub source, so provenance is
+traceable even though its builds are not reproducible.
 
-**FFmpeg** — `com.moizhassan.ffmpeg:ffmpeg-kit-16kb:6.1.1`, Maven Central, source
-at <https://github.com/moizhassankh/ffmpeg-kit-android-16KB>.
+The rest of this section records why the FFmpeg decision went the way it did, so
+the reasoning survives if someone revisits it.
 
-Context: upstream `arthenica/ffmpeg-kit` was retired on 2025-01-06 and its
-binaries were pulled from Maven Central on 2025-04-01, so the official artifact
-no longer exists. This is a community rebuild that also adds the 16 KB page-size
-support API 35 requires.
+Ordinary (non-F-Droid) builds resolve `com.moizhassan.ffmpeg:ffmpeg-kit-16kb:6.1.1`
+from Maven Central, source at <https://github.com/moizhassankh/ffmpeg-kit-android-16KB>.
+Upstream `arthenica/ffmpeg-kit` was retired on 2025-01-06 and its binaries were
+pulled from Maven Central on 2025-04-01, so the official artifact no longer
+exists; this is a community rebuild that also adds the 16 KB page-size support
+API 35 requires.
 
 ### What other F-Droid apps actually do
 
@@ -91,31 +94,64 @@ about provenance quality rather than policy:
   it was built from a personal macOS home directory, not a reproducible pipeline.
 - **It tracks a retired 6.1.1** — no security updates.
 
-### Options, ranked
+### Decision: build from source
 
-**1. Build ffmpeg-kit from source in the recipe (recommended).** This is the
-dominant pattern, needs no app-code change (the forks keep arthenica's 6.x Java
-API), and fixes all three weaknesses above. It does not require writing a new
-srclib: `anonfaded-ffmpeg-kit-16KB` already exists in fdroiddata and is used by
-FadCam, whose accepted recipe already passes `--enable-libwebp` — direct
-evidence that the flag we depend on builds on the F-Droid buildserver. Cost is
-build time (comparable recipes set `timeout: 10800`). A sketch is in
-[`app.embeddy.yml`](app.embeddy.yml) under `MaintainerNotes`.
+`app.embeddy.yml` compiles FFmpeg from source. That removes every weakness above
+— no licence-metadata mismatch, no untraceable binary, and the FFmpeg version is
+ours to move — and it matches what most FFmpeg apps in F-Droid already do.
 
-**2. Keep the current Maven dependency.** Zero effort, scanner-clean, with live
-precedent. Accept the licence-metadata and provenance weaknesses above, and be
-ready to answer for them in the merge request.
+The recipe mirrors `com.fadcam`'s accepted build: same `anonfaded-ffmpeg-kit-16KB`
+srclib, **pinned to the same commit** (`d633c47`), same `ndk: r27`. Deliberately
+the proven combination rather than the srclib's newer HEAD, which has never been
+built on the buildserver. It differs only in enabling far fewer libraries.
 
-**3. Migrate to FFmpegKitNext.** The official successor, current with FFmpeg 8.x,
-and it has libwebp. Rank it last for *this* submission regardless: it is
-distributed as source only, its Android entry point is a Nix flake (no
-fdroiddata recipe uses Nix), and its API is now Kotlin — a real code migration.
-A reasonable 12-month target, a bad submission blocker.
+Two details that are easy to get wrong and are worth preserving:
 
-**Not recommended: dropping FFmpeg.** `WebPFrameSplitter` already decodes
-animated WebP without it and `MediaCodec` can decode video, but FFmpeg still
-does the whole filter chain and the `libwebp_anim` encoding. That is a rewrite,
-not a flag change.
+- **`--enable-libwebp` is load-bearing.** FFmpeg's `configure` probes libwebpmux
+  with `check_pkg_config`, not `require_pkg_config`, so omitting it *silently*
+  drops the `libwebp_anim` encoder. The build succeeds and every conversion then
+  fails at runtime with `Unknown encoder 'libwebp_anim'`.
+- **`--enable-gpl` is needed by exactly one filter**, `hqdn3d` (denoise).
+  Verified against FFmpeg's `configure`: `hqdn3d_filter_deps="gpl"`, while
+  `scale`, `fps`, `crop`, `unsharp`, `palettegen`, `paletteuse`, `trim`,
+  `setpts` and `concat` have no GPL dependency. The app is GPL-3.0-only so this
+  costs nothing — but if denoise is ever dropped, drop the flag with it.
+
+### No build-script patching
+
+The recipe never `sed`s `build.gradle.kts`. `app/build.gradle.kts` picks up
+`app/libs/ffmpeg-kit.aar` when that file exists and falls back to the Maven
+coordinate otherwise, and `-PsingleApk` is a supported flag. A sed patch is the
+usual approach in other recipes, and it silently stops applying the moment the
+patched lines are reformatted.
+
+Because a `files()` AAR carries no POM, ffmpeg-kit's transitive
+`com.arthenica:smart-exception-java` is declared explicitly on that path.
+
+The local-AAR path is verified end to end: staging a real ffmpeg-kit AAR at
+`app/libs/ffmpeg-kit.aar` builds, resolves `smart-exception-java`, drops the
+Maven coordinate, installs, and converts a 30-frame animated WebP on device with
+`libwebp_anim` present.
+
+`app/libs/*.aar` is gitignored — F-Droid requires in-repo binaries be deleted and
+rebuilt, and committing one is what forces most other apps into `rm`/`scandelete`
+workarounds.
+
+### Alternatives considered
+
+**Keep the Maven prebuilt.** Zero effort, scanner-clean, with live precedent
+(Seal, YTDLnis). Rejected because the from-source path turned out to be cheap —
+no new srclib, a proven toolchain — and it leaves the licence-metadata and
+provenance problems unanswered.
+
+**FFmpegKitNext.** The official successor, current with FFmpeg 8.x, has libwebp.
+Rejected *for now*: distributed as source only, its Android entry point is a Nix
+flake (no fdroiddata recipe uses Nix), and its API is now Kotlin — a real code
+migration. A reasonable 12-month target, a bad submission blocker.
+
+**Dropping FFmpeg.** `WebPFrameSplitter` already decodes animated WebP without it
+and `MediaCodec` can decode video, but FFmpeg still does the whole filter chain
+and the `libwebp_anim` encoding. That is a rewrite, not a flag change.
 
 ### Size note
 
