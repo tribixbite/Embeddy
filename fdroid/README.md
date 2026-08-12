@@ -25,8 +25,9 @@ stale patch number and a build at tag `v0.1.40` produced `versionName 0.1.13` â€
 a mismatch F-Droid rejects.
 
 The release workflow now writes the resolved version into `version.properties`,
-commits it with `[skip ci]`, and tags *that* commit. Building a tag with no
-environment overrides reproduces the published version:
+commits it with a skip-CI marker so the push does not re-trigger the workflow,
+and tags *that* commit. Building a tag with no environment overrides reproduces
+the published version:
 
 ```sh
 git checkout v0.1.40

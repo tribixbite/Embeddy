@@ -50,7 +50,11 @@ jobs:
       # Without this the version lives only in this job's environment, so anyone
       # building from the tag — F-Droid included — gets whatever stale patch
       # number version.properties happened to hold, not the released version.
-      # [skip ci] stops the push from re-triggering this workflow.
+      #
+      # The commit below carries GitHub's skip-CI marker so this push does not
+      # re-trigger the workflow. NOTE: GitHub scans the whole commit message, so
+      # never write that marker in the body of an ordinary commit — doing so
+      # silently skips every workflow for that push.
       - name: Pin version into the tagged commit
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         id: pin

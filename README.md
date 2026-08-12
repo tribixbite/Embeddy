@@ -169,7 +169,8 @@ GitHub Pages. A failing suite blocks the deploy.
 **Build & Release** (`release.yml`):
 
 1. Run the Android unit tests — a failure blocks the release
-2. Pin the resolved version into `version.properties` and commit it (`[skip ci]`)
+2. Pin the resolved version into `version.properties` and commit it, with a
+   skip-CI marker so the push does not re-trigger the workflow
 3. Build release APKs for the three configured ABIs plus universal
 4. Tag the version-pinned commit and publish a GitHub Release with grouped
    release notes, a download table with sizes and SHA-256 prefixes, and
