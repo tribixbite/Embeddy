@@ -43,7 +43,7 @@ MaintainerNotes: |
     Building a tag without BUILD_NUMBER set is the supported path.
 
     Native code: FFmpeg is consumed as a prebuilt AAR from Maven Central
-    (com.moizhassan.ffmpeg:ffmpeg-kit-16kb, LGPL-3.0, source at
+    (com.moizhassan.ffmpeg:ffmpeg-kit-16kb, source at
     https://github.com/moizhassankh/ffmpeg-kit-android-16KB). This is a
     community rebuild of arthenica/ffmpeg-kit, which was retired on 2025-01-06
     and had its binaries pulled from Maven Central on 2025-04-01. The rebuild
@@ -51,10 +51,46 @@ MaintainerNotes: |
 
     AVIF encoding uses com.github.awxkee:avif-coder via JitPack.
 
-    Both are prebuilt FLOSS binaries from repositories F-Droid lists as trusted,
-    but neither is built from source by F-Droid. If the reviewer requires
-    source-built native code, see fdroid/README.md in the app repository for the
-    known options and their trade-offs.
+    Both are prebuilt FLOSS binaries from repositories listed in scanner.py's
+    allowed_repos. Precedent for a prebuilt FFmpeg from Maven Central: Seal
+    (com.junkfood.seal) and YTDLnis (com.deniscerri.ytdl) both consume a
+    third-party republished FFmpeg AAR as a plain gradle dependency.
+
+    Note the artifact's POM declares LGPL-3.0 but the binary is built
+    --enable-gpl --enable-version3, i.e. GPL-3.0. That is compatible with this
+    app's GPL-3.0-only licence, but the artifact metadata is wrong.
+
+    If a source build is preferred, it does not need a new srclib — the existing
+    anonfaded-ffmpeg-kit-16KB srclib works, and FadCam's accepted recipe already
+    proves --enable-libwebp (which this app requires for libwebp_anim) builds on
+    the buildserver. Replace the Builds entry above with:
+
+      sudo:
+        - apt-get update
+        - apt-get install -y make autoconf automake libtool pkg-config curl
+          nasm cmake gcc gperf texinfo yasm bison autogen wget autopoint meson
+          ninja-build ragel groff gtk-doc-tools libtasn1-6-dev libtasn1-bin
+          libgnutls28-dev libunistring-dev
+      timeout: 10800
+      ndk: r27
+      srclibs:
+        - anonfaded-ffmpeg-kit-16KB@<pinned-commit>
+      prebuild:
+        # point the gradle dependency at the AAR built below
+        - sed -i -e '/^ffmpeg-kit = /d' ../gradle/libs.versions.toml
+        - sed -i -e 's|implementation(libs.ffmpeg.kit)|implementation(files("libs/ffmpeg-kit.aar"))\n    implementation("com.arthenica:smart-exception-java:0.2.1")|' build.gradle.kts
+        - sdkmanager "ndk;27.3.13750724"
+      build:
+        - pushd $$anonfaded-ffmpeg-kit-16KB$$
+        - ANDROID_SDK_ROOT=$$SDK$$ ANDROID_NDK_ROOT=$$SDK$$/ndk/27.3.13750724
+          ./android.sh --enable-libwebp --enable-gpl --api-level=26
+        - popd
+        - mkdir -p libs
+        - mv $$anonfaded-ffmpeg-kit-16KB$$/prebuilt/bundle-android-aar/ffmpeg-kit/*.aar libs/ffmpeg-kit.aar
+
+    --enable-libwebp is load-bearing: without it FFmpeg's configure silently
+    disables the libwebp_anim encoder (check_pkg_config, not require_pkg_config)
+    and every conversion fails with "Unknown encoder 'libwebp_anim'".
 
     No Google Play Services, no analytics, no ads, no tracking. Network access
     is limited to URLs the user types (Inspect) and files the user chooses to
