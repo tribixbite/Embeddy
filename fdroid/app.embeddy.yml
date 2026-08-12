@@ -23,9 +23,9 @@ RepoType: git
 Repo: https://github.com/tribixbite/Embeddy.git
 
 Builds:
-  - versionName: 0.1.41
-    versionCode: 141
-    commit: v0.1.41
+  - versionName: 0.1.43
+    versionCode: 143
+    commit: v0.1.43
     subdir: app
     gradle:
       - yes
@@ -62,5 +62,5 @@ MaintainerNotes: |
 
 AutoUpdateMode: Version v%v
 UpdateCheckMode: Tags ^v[0-9.]+$
-CurrentVersion: 0.1.41
-CurrentVersionCode: 141
+CurrentVersion: 0.1.43
+CurrentVersionCode: 143
