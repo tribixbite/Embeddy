@@ -80,6 +80,23 @@ to work it out:
   user-initiated.
 - No account, no telemetry, no crash reporting.
 
+## Keeping the recipe current
+
+`fdroid/app.embeddy.yml` pins one `Builds` entry to a specific tag. That entry is
+only the starting point — `UpdateCheckMode: Tags` and `AutoUpdateMode: Version v%v`
+let F-Droid pick up later tags on its own once the app is in.
+
+Before opening the merge request, set the `Builds` entry, `CurrentVersion` and
+`CurrentVersionCode` to the newest tag, and make sure
+`fastlane/metadata/android/en-US/changelogs/<versionCode>.txt` exists for it.
+
+Note that `release.yml` currently cuts a release on **every** push to `main`,
+including documentation-only pushes, so the newest tag moves faster than the app
+actually changes. Restricting the release job to pushes that touch `app/**`,
+`gradle/**` or `version.properties` would make versions correspond to real
+changes — worth doing before submission, but it changes release cadence, so it
+is left as a decision for the maintainer.
+
 ## Submitting
 
 F-Droid submission happens on F-Droid's GitLab, not here. It is deliberately

@@ -1,0 +1,7 @@
+Packaging and reproducibility work, no user-facing behaviour change from 0.1.40.
+
+Builds from a git tag now reproduce the released version number without any
+build-environment setup, so the app can be rebuilt from source by anyone —
+including F-Droid. Added a single-APK build mode covering every ABI.
+
+See 0.1.40 for the animated WebP input support and the conversion fixes.
