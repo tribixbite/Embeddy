@@ -1,0 +1,33 @@
+Embeddy is a media toolkit for getting images and video into the size and format
+that chat apps, forums and social sites actually accept.
+
+All conversion and compression runs on your device. Nothing is uploaded unless
+you explicitly choose the Upload tool.
+
+<b>Convert</b>
+Turn video, GIF or animated WebP into animated WebP. An adaptive quality pass
+starts at your chosen quality and steps down until the file fits a size target,
+so you get the best quality that still uploads.
+
+• Presets for Discord (10 MB), Telegram stickers (256 KB) and Slack (5 MB)
+• Trim to a range, or stitch several segments together
+• Lanczos downscaling, optional sharpening, denoise and dithering
+• Exact output dimensions with centre-crop, or scale to a maximum size
+• Generate a 3-second preview before committing to a full encode
+
+<b>Squoosh</b>
+Compress still images to WebP, JPEG, PNG or AVIF with a before/after slider so
+you can see exactly what a quality setting costs.
+
+<b>Inspect</b>
+See how a link will look when shared: Open Graph and Twitter Card tags rendered
+as a live preview card. Also reads local files — EXIF, camera settings, GPS,
+codec, colour space, bit depth and keyframe cadence.
+
+<b>Upload</b>
+Send a file to an anonymous host (0x0.st or catbox.moe) and get a link back.
+EXIF is stripped before upload when the format supports it.
+
+<b>Privacy</b>
+No analytics, no accounts, no ads. The only network access is the Inspect tool
+fetching a URL you typed, and the Upload tool sending a file you chose.

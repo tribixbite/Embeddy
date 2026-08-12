@@ -90,39 +90,79 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         id: notes
         run: |
-          # Find the previous release tag (if any)
+          set -euo pipefail
           PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
           VERSION="v${{ steps.version.outputs.version_name }}"
+          RANGE=${PREV_TAG:+${PREV_TAG}..HEAD}
+
+          # Group commits by conventional-commit type. `git log` output is read
+          # into a file first so the pipeline can't swallow a failure.
+          git log ${RANGE:-} --pretty=format:'%s' --no-merges > /tmp/commits.txt || true
+
+          # Render a section only when it has entries
+          emit() {
+            local heading="$1"; shift
+            local body
+            body=$(for prefix in "$@"; do
+              grep -E "^${prefix}(\(.+\))?!?: " /tmp/commits.txt 2>/dev/null | sed -E 's/^[a-z]+(\(.+\))?!?: //' || true
+            done | sed 's/^/- /')
+            if [ -n "$body" ]; then
+              echo "### ${heading}"
+              echo ""
+              echo "$body"
+              echo ""
+            fi
+          }
 
           {
             echo "body<<RELEASE_NOTES_EOF"
             echo "## Embeddy ${VERSION}"
             echo ""
-
-            # Changelog from commits since last tag
-            echo "### Changes"
-            echo ""
             if [ -n "$PREV_TAG" ]; then
-              git log "${PREV_TAG}..HEAD" --pretty=format:"- %s" --no-merges
+              echo "Changes since [\`${PREV_TAG}\`](https://github.com/${{ github.repository }}/releases/tag/${PREV_TAG})."
             else
-              git log --pretty=format:"- %s" --no-merges -20
+              echo "First tracked release."
             fi
             echo ""
-            echo ""
 
-            # APK table
+            emit "New" "feat"
+            emit "Fixed" "fix"
+            emit "Performance" "perf"
+            emit "Internal" "refactor" "build" "ci" "test" "chore"
+            emit "Documentation" "docs"
+
             echo "### Downloads"
             echo ""
-            echo "| ABI | File |"
-            echo "|-----|------|"
-            echo "| arm64-v8a | \`Embeddy-${VERSION}-arm64-v8a.apk\` |"
-            echo "| armeabi-v7a | \`Embeddy-${VERSION}-armeabi-v7a.apk\` |"
-            echo "| x86_64 | \`Embeddy-${VERSION}-x86_64.apk\` |"
-            echo "| Universal | \`Embeddy-${VERSION}-universal.apk\` |"
+            echo "Pick the ABI matching your device, or \`universal\` if unsure."
             echo ""
-            echo "**Version Code:** ${{ steps.version.outputs.version_code }}"
+            echo "| ABI | Best for | Size | SHA-256 |"
+            echo "|-----|----------|------|---------|"
+            for apk in final_apks/*.apk; do
+              name=$(basename "$apk")
+              size=$(du -h "$apk" | cut -f1)
+              sha=$(sha256sum "$apk" | cut -c1-16)
+              case "$name" in
+                *arm64-v8a*)   desc="Modern 64-bit phones" ;;
+                *armeabi-v7a*) desc="Older 32-bit ARM devices" ;;
+                *x86_64*)      desc="Emulators, Chromebooks" ;;
+                *universal*)   desc="Any device (largest)" ;;
+                *)             desc="—" ;;
+              esac
+              echo "| \`${name##Embeddy-v${{ steps.version.outputs.version_name }}-}\` | ${desc} | ${size} | \`${sha}…\` |"
+            done
+            echo ""
+            echo "**Version code:** ${{ steps.version.outputs.version_code }} &middot; **Min Android:** 8.0 (API 26)"
+            echo ""
+            echo "Full checksums are in \`SHA256SUMS.txt\` below."
             echo "RELEASE_NOTES_EOF"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Write checksum file
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          cd final_apks
+          sha256sum *.apk > SHA256SUMS.txt
+          cat SHA256SUMS.txt
 
       - name: Create GitHub Release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -131,7 +171,9 @@ jobs:
           tag_name: v${{ steps.version.outputs.version_name }}
           name: Embeddy v${{ steps.version.outputs.version_name }}
           body: ${{ steps.notes.outputs.body }}
-          files: final_apks/*.apk
+          files: |
+            final_apks/*.apk
+            final_apks/SHA256SUMS.txt
           draft: false
           prerelease: false
           make_latest: true

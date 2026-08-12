@@ -1,0 +1,9 @@
+Animated WebP is now accepted as input — frames are decoded in-app, since the
+bundled FFmpeg cannot read the format.
+
+Fixed: quality below a preset's floor failed every conversion. Fixed: FFmpeg got
+comma decimal separators on non-English devices, so trimming failed. Fixed:
+sharing to Embeddy while open loaded the file into a hidden tab. Fixed:
+cancelling a preview could stick on a spinner.
+
+Builds no longer ship empty APKs for ABIs with no native libraries.
