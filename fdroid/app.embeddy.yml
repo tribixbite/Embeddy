@@ -1,0 +1,66 @@
+# F-Droid build recipe for Embeddy.
+#
+# This file is a *draft of what belongs in fdroiddata*, kept here so it is
+# reviewed alongside the code it builds. To submit, copy it to
+# fdroiddata/metadata/app.embeddy.yml and open a merge request against
+# https://gitlab.com/fdroid/fdroiddata — F-Droid does not read this copy.
+#
+# Listing text, screenshots and changelogs are NOT duplicated here: F-Droid
+# reads those from fastlane/metadata/android/en-US/ in this repository.
+
+Categories:
+  - Multimedia
+  - Graphics
+License: GPL-3.0-only
+AuthorName: tribixbite
+SourceCode: https://github.com/tribixbite/Embeddy
+IssueTracker: https://github.com/tribixbite/Embeddy/issues
+Changelog: https://github.com/tribixbite/Embeddy/releases
+
+AutoName: Embeddy
+
+RepoType: git
+Repo: https://github.com/tribixbite/Embeddy.git
+
+Builds:
+  - versionName: 0.1.40
+    versionCode: 140
+    commit: v0.1.40
+    subdir: app
+    gradle:
+      - yes
+    # The project builds per-ABI splits plus a universal APK by default, but
+    # F-Droid publishes exactly one APK per build entry. -PsingleApk disables
+    # splitting so the build emits a single APK carrying every ABI. This is a
+    # supported flag in app/build.gradle.kts, not a patch applied at build time.
+    gradleprops:
+      - singleApk
+
+MaintainerNotes: |
+    Versioning: the release workflow writes the resolved version into
+    version.properties and tags that commit, so a build from the tag reproduces
+    the published versionName/versionCode without any environment variables.
+    Building a tag without BUILD_NUMBER set is the supported path.
+
+    Native code: FFmpeg is consumed as a prebuilt AAR from Maven Central
+    (com.moizhassan.ffmpeg:ffmpeg-kit-16kb, LGPL-3.0, source at
+    https://github.com/moizhassankh/ffmpeg-kit-android-16KB). This is a
+    community rebuild of arthenica/ffmpeg-kit, which was retired on 2025-01-06
+    and had its binaries pulled from Maven Central on 2025-04-01. The rebuild
+    exists to add 16 KB page-size support required by API 35.
+
+    AVIF encoding uses com.github.awxkee:avif-coder via JitPack.
+
+    Both are prebuilt FLOSS binaries from repositories F-Droid lists as trusted,
+    but neither is built from source by F-Droid. If the reviewer requires
+    source-built native code, see fdroid/README.md in the app repository for the
+    known options and their trade-offs.
+
+    No Google Play Services, no analytics, no ads, no tracking. Network access
+    is limited to URLs the user types (Inspect) and files the user chooses to
+    upload (Upload, to 0x0.st or catbox.moe).
+
+AutoUpdateMode: Version v%v
+UpdateCheckMode: Tags ^v[0-9.]+$
+CurrentVersion: 0.1.40
+CurrentVersionCode: 140

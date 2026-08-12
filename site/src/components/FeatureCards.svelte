@@ -19,8 +19,8 @@
       icon: "M15.91 11.672a.375.375 0 010 .656l-5.603 3.113a.375.375 0 01-.557-.328V8.887c0-.286.307-.466.557-.327l5.603 3.112z",
       title: "Convert",
       description:
-        "Video and GIF to animated WebP with adaptive quality loop. Platform presets for Discord (10 MB / 720p), Telegram (256 KB sticker), Slack (5 MB), or fully custom targets.",
-      badges: ["FFmpeg-kit", "Adaptive quality", "Trim & stitch"],
+        "Video, GIF or animated WebP to animated WebP, with an adaptive quality loop that steps down until the file fits. Platform presets for Discord (10 MB / 720p), Telegram (256 KB sticker), Slack (5 MB), or fully custom targets.",
+      badges: ["Animated WebP in", "Adaptive quality", "Trim & stitch"],
       toolHref: "/tools/convert",
     },
     {

@@ -38,7 +38,7 @@ Every push to `main` triggers a CI build that produces split-ABI APKs:
 
 ## Features
 
-### Convert — Animated WebP from any video/GIF
+### Convert — Animated WebP from video, GIF or animated WebP
 
 - **Adaptive quality** algorithm — starts at target quality, steps down until file fits the size limit
 - **Platform presets** with tuned parameters:
@@ -46,10 +46,15 @@ Every push to `main` triggers a CI build that produces split-ABI APKs:
   - **Telegram** — 256 KB / 512px / 30 fps (sticker-ready)
   - **Slack** — 5 MB / 640px / 12 fps
   - **Custom** — full manual control
-- Lanczos downscaling, optional text sharpening (`unsharp` filter)
+- **Animated WebP input** — frames are decoded in-app by splitting the RIFF
+  container, because the bundled FFmpeg cannot demux the format
+- Trim to a range, or stitch several segments together
+- Lanczos downscaling, optional text sharpening (`unsharp` filter), denoise, dithering
+- Exact output dimensions with centre-crop, or scale to a maximum
+- 3-second preview clip before committing to a full encode
 - Real-time progress with quality-step feedback
 - Share/Save output directly from the result card
-- Accepts shared media via Android intent filters
+- Accepts shared media via Android intent filters (video, GIF, animated WebP)
 
 ### Inspect — Social embed metadata viewer
 
@@ -152,20 +157,50 @@ splits {
 
 ## CI/CD
 
-Every push to `main` triggers the GitHub Actions workflow:
+Three workflows run on push to `main`:
 
-1. Build release APKs (all ABIs)
-2. Rename with version: `Embeddy-v{major}.{minor}.{build}-{abi}.apk`
-3. Upload as build artifacts (30-day retention)
-4. Create a GitHub Release tagged `v{major}.{minor}.{build}` with:
-   - Auto-generated changelog from commit messages
-   - All APK variants attached
-   - Marked as `latest`
+**Tests** (`test.yml`) — gates everything else. Runs the Android unit suite, the
+Worker's SSRF tests plus typecheck, and the site's unit tests plus `astro check`.
+Also runs on pull requests.
 
-Version is derived from `version.properties` (major/minor) + `github.run_number` (patch).
+**Deploy Site** (`pages.yml`) — runs the site tests, then builds and deploys to
+GitHub Pages. A failing suite blocks the deploy.
+
+**Build & Release** (`release.yml`):
+
+1. Run the Android unit tests — a failure blocks the release
+2. Pin the resolved version into `version.properties` and commit it (`[skip ci]`)
+3. Build release APKs for the three configured ABIs plus universal
+4. Tag the version-pinned commit and publish a GitHub Release with grouped
+   release notes, a download table with sizes and SHA-256 prefixes, and
+   `SHA256SUMS.txt`
+
+Version is `version.properties` (major/minor) + `github.run_number` (patch).
+Step 2 matters for anyone rebuilding from a tag — without it the version exists
+only in the CI environment and a tag build produces a stale version number.
+
+### Testing
+
+```sh
+./gradlew :app:testDebugUnitTest     # Android
+cd worker && bun test                # Worker (SSRF)
+cd site   && bun test src            # Site (WebP parsing, upload retry)
+```
+
+## F-Droid
+
+Store metadata lives in `fastlane/metadata/android/en-US/`. A draft build recipe
+and a submission guide — including the dependency-provenance questions a
+reviewer will raise — are in [`fdroid/`](fdroid/README.md).
+
+Build a single all-ABI APK the way F-Droid does:
+
+```sh
+./gradlew assembleRelease -PsingleApk
+```
 
 ## License
 
 ```
-GPL-3.0 License — see LICENSE file for details.
+GPL-3.0-only — see LICENSE file for details.
 ```

@@ -46,6 +46,32 @@ jobs:
       - name: Unit tests
         run: ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
 
+      # Write the resolved version into the tree and tag *that* commit.
+      # Without this the version lives only in this job's environment, so anyone
+      # building from the tag — F-Droid included — gets whatever stale patch
+      # number version.properties happened to hold, not the released version.
+      # [skip ci] stops the push from re-triggering this workflow.
+      - name: Pin version into the tagged commit
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: pin
+        run: |
+          set -euo pipefail
+          cat > version.properties <<EOF
+          VERSION_MAJOR=${{ steps.version.outputs.major }}
+          VERSION_MINOR=${{ steps.version.outputs.minor }}
+          VERSION_PATCH=${{ steps.version.outputs.patch }}
+          EOF
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add version.properties
+          if git diff --cached --quiet; then
+            echo "version.properties already correct"
+          else
+            git commit -m "chore(release): pin version to v${{ steps.version.outputs.version_name }} [skip ci]"
+            git push origin HEAD:main
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Build Release APKs
         env:
           BUILD_NUMBER: ${{ github.run_number }}
@@ -169,6 +195,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.version_name }}
+          # Tag the version-pinned commit so a build from the tag reproduces
+          # exactly this versionName/versionCode.
+          target_commitish: ${{ steps.pin.outputs.sha }}
           name: Embeddy v${{ steps.version.outputs.version_name }}
           body: ${{ steps.notes.outputs.body }}
           files: |

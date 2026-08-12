@@ -65,7 +65,10 @@ android {
 
     splits {
         abi {
-            isEnable = true
+            // F-Droid (and anyone else who wants one artifact) builds with
+            // -PsingleApk to get a single all-ABI APK instead of per-ABI splits,
+            // because F-Droid publishes exactly one APK per build entry.
+            isEnable = !project.hasProperty("singleApk")
             // reset() is required — include() ADDS to the default set (every known
             // ABI), so without it AGP also emits empty mips/mips64/riscv64/armeabi/x86
             // APKs that contain no FFmpeg .so files and crash on first use.
