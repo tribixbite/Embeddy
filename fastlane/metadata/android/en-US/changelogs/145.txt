@@ -1,0 +1,1 @@
+- warn when a release build falls back to debug signing
