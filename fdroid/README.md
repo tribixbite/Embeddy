@@ -240,9 +240,14 @@ create:
    it means never being able to update the app in place again.
 
    ```sh
-   keytool -genkey -v -keystore embeddy-release.jks -keyalg RSA \
-     -keysize 4096 -validity 10000 -alias embeddy
+   scripts/generate-release-key.sh
    ```
+
+   It writes to `../embeddy-release.jks` (outside the repo, so it cannot be
+   committed), refuses to overwrite an existing keystore, and never takes a
+   password as an argument — `keytool` prompts, so nothing lands in your shell
+   history or the process table. It then prints the exact `gh secret set`
+   commands for step 2.
 
 2. Add repository secrets: `KEYSTORE_BASE64` (`base64 -w0 embeddy-release.jks`),
    `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`.
