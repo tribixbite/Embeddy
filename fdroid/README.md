@@ -216,6 +216,61 @@ left as a human step — it posts publicly under your account.
 4. Expect the reviewer to ask about the FFmpeg artifact. The answer is in
    [Dependency provenance](#dependency-provenance--the-reviewers-likely-question).
 
+## Signing
+
+**This does not affect F-Droid** — F-Droid signs with its own key, so its builds
+are self-consistent. It does affect the GitHub releases.
+
+`app/build.gradle.kts` falls back to the debug signing config when
+`KEYSTORE_PATH` is unset, and `release.yml` sets no keystore secrets. The debug
+keystore is generated per machine, so every CI run signs with a *different* key.
+Confirmed on device: installing `v0.1.44` over `v0.1.40` fails with
+
+```
+INSTALL_FAILED_UPDATE_INCOMPATIBLE: Existing package app.embeddy
+signatures do not match newer version; ignoring!
+```
+
+So nobody can update in place from a GitHub release — they have to uninstall
+first and lose their settings. The build now prints a loud warning when it takes
+this path, but the real fix needs a stable key, which only the maintainer can
+create:
+
+1. Generate a release keystore and keep it somewhere safe and backed up. Losing
+   it means never being able to update the app in place again.
+
+   ```sh
+   keytool -genkey -v -keystore embeddy-release.jks -keyalg RSA \
+     -keysize 4096 -validity 10000 -alias embeddy
+   ```
+
+2. Add repository secrets: `KEYSTORE_BASE64` (`base64 -w0 embeddy-release.jks`),
+   `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`.
+
+3. In `release.yml`, before the build step, materialise it and point the existing
+   env vars at it:
+
+   ```yaml
+   - name: Decode keystore
+     env:
+       KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+     run: echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+   ```
+
+   then add to the build step's `env:`
+
+   ```yaml
+   KEYSTORE_PATH: ${{ runner.temp }}/release.jks
+   KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+   KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+   KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+   ```
+
+`build.gradle.kts` already reads all four, so no build-script change is needed.
+
+Note the first properly-signed release will still be uninstall-and-reinstall for
+existing users, since their installed copy carries a throwaway debug key.
+
 ## Open item for the maintainer
 
 The licence is ambiguous in one respect: `LICENSE` is the plain GPL-3.0 text and

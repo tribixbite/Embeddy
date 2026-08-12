@@ -68,6 +68,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // Falling back to the debug key produces an APK that cannot be
+            // installed over a previous release: the debug keystore is generated
+            // per machine, so every CI run signs with a different key and users
+            // hit INSTALL_FAILED_UPDATE_INCOMPATIBLE. Warned about below, once
+            // the task graph confirms a release is actually being built.
             signingConfig = signingConfigs.findByName("release")
                 ?: signingConfigs.getByName("debug")
         }
@@ -116,6 +121,23 @@ android {
                 "META-INF/com/android/build/gradle/app-metadata.properties",
             )
         }
+    }
+}
+
+// Warn only when a release artifact is genuinely being produced. The buildTypes
+// block above is configured on every invocation, so checking there would fire
+// this on debug builds too.
+gradle.taskGraph.whenReady {
+    val buildingRelease = allTasks.any { it.name.contains("Release") && it.project == project }
+    if (buildingRelease && android.signingConfigs.findByName("release") == null) {
+        logger.warn(
+            "\n" + "!".repeat(78) +
+                "\nRELEASE BUILD IS DEBUG-SIGNED — KEYSTORE_PATH is not set." +
+                "\nThe debug keystore is generated per machine, so this APK cannot be" +
+                "\ninstalled as an update over any other build." +
+                "\nSee fdroid/README.md > Signing for the fix." +
+                "\n" + "!".repeat(78)
+        )
     }
 }
 
