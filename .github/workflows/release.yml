@@ -3,8 +3,23 @@ name: Build & Release
 on:
   push:
     branches: [main]
+    # Only cut a version when something that affects the APK changed. Docs, site
+    # and worker pushes still run Tests and deploy Pages, they just don't mint a
+    # release — otherwise tags become a build counter rather than a marker of
+    # actual app changes, which also keeps the F-Droid recipe churning.
+    paths:
+      - 'app/**'
+      - 'gradle/**'
+      - 'gradle.properties'
+      - 'version.properties'
+      - 'settings.gradle.kts'
+      - 'build.gradle.kts'
+      - 'gradle/libs.versions.toml'
+      - '.github/workflows/release.yml'
   pull_request:
     branches: [main]
+  # Lets you ship a release for a change outside those paths when you want one.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -65,13 +80,37 @@ jobs:
           VERSION_MINOR=${{ steps.version.outputs.minor }}
           VERSION_PATCH=${{ steps.version.outputs.patch }}
           EOF
+
+          # Write the F-Droid changelog for THIS versionCode in the same commit.
+          # F-Droid reads fastlane metadata from the tag it builds, and the
+          # version number isn't known until this job runs — so a hand-written
+          # changelog could never land in its own tag. Generated from the feat/fix
+          # subjects since the last tag, which is what a user cares about.
+          CHANGELOG="fastlane/metadata/android/en-US/changelogs/${{ steps.version.outputs.version_code }}.txt"
+          mkdir -p "$(dirname "$CHANGELOG")"
+          PREV=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ ! -f "$CHANGELOG" ]; then
+            {
+              git log ${PREV:+${PREV}..HEAD} --pretty=format:'%s' --no-merges \
+                | grep -E '^(feat|fix)(\(.+\))?!?: ' \
+                | sed -E 's/^[a-z]+(\(.+\))?!?: //' \
+                | head -12 \
+                | sed 's/^/- /'
+            } > "$CHANGELOG" || true
+            # Never commit an empty changelog — F-Droid renders it verbatim
+            if [ ! -s "$CHANGELOG" ]; then
+              echo "Maintenance release: internal and packaging changes only." > "$CHANGELOG"
+            fi
+            echo "--- generated $CHANGELOG ---"; cat "$CHANGELOG"
+          fi
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add version.properties
+          git add version.properties "$CHANGELOG"
           if git diff --cached --quiet; then
             echo "version.properties already correct"
           else
-            git commit -m "chore(release): pin version to v${{ steps.version.outputs.version_name }} [skip ci]"
+            git commit -m "chore(release): pin version to v${{ steps.version.outputs.version_name }} and add changelog [skip ci]"
             git push origin HEAD:main
           fi
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
@@ -127,7 +166,10 @@ jobs:
 
           # Group commits by conventional-commit type. `git log` output is read
           # into a file first so the pipeline can't swallow a failure.
-          git log ${RANGE:-} --pretty=format:'%s' --no-merges > /tmp/commits.txt || true
+          # The version-pin commits this workflow makes are plumbing, not
+          # changes, so they are dropped rather than listed under "Internal".
+          git log ${RANGE:-} --pretty=format:'%s' --no-merges \
+            | grep -v '^chore(release): pin version to ' > /tmp/commits.txt || true
 
           # Render a section only when it has entries
           emit() {
