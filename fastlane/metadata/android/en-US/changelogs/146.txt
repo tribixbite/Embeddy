@@ -1,0 +1,1 @@
+- reproducible builds — F-Droid republishes our signed APK
