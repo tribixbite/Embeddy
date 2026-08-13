@@ -115,38 +115,61 @@ jobs:
           fi
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Build Release APKs
+      # F-Droid republishes the APK built here rather than signing its own, so
+      # this key is the app's identity. Without the secrets the build still
+      # succeeds but falls back to a per-runner debug key and warns loudly.
+      - name: Decode signing keystore
+        id: keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "${KEYSTORE_BASE64:-}" ]; then
+            printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "path=$RUNNER_TEMP/release.jks" >> "$GITHUB_OUTPUT"
+            echo "Release keystore decoded."
+          else
+            echo "::warning::KEYSTORE_BASE64 not set — release APKs will be debug-signed and cannot be installed as updates."
+          fi
+
+      # REPRODUCIBILITY: build each ABI separately, exactly as F-Droid does.
+      #
+      # F-Droid publishes this APK rather than signing its own, so its build must
+      # reproduce ours byte-for-byte. Building all ABIs in one invocation does
+      # NOT produce the same per-ABI APK as building that ABI alone — measured
+      # locally: same 452 entries, but one dex differs. Same inputs are otherwise
+      # deterministic, so the split configuration itself is the variable.
+      #
+      # clean + --no-build-cache keeps each pass independent of the last.
+      - name: Build Release APKs (per ABI, matching F-Droid)
         env:
           BUILD_NUMBER: ${{ github.run_number }}
           VERSION_MAJOR: ${{ steps.version.outputs.major }}
           VERSION_MINOR: ${{ steps.version.outputs.minor }}
-        run: ./gradlew assembleRelease --no-daemon --stacktrace
-
-      - name: Rename APKs
-        id: apks
+          KEYSTORE_PATH: ${{ steps.keystore.outputs.path }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          VERSION="${{ steps.version.outputs.version_name }}"
-          APK_DIR="app/build/outputs/apk/release"
+          set -euo pipefail
           mkdir -p final_apks
 
-          for apk in "${APK_DIR}"/*.apk; do
-            filename=$(basename "$apk")
-            if echo "$filename" | grep -q "universal"; then
-              new_name="Embeddy-v${VERSION}-universal.apk"
-            elif echo "$filename" | grep -q "arm64"; then
-              new_name="Embeddy-v${VERSION}-arm64-v8a.apk"
-            elif echo "$filename" | grep -q "armeabi"; then
-              new_name="Embeddy-v${VERSION}-armeabi-v7a.apk"
-            elif echo "$filename" | grep -q "x86_64"; then
-              new_name="Embeddy-v${VERSION}-x86_64.apk"
-            else
-              # Skip unexpected ABIs (mips, riscv64, x86-only, etc.)
-              echo "Skipped: ${filename}"
-              continue
-            fi
-            cp "$apk" "final_apks/${new_name}"
-            echo "Renamed: ${filename} -> ${new_name}"
+          for ABI in armeabi-v7a arm64-v8a x86_64; do
+            echo "::group::Building $ABI"
+            ./gradlew clean assembleRelease -PabiFilter="$ABI" \
+              --no-daemon --no-build-cache --stacktrace
+            cp app/build/outputs/apk/release/Embeddy-v*-"$ABI".apk final_apks/
+            echo "::endgroup::"
           done
+
+          # Universal APK for people who do not know their ABI. Not verified by
+          # F-Droid — it has no build entry — but useful on the releases page.
+          echo "::group::Building universal"
+          ./gradlew clean assembleRelease -PsingleApk \
+            --no-daemon --no-build-cache --stacktrace
+          cp app/build/outputs/apk/release/Embeddy-v*-universal.apk final_apks/
+          echo "::endgroup::"
+
+          ls -1 final_apks/
 
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
@@ -223,9 +246,16 @@ jobs:
               echo "| \`${name##Embeddy-v${{ steps.version.outputs.version_name }}-}\` | ${desc} | ${size} | \`${sha}…\` |"
             done
             echo ""
-            echo "**Version code:** ${{ steps.version.outputs.version_code }} &middot; **Min Android:** 8.0 (API 26)"
+            echo "**Min Android:** 8.0 (API 26)"
             echo ""
             echo "Full checksums are in \`SHA256SUMS.txt\` below."
+            echo ""
+            # F-Droid's UpdateCheckMode: HTTP scrapes these two lines from the
+            # releases page to detect a new version. The exact "Name: value"
+            # shape is matched by UpdateCheckData in the recipe — changing the
+            # wording here silently stops F-Droid seeing updates.
+            echo "Version: ${{ steps.version.outputs.version_name }}"
+            echo "VersionCode: ${{ steps.version.outputs.version_code }}"
             echo "RELEASE_NOTES_EOF"
           } >> "$GITHUB_OUTPUT"
 

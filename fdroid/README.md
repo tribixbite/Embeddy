@@ -11,8 +11,8 @@ a manual step against F-Droid's own infrastructure and has not been done — see
 | FOSS licence | GPL-3.0-only (`LICENSE`) |
 | Public source, git tags per release | tags match `^v[0-9.]+$` |
 | Reproducible version from a tag | Fixed — see [Versioning](#versioning) |
-| Native code built from source | FFmpeg compiled by the recipe |
-| Single APK per build | `./gradlew assembleRelease -PsingleApk` |
+| Reproducible per-ABI builds | CI and recipe both use `-PabiFilter=<abi>` |
+| Published-binary mode | `binary:` + `AllowedAPKSigningKeys` in the recipe |
 | Listing text, changelogs, screenshots | `fastlane/metadata/android/en-US/` |
 | Build recipe | `fdroid/app.embeddy.yml` (draft) |
 | No Google Play Services / analytics / ads / tracking | Verified — no such dependency |
@@ -35,137 +35,104 @@ git checkout v0.1.40
 ./gradlew assembleRelease -PsingleApk    # -> versionName 0.1.40, versionCode 140
 ```
 
+## Reproducible builds — how this app is published
+
+Embeddy uses F-Droid's **published-binary** mode rather than letting F-Droid sign
+its own APK. F-Droid builds from source, compares the result to the APK on our
+GitHub Releases page and, if they match, publishes *our* signed APK. The file on
+f-droid.org and the file on GitHub Releases are then the same bytes, so users can
+switch between the two without uninstalling.
+
+Two recipe fields drive this:
+
+- `binary:` — the GitHub Releases URL to compare against, per ABI.
+- `AllowedAPKSigningKeys:` — SHA-256 of our release signing certificate.
+
+### Build each ABI separately — on both sides
+
+This is the part that is easy to get wrong. **Building all ABIs in one Gradle
+invocation does not produce the same per-ABI APK as building that ABI alone.**
+Measured locally on arm64-v8a: both APKs had the same 452 entries and matching
+CRCs for 451 of them, with one dex differing. Running the *same* command twice
+was fully deterministic, so the split configuration itself is the variable.
+
+So CI builds each ABI in its own `clean` invocation with `-PabiFilter=<abi>`,
+which is exactly what the recipe does. If you change one side, change the other.
+
+### versionCodes
+
+Base is `MAJOR*10000 + MINOR*100 + PATCH`; each split APK gets `base*10 + N`
+where N is 1 (armeabi-v7a), 2 (arm64-v8a), 3 (x86_64). `VercodeOperation` in the
+recipe reproduces that arithmetic, so the two must stay in sync. The build fails
+if MINOR or PATCH reaches 100, because that would collide with the next place
+value and could emit a versionCode below one already published.
+
+### Update detection
+
+`UpdateCheckMode: HTTP` scrapes the releases page for two literal lines that the
+release workflow appends to every set of notes:
+
+```
+Version: 0.1.46
+VersionCode: 146
+```
+
+`UpdateCheckData` matches those exact shapes. Rewording them stops F-Droid
+seeing new releases — silently.
+
 ## Dependency provenance
 
-**FFmpeg is built from source by the recipe** — see [Decision](#decision-build-from-source)
-below for how and why. AVIF encoding still uses a prebuilt,
-`com.github.awxkee:avif-coder` via JitPack, which is in `scanner.py`'s
-`allowed_repos`; JitPack builds from public GitHub source, so provenance is
-traceable even though its builds are not reproducible.
+FFmpeg is a prebuilt AAR from Maven Central
+(`com.moizhassan.ffmpeg:ffmpeg-kit-16kb`), a community rebuild of
+`arthenica/ffmpeg-kit` — retired 2025-01-06, binaries pulled from Maven Central
+2025-04-01 — that adds the 16 KB page-size support API 35 requires. AVIF uses
+`com.github.awxkee:avif-coder` via JitPack. Both repositories are in
+`fdroidserver/scanner.py`'s `allowed_repos`, and the scanner never inspects
+artifact contents.
 
-The rest of this section records why the FFmpeg decision went the way it did, so
-the reasoning survives if someone revisits it.
+Precedent for a prebuilt FFmpeg from Maven Central: **Seal**
+(`com.junkfood.seal`) and **YTDLnis** (`com.deniscerri.ytdl`) both consume a
+third-party republished FFmpeg AAR as a plain gradle dependency, and both are
+live in the official repo. A survey of `fdroiddata` (9029 apps) found no reviewer
+objection to a prebuilt FFmpeg from a trusted Maven repo — the from-source
+recipes were driven by AARs *committed into app repos*, which is a different
+situation.
 
-Ordinary (non-F-Droid) builds resolve `com.moizhassan.ffmpeg:ffmpeg-kit-16kb:6.1.1`
-from Maven Central, source at <https://github.com/moizhassankh/ffmpeg-kit-android-16KB>.
-Upstream `arthenica/ffmpeg-kit` was retired on 2025-01-06 and its binaries were
-pulled from Maven Central on 2025-04-01, so the official artifact no longer
-exists; this is a community rebuild that also adds the 16 KB page-size support
-API 35 requires.
+### Why not build FFmpeg from source
 
-### What other F-Droid apps actually do
+It was implemented, and then deliberately reverted, because **it is incompatible
+with reproducible builds**. Verification requires F-Droid's APK to match ours
+byte-for-byte. A cross-compiled FFmpeg is not bit-reproducible across machines —
+the shipped `.so` files even embed the builder's absolute paths (the current
+artifact's configure line names a personal macOS home directory). For the APKs to
+match, both sides must consume the identical prebuilt artifact.
 
-Surveyed from a clone of `fdroiddata` (9029 apps, 591 srclibs) rather than from
-policy reading:
+That trade is worth naming plainly: reproducible builds buy a verifiable link
+between source and published binary, at the cost of trusting one prebuilt
+dependency. Building from source would invert it.
 
-| Approach | Apps |
-|---|---|
-| Build FFmpeg (or ffmpeg-kit) from source in the recipe | ~24 |
-| Consume a prebuilt FFmpeg AAR from Maven Central | 2 confirmed (Seal, YTDLnis) |
+`app/build.gradle.kts` still supports dropping a locally built AAR at
+`app/libs/ffmpeg-kit.aar` (gitignored) if you ever want the other trade — it is
+tested and works, it is just not what the recipe uses.
 
-From-source is the dominant pattern by a wide margin. But the two prebuilt cases
-are close precedent for us: **Seal** (`com.junkfood.seal`) and **YTDLnis**
-(`com.deniscerri.ytdl`) both ship a third-party *republished* FFmpeg AAR
-(`io.github.junkfood02.youtubedl-android:ffmpeg`, republished by someone other
-than the upstream author) as a plain gradle dependency — no srclib, no
-`scandelete`, no from-source step — and both are live in the official repo.
-
-Two further findings that matter:
-
-- **No reviewer objection to a prebuilt FFmpeg from a trusted Maven repo was
-  found** in `fdroid/rfp` or `fdroiddata` issues and merge requests. The
-  from-source recipes were driven by AARs *committed into the app's own git
-  repo* (which F-Droid always requires be deleted and rebuilt) — a different
-  situation from a Maven coordinate.
-- The automated scanner passes us. `fdroidserver/scanner.py` lists
-  `repo1.maven.org/maven2` and `jitpack.io` in `allowed_repos`, and only
-  raises `unknown maven repo` for repos outside that list. It never inspects
-  artifact contents.
-
-So the current dependency is defensible, not disqualifying. The weaknesses are
-about provenance quality rather than policy:
-
-- **The declared licence is wrong.** The POM says LGPL-3.0, but the shipped
-  binary is configured `--enable-gpl --enable-version3`, which makes it
-  GPL-3.0. Harmless for a GPL-3.0-only app, but "simply being included in one of
-  those repositories is not enough" is aimed at exactly this.
-- **No traceable provenance.** No `-sources.jar` is published, and the Maven
-  publish step is not in CI. The configure line baked into `libavutil.so` shows
-  it was built from a personal macOS home directory, not a reproducible pipeline.
-- **It tracks a retired 6.1.1** — no security updates.
-
-### Decision: build from source
-
-`app.embeddy.yml` compiles FFmpeg from source. That removes every weakness above
-— no licence-metadata mismatch, no untraceable binary, and the FFmpeg version is
-ours to move — and it matches what most FFmpeg apps in F-Droid already do.
-
-The recipe mirrors `com.fadcam`'s accepted build: same `anonfaded-ffmpeg-kit-16KB`
-srclib, **pinned to the same commit** (`d633c47`), same `ndk: r27`. Deliberately
-the proven combination rather than the srclib's newer HEAD, which has never been
-built on the buildserver. It differs only in enabling far fewer libraries.
-
-Two details that are easy to get wrong and are worth preserving:
-
-- **`--enable-libwebp` is load-bearing.** FFmpeg's `configure` probes libwebpmux
-  with `check_pkg_config`, not `require_pkg_config`, so omitting it *silently*
-  drops the `libwebp_anim` encoder. The build succeeds and every conversion then
-  fails at runtime with `Unknown encoder 'libwebp_anim'`.
-- **`--enable-gpl` is needed by exactly one filter**, `hqdn3d` (denoise).
-  Verified against FFmpeg's `configure`: `hqdn3d_filter_deps="gpl"`, while
-  `scale`, `fps`, `crop`, `unsharp`, `palettegen`, `paletteuse`, `trim`,
-  `setpts` and `concat` have no GPL dependency. The app is GPL-3.0-only so this
-  costs nothing — but if denoise is ever dropped, drop the flag with it.
-
-### No build-script patching
-
-The recipe never `sed`s `build.gradle.kts`. `app/build.gradle.kts` picks up
-`app/libs/ffmpeg-kit.aar` when that file exists and falls back to the Maven
-coordinate otherwise, and `-PsingleApk` is a supported flag. A sed patch is the
-usual approach in other recipes, and it silently stops applying the moment the
-patched lines are reformatted.
-
-Because a `files()` AAR carries no POM, ffmpeg-kit's transitive
-`com.arthenica:smart-exception-java` is declared explicitly on that path.
-
-The local-AAR path is verified end to end: staging a real ffmpeg-kit AAR at
-`app/libs/ffmpeg-kit.aar` builds, resolves `smart-exception-java`, drops the
-Maven coordinate, installs, and converts a 30-frame animated WebP on device with
-`libwebp_anim` present.
-
-`app/libs/*.aar` is gitignored — F-Droid requires in-repo binaries be deleted and
-rebuilt, and committing one is what forces most other apps into `rm`/`scandelete`
-workarounds.
-
-### Alternatives considered
-
-**Keep the Maven prebuilt.** Zero effort, scanner-clean, with live precedent
-(Seal, YTDLnis). Rejected because the from-source path turned out to be cheap —
-no new srclib, a proven toolchain — and it leaves the licence-metadata and
-provenance problems unanswered.
-
-**FFmpegKitNext.** The official successor, current with FFmpeg 8.x, has libwebp.
-Rejected *for now*: distributed as source only, its Android entry point is a Nix
-flake (no fdroiddata recipe uses Nix), and its API is now Kotlin — a real code
-migration. A reasonable 12-month target, a bad submission blocker.
-
-**Dropping FFmpeg.** `WebPFrameSplitter` already decodes animated WebP without it
-and `MediaCodec` can decode video, but FFmpeg still does the whole filter chain
-and the `libwebp_anim` encoding. That is a rewrite, not a flag change.
+Known defect in the artifact worth disclosing in the merge request: its POM
+declares LGPL-3.0 while the binary is built `--enable-gpl --enable-version3`,
+i.e. actually GPL-3.0. Compatible with this app's GPL-3.0-only licence, but the
+metadata is wrong.
 
 ### Size note
 
 FFmpeg is 31.5 MB of the 44.6 MB of arm64 native code (71%), with `libavcodec`
 alone at 18 MB. The build enables 24 external libraries — libx265, libaom,
 libopenh264, libvpx, libass, even libtesseract (OCR) — of which Embeddy uses
-only libwebp. Going the from-source route is also the opportunity to configure a
-minimal build and cut most of that, which would shrink the universal APK well
-below its current ~105 MB.
+only libwebp.
 
-**AVIF** — `com.github.awxkee:avif-coder` via JitPack. JitPack builds from a
-public GitHub source, so provenance is traceable, but JitPack does not offer
-reproducible or verifiable builds. Moving this to a Maven Central release would
-strengthen it.
+Trimming that needs a custom FFmpeg build, which is exactly what reproducible
+builds rule out unless the artifact is published somewhere both CI and F-Droid
+can fetch the *same* bytes from. The realistic route is publishing a minimal
+ffmpeg-kit build to Maven Central under our own account and depending on that —
+which would fix the provenance and licence-metadata problems too. Worth doing;
+out of scope for the first submission.
 
 ## Anti-features
 
@@ -181,20 +148,19 @@ to work it out:
 
 ## Keeping the recipe current
 
-`fdroid/app.embeddy.yml` pins one `Builds` entry to a specific tag. That entry is
-only the starting point — `UpdateCheckMode: Tags` and `AutoUpdateMode: Version v%v`
-let F-Droid pick up later tags on its own once the app is in.
+`fdroid/app.embeddy.yml` pins three `Builds` entries (one per ABI) to a specific
+tag. Those are only the starting point — `UpdateCheckMode: HTTP` plus
+`AutoUpdateMode: Version v%v` let F-Droid pick up later releases on its own once
+the app is in, deriving each ABI's versionCode via `VercodeOperation`.
 
-Before opening the merge request, set the `Builds` entry, `CurrentVersion` and
-`CurrentVersionCode` to the newest tag, and make sure
-`fastlane/metadata/android/en-US/changelogs/<versionCode>.txt` exists for it.
+Before opening the merge request, set the three `Builds` entries,
+`CurrentVersion` and `CurrentVersionCode` to the newest tag, and make sure
+`fastlane/metadata/android/en-US/changelogs/<versionCode>.txt` exists for it
+(CI generates that file automatically — it uses the *base* versionCode).
 
-Note that `release.yml` currently cuts a release on **every** push to `main`,
-including documentation-only pushes, so the newest tag moves faster than the app
-actually changes. Restricting the release job to pushes that touch `app/**`,
-`gradle/**` or `version.properties` would make versions correspond to real
-changes — worth doing before submission, but it changes release cadence, so it
-is left as a decision for the maintainer.
+`release.yml` only cuts a release when something affecting the APK changes
+(`app/**`, `gradle/**`, the build scripts, `version.properties`), so tags track
+real app changes rather than every documentation push.
 
 ## Submitting
 

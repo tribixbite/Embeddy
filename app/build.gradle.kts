@@ -17,12 +17,52 @@ val versionMinor = System.getenv("VERSION_MINOR")?.toIntOrNull()
 val versionPatch = buildNumber
     ?: (versionProps["VERSION_PATCH"] as String).toInt()
 
+// Base versionCode = MAJOR*10000 + MINOR*100 + PATCH.
+// Per-ABI split APKs get base*10 + abiCode, which is what F-Droid's
+// `VercodeOperation: 10 * %c + N` reproduces. The two must agree exactly or
+// F-Droid will look for a versionCode our APKs do not carry.
+val baseVersionCode = versionMajor * 10000 + versionMinor * 100 + versionPatch
+
+// Guard the scheme: MINOR or PATCH reaching 100 would collide with the next
+// place value and could emit a versionCode lower than an already-published one,
+// which Android refuses to install over.
+require(versionMinor < 100 && versionPatch < 100) {
+    "versionCode scheme collision: MINOR ($versionMinor) and PATCH ($versionPatch) " +
+        "must stay below 100 — see the versionCode formula in app/build.gradle.kts"
+}
+
+/** ABI -> versionCode suffix. Must match VercodeOperation in the F-Droid recipe. */
+val abiVersionCodes = mapOf(
+    "armeabi-v7a" to 1,
+    "arm64-v8a" to 2,
+    "x86_64" to 3,
+)
+
+/** ABIs shipped in a normal release build. */
+val RELEASE_ABIS = arrayOf("arm64-v8a", "armeabi-v7a", "x86_64")
+
+/**
+ * Build a single ABI (`-PabiFilter=arm64-v8a`), used by F-Droid.
+ * Validated eagerly so a typo fails the build instead of silently producing
+ * an APK with no native libraries.
+ */
+val abiFilter: String? = (project.findProperty("abiFilter") as String?)
+    ?.trim()
+    ?.takeIf { it.isNotEmpty() }
+    ?.also {
+        require(it in abiVersionCodes) {
+            "Unknown -PabiFilter=$it — expected one of ${abiVersionCodes.keys}"
+        }
+    }
+
 /**
  * A locally built ffmpeg-kit AAR, or null to use the Maven coordinate.
  *
- * F-Droid compiles FFmpeg from source on its buildserver and places the AAR
- * here; see fdroid/README.md. Resolved once so the choice is logged exactly
- * once per configuration rather than per dependency block.
+ * Not used by the F-Droid recipe: reproducible builds require F-Droid and CI to
+ * consume the *identical* artifact, and a cross-compiled FFmpeg is not
+ * bit-reproducible across machines (see fdroid/README.md). This stays as a
+ * tested escape hatch for anyone who wants to build FFmpeg themselves — drop the
+ * AAR at app/libs/ffmpeg-kit.aar (gitignored) and it is picked up automatically.
  */
 val localFfmpegAar: File? = file("libs/ffmpeg-kit.aar").takeIf { it.isFile }
     ?.also { logger.lifecycle("ffmpeg-kit: using local AAR at ${it.relativeTo(rootDir)}") }
@@ -35,7 +75,7 @@ android {
         applicationId = "app.embeddy"
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
-        versionCode = versionMajor * 10000 + versionMinor * 100 + versionPatch
+        versionCode = baseVersionCode
         versionName = "$versionMajor.$versionMinor.$versionPatch"
 
         vectorDrawables {
@@ -80,16 +120,17 @@ android {
 
     splits {
         abi {
-            // F-Droid (and anyone else who wants one artifact) builds with
-            // -PsingleApk to get a single all-ABI APK instead of per-ABI splits,
-            // because F-Droid publishes exactly one APK per build entry.
+            // -PsingleApk collapses everything into one all-ABI APK.
             isEnable = !project.hasProperty("singleApk")
             // reset() is required — include() ADDS to the default set (every known
             // ABI), so without it AGP also emits empty mips/mips64/riscv64/armeabi/x86
             // APKs that contain no FFmpeg .so files and crash on first use.
             reset()
-            include("arm64-v8a", "armeabi-v7a", "x86_64")
-            isUniversalApk = true
+            // -PabiFilter=<abi> builds exactly one ABI. F-Droid uses this: it
+            // publishes one APK per build entry and has to reproduce ours
+            // byte-for-byte, so it builds each ABI separately with no universal.
+            include(*(abiFilter?.let { arrayOf(it) } ?: RELEASE_ABIS))
+            isUniversalApk = abiFilter == null
         }
     }
 
@@ -120,6 +161,34 @@ android {
                 "META-INF/version-control-info.textproto",
                 "META-INF/com/android/build/gradle/app-metadata.properties",
             )
+        }
+    }
+}
+
+// Per-ABI versionCodes and final filenames.
+//
+// F-Droid publishes our own signed APK after reproducing it from source, so the
+// names and versionCodes here are what the recipe references — they are part of
+// the contract, not cosmetic. Naming the outputs in Gradle rather than renaming
+// in CI keeps a locally built APK identical to a released one.
+androidComponents {
+    onVariants { variant ->
+        variant.outputs.forEach { output ->
+            val abi = (output as? com.android.build.api.variant.impl.VariantOutputImpl)
+                ?.filters?.find { it.filterType == com.android.build.api.variant.FilterConfiguration.FilterType.ABI }
+                ?.identifier
+            val impl = output as? com.android.build.api.variant.impl.VariantOutputImpl ?: return@forEach
+
+            val name = variant.name
+            if (abi != null) {
+                abiVersionCodes[abi]?.let { impl.versionCode.set(baseVersionCode * 10 + it) }
+                impl.outputFileName.set("Embeddy-v${versionMajor}.${versionMinor}.${versionPatch}-$abi.apk")
+            } else if (name.contains("release", ignoreCase = true) || name.contains("debug", ignoreCase = true)) {
+                // Universal (or non-split) output keeps the base versionCode
+                impl.outputFileName.set(
+                    "Embeddy-v${versionMajor}.${versionMinor}.${versionPatch}-universal.apk"
+                )
+            }
         }
     }
 }

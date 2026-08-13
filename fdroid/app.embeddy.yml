@@ -1,4 +1,4 @@
-# F-Droid build recipe for Embeddy.
+# F-Droid build recipe for Embeddy — reproducible-build / published-binary mode.
 #
 # This file is a *draft of what belongs in fdroiddata*, kept here so it is
 # reviewed alongside the code it builds. To submit, copy it to
@@ -7,12 +7,21 @@
 #
 # Listing text, screenshots and changelogs are NOT duplicated here: F-Droid
 # reads those from fastlane/metadata/android/en-US/ in this repository.
+#
+# `binary:` puts this app in reproducible-build mode: F-Droid builds from source,
+# compares the result to the APK published on GitHub Releases, and — if they
+# match — publishes OUR signed APK rather than signing its own. So the APK from
+# f-droid.org and the one from GitHub Releases are the same file, and users can
+# move between the two without uninstalling.
+#
+# AllowedAPKSigningKeys pins the developer key that must have signed it.
 
 Categories:
   - Multimedia
   - Graphics
 License: GPL-3.0-only
 AuthorName: tribixbite
+AuthorEmail: willstone@gmail.com
 SourceCode: https://github.com/tribixbite/Embeddy
 IssueTracker: https://github.com/tribixbite/Embeddy/issues
 Changelog: https://github.com/tribixbite/Embeddy/releases
@@ -22,108 +31,96 @@ AutoName: Embeddy
 RepoType: git
 Repo: https://github.com/tribixbite/Embeddy.git
 
+# One entry per ABI. -PabiFilter builds exactly that ABI with no universal APK,
+# which is how the released per-ABI APKs are produced too — building all ABIs in
+# one invocation yields a different APK for the same ABI, so both sides must
+# build them separately or verification fails.
 Builds:
-  - versionName: 0.1.43
-    versionCode: 143
-    commit: v0.1.43
+  - versionName: 0.1.46
+    versionCode: 1461
+    commit: v0.1.46
     subdir: app
-
-    # FFmpeg is compiled from source rather than taken from Maven Central.
-    # This mirrors com.fadcam's accepted recipe, which builds the same srclib at
-    # the same pinned commit with the same NDK — a configuration already proven
-    # on the buildserver — differing only in the enabled-library set.
-    #
-    # /home/embeddy exists because ffmpeg-kit's build breaks on long paths; the
-    # srclib is moved somewhere short before building. Same reason FadCam uses
-    # /home/faded.
-    sudo:
-      - apt-get update
-      - apt-get install -y make autoconf automake libtool pkg-config curl doxygen
-        nasm cmake gcc gperf texinfo yasm bison autogen wget autopoint meson
-        ninja-build ragel groff gtk-doc-tools libtasn1-6-dev libtasn1-bin
-        libgnutls28-dev libunistring-dev
-      - mkdir -p /home/embeddy/
-      - chown vagrant /home/embeddy/
-    srclibs:
-      - anonfaded-ffmpeg-kit-16KB@d633c47ca4b47acfc07542e9566b04dfe061af82
-    ndk: r27
-    # Building FFmpeg for three ABIs is slow; comparable recipes use this ceiling.
-    timeout: 10800
-
-    build:
-      # Enabled libraries are deliberately minimal — only libwebp is needed.
-      # Everything else this app asks FFmpeg for (scale, fps, crop, unsharp,
-      # hqdn3d, palettegen, paletteuse, trim, setpts, concat) is built in, and
-      # video decoding goes through the platform via android-media-codec.
-      #
-      # --enable-libwebp is load-bearing. FFmpeg's configure probes libwebpmux
-      # with check_pkg_config rather than require_pkg_config, so without it the
-      # libwebp_anim encoder is silently omitted and every conversion fails at
-      # runtime with "Unknown encoder 'libwebp_anim'".
-      #
-      # --enable-gpl is required by exactly one filter, hqdn3d (denoise); every
-      # other filter used here is LGPL-clean. The app is GPL-3.0-only so GPL
-      # FFmpeg is fine. If denoise is ever dropped, drop --enable-gpl with it.
-      #
-      # x86 is disabled because the app ships arm64-v8a, armeabi-v7a and x86_64
-      # only. arm-v7a-neon is a separate ffmpeg-kit variant we do not ship.
-      - mv $$anonfaded-ffmpeg-kit-16KB$$ /home/embeddy/ffmpeg-kit
-      - pushd /home/embeddy/ffmpeg-kit
-      - JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 ANDROID_SDK_ROOT=$$SDK$$
-        ANDROID_NDK_ROOT=$$NDK$$
-        ./android.sh --disable-x86 --disable-arm-v7a-neon
-        --enable-libwebp --enable-gpl --enable-android-media-codec
-        --api-level=26
-      - popd
-      - mkdir -p libs
-      - mv /home/embeddy/ffmpeg-kit/prebuilt/bundle-android-aar/ffmpeg-kit/*.aar
-        libs/ffmpeg-kit.aar
-
     gradle:
       - yes
-    # -PsingleApk: the project emits per-ABI splits plus a universal APK by
-    # default, but F-Droid publishes exactly one APK per build entry. Both this
-    # and the libs/ffmpeg-kit.aar pickup above are supported paths in
-    # app/build.gradle.kts, so this recipe never patches the build script —
-    # a sed patch would silently stop applying when those lines are reformatted.
     gradleprops:
-      - singleApk
+      - abiFilter=armeabi-v7a
+    binary: https://github.com/tribixbite/Embeddy/releases/download/v%v/Embeddy-v%v-armeabi-v7a.apk
+
+  - versionName: 0.1.46
+    versionCode: 1462
+    commit: v0.1.46
+    subdir: app
+    gradle:
+      - yes
+    gradleprops:
+      - abiFilter=arm64-v8a
+    binary: https://github.com/tribixbite/Embeddy/releases/download/v%v/Embeddy-v%v-arm64-v8a.apk
+
+  - versionName: 0.1.46
+    versionCode: 1463
+    commit: v0.1.46
+    subdir: app
+    gradle:
+      - yes
+    gradleprops:
+      - abiFilter=x86_64
+    binary: https://github.com/tribixbite/Embeddy/releases/download/v%v/Embeddy-v%v-x86_64.apk
 
 MaintainerNotes: |
-    Versioning: the release workflow writes the resolved version into
+    Reproducible builds. The released APKs are built one ABI at a time with
+    -PabiFilter=<abi>, the same way this recipe builds them, because building
+    every ABI in a single Gradle invocation produces a different APK for the
+    same ABI (measured: identical entry list, one differing dex). Same inputs
+    are otherwise deterministic.
+
+    Versioning. The release workflow writes the resolved version into
     version.properties and tags that commit, so a build from the tag reproduces
-    the published versionName/versionCode without any environment variables.
-    Building a tag without BUILD_NUMBER set is the supported path.
+    the published versionName/versionCode with no environment variables set.
+    Base versionCode is MAJOR*10000 + MINOR*100 + PATCH; split APKs use
+    base*10 + {armeabi-v7a:1, arm64-v8a:2, x86_64:3}, which is what
+    VercodeOperation reproduces. The build fails if MINOR or PATCH reaches 100,
+    since that would collide with the next place value.
 
-    Native code: FFmpeg is built from source by this recipe. Nothing about that
-    requires patching the app's build script — app/build.gradle.kts picks up
-    app/libs/ffmpeg-kit.aar when the file exists and falls back to the Maven
-    coordinate otherwise, and -PsingleApk is a supported flag. Both are exercised
-    upstream, so a reformat of the build script cannot silently break this recipe
-    the way a sed patch would.
-
-    The AAR carries no POM, so ffmpeg-kit's transitive dependency
-    com.arthenica:smart-exception-java is declared explicitly on that code path.
-
-    Why this srclib: upstream arthenica/ffmpeg-kit was retired on 2025-01-06 and
-    its binaries were pulled from Maven Central on 2025-04-01. anonfaded-ffmpeg-kit-16KB
-    is a maintained fork adding the 16 KB page-size support API 35 requires, and
-    it is already in fdroiddata — com.fadcam builds this exact commit with this
-    exact NDK, so the toolchain is proven rather than assumed.
-
-    Ordinary (non-F-Droid) builds still resolve
-    com.moizhassan.ffmpeg:ffmpeg-kit-16kb from Maven Central. Reviewers should
-    note that artifact declares LGPL-3.0 in its POM while being built
-    --enable-gpl, i.e. actually GPL-3.0. It is not used by this recipe.
-
-    AVIF encoding uses com.github.awxkee:avif-coder via JitPack, which is in
+    Native code. FFmpeg is a prebuilt AAR from Maven Central
+    (com.moizhassan.ffmpeg:ffmpeg-kit-16kb), a community rebuild of
+    arthenica/ffmpeg-kit — retired 2025-01-06, binaries pulled from Maven
+    Central 2025-04-01 — that adds the 16 KB page-size support API 35 requires.
+    AVIF uses com.github.awxkee:avif-coder via JitPack. Both repos are in
     scanner.py's allowed_repos.
+
+    Compiling FFmpeg from source was implemented and then deliberately reverted:
+    it is incompatible with reproducible builds. Verification requires F-Droid's
+    APK to match ours byte-for-byte, and a cross-compiled FFmpeg is not
+    bit-reproducible across machines — the shipped .so files even embed the
+    builder's absolute paths. Both sides must consume the identical prebuilt
+    artifact for the APKs to match. Precedent for a prebuilt FFmpeg from Maven
+    Central: Seal (com.junkfood.seal) and YTDLnis (com.deniscerri.ytdl).
+
+    Note that artifact's POM declares LGPL-3.0 while the binary is built
+    --enable-gpl --enable-version3, i.e. GPL-3.0. Compatible with this app's
+    GPL-3.0-only licence, but the artifact metadata is wrong.
+
+    The recipe never patches the build script. -PabiFilter and -PsingleApk are
+    supported flags in app/build.gradle.kts, so a reformat cannot silently break
+    this recipe the way a sed patch would.
 
     No Google Play Services, no analytics, no ads, no tracking. Network access
     is limited to URLs the user types (Inspect) and files the user chooses to
     upload (Upload, to 0x0.st or catbox.moe).
 
+# TODO before submitting: replace with the SHA-256 of the release signing
+# certificate. Get it from any signed release APK:
+#   apksigner verify --print-certs Embeddy-v0.1.46-arm64-v8a.apk
+# (the "Signer #1 certificate SHA-256 digest" value, lowercase, no colons)
+AllowedAPKSigningKeys: REPLACE_WITH_SIGNING_CERT_SHA256
+
 AutoUpdateMode: Version v%v
-UpdateCheckMode: Tags ^v[0-9.]+$
-CurrentVersion: 0.1.43
-CurrentVersionCode: 143
+UpdateCheckMode: HTTP
+VercodeOperation:
+  - 10 * %c + 1
+  - 10 * %c + 2
+  - 10 * %c + 3
+UpdateCheckData: https://github.com/tribixbite/Embeddy/releases/latest|VersionCode:\
+  (\d+)|.|Version:\ ([\d.]+)
+CurrentVersion: 0.1.46
+CurrentVersionCode: 1463
