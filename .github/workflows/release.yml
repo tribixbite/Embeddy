@@ -61,6 +61,94 @@ jobs:
       - name: Unit tests
         run: ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
 
+      # F-Droid republishes the APK built here rather than signing its own, so
+      # this key is the app's identity. Without the secrets the build still
+      # succeeds but falls back to a per-runner debug key and warns loudly.
+      - name: Decode signing keystore
+        id: keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_BASE64:-}" ]; then
+            echo "::warning::KEYSTORE_BASE64 not set — release APKs will be debug-signed and cannot be installed as updates."
+            exit 0
+          fi
+
+          # Fail here with a clear message rather than 3 ABI builds later with
+          # "keystore password was incorrect" from deep inside packageRelease.
+          missing=""
+          [ -n "${KEYSTORE_PASSWORD:-}" ] || missing="$missing KEYSTORE_PASSWORD"
+          [ -n "${KEY_PASSWORD:-}" ] || missing="$missing KEY_PASSWORD"
+          [ -n "${KEY_ALIAS:-}" ] || missing="$missing KEY_ALIAS"
+          if [ -n "$missing" ]; then
+            echo "::error::KEYSTORE_BASE64 is set but these secrets are missing:$missing"
+            echo "Set them with: gh secret set <NAME>   (see fdroid/README.md > Signing)"
+            exit 1
+          fi
+
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+
+          # Verify the password up front — same reason.
+          if ! keytool -list -keystore "$RUNNER_TEMP/release.jks" \
+                 -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null 2>&1; then
+            echo "::error::Keystore decoded but KEYSTORE_PASSWORD/KEY_ALIAS do not open it."
+            exit 1
+          fi
+
+          echo "path=$RUNNER_TEMP/release.jks" >> "$GITHUB_OUTPUT"
+          echo "Release keystore decoded and verified."
+
+      # REPRODUCIBILITY: build each ABI separately, exactly as F-Droid does.
+      #
+      # F-Droid publishes this APK rather than signing its own, so its build must
+      # reproduce ours byte-for-byte. Building all ABIs in one invocation does
+      # NOT produce the same per-ABI APK as building that ABI alone — measured
+      # locally: same 452 entries, but one dex differs. Same inputs are otherwise
+      # deterministic, so the split configuration itself is the variable.
+      #
+      # clean + --no-build-cache keeps each pass independent of the last.
+      - name: Build Release APKs (per ABI, matching F-Droid)
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+          VERSION_MAJOR: ${{ steps.version.outputs.major }}
+          VERSION_MINOR: ${{ steps.version.outputs.minor }}
+          KEYSTORE_PATH: ${{ steps.keystore.outputs.path }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          mkdir -p final_apks
+
+          for ABI in armeabi-v7a arm64-v8a x86_64; do
+            echo "::group::Building $ABI"
+            ./gradlew clean assembleRelease -PabiFilter="$ABI" \
+              --no-daemon --no-build-cache --stacktrace
+            cp app/build/outputs/apk/release/Embeddy-v*-"$ABI".apk final_apks/
+            echo "::endgroup::"
+          done
+
+          # Universal APK for people who do not know their ABI. Not verified by
+          # F-Droid — it has no build entry — but useful on the releases page.
+          echo "::group::Building universal"
+          ./gradlew clean assembleRelease -PsingleApk \
+            --no-daemon --no-build-cache --stacktrace
+          cp app/build/outputs/apk/release/Embeddy-v*-universal.apk final_apks/
+          echo "::endgroup::"
+
+          ls -1 final_apks/
+
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: embeddy-v${{ steps.version.outputs.version_name }}
+          path: final_apks/*.apk
+          retention-days: 30
+
       # Write the resolved version into the tree and tag *that* commit.
       # Without this the version lives only in this job's environment, so anyone
       # building from the tag — F-Droid included — gets whatever stale patch
@@ -114,69 +202,6 @@ jobs:
             git push origin HEAD:main
           fi
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
-      # F-Droid republishes the APK built here rather than signing its own, so
-      # this key is the app's identity. Without the secrets the build still
-      # succeeds but falls back to a per-runner debug key and warns loudly.
-      - name: Decode signing keystore
-        id: keystore
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-        run: |
-          if [ -n "${KEYSTORE_BASE64:-}" ]; then
-            printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
-            echo "path=$RUNNER_TEMP/release.jks" >> "$GITHUB_OUTPUT"
-            echo "Release keystore decoded."
-          else
-            echo "::warning::KEYSTORE_BASE64 not set — release APKs will be debug-signed and cannot be installed as updates."
-          fi
-
-      # REPRODUCIBILITY: build each ABI separately, exactly as F-Droid does.
-      #
-      # F-Droid publishes this APK rather than signing its own, so its build must
-      # reproduce ours byte-for-byte. Building all ABIs in one invocation does
-      # NOT produce the same per-ABI APK as building that ABI alone — measured
-      # locally: same 452 entries, but one dex differs. Same inputs are otherwise
-      # deterministic, so the split configuration itself is the variable.
-      #
-      # clean + --no-build-cache keeps each pass independent of the last.
-      - name: Build Release APKs (per ABI, matching F-Droid)
-        env:
-          BUILD_NUMBER: ${{ github.run_number }}
-          VERSION_MAJOR: ${{ steps.version.outputs.major }}
-          VERSION_MINOR: ${{ steps.version.outputs.minor }}
-          KEYSTORE_PATH: ${{ steps.keystore.outputs.path }}
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: |
-          set -euo pipefail
-          mkdir -p final_apks
-
-          for ABI in armeabi-v7a arm64-v8a x86_64; do
-            echo "::group::Building $ABI"
-            ./gradlew clean assembleRelease -PabiFilter="$ABI" \
-              --no-daemon --no-build-cache --stacktrace
-            cp app/build/outputs/apk/release/Embeddy-v*-"$ABI".apk final_apks/
-            echo "::endgroup::"
-          done
-
-          # Universal APK for people who do not know their ABI. Not verified by
-          # F-Droid — it has no build entry — but useful on the releases page.
-          echo "::group::Building universal"
-          ./gradlew clean assembleRelease -PsingleApk \
-            --no-daemon --no-build-cache --stacktrace
-          cp app/build/outputs/apk/release/Embeddy-v*-universal.apk final_apks/
-          echo "::endgroup::"
-
-          ls -1 final_apks/
-
-      - name: Upload APK artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: embeddy-v${{ steps.version.outputs.version_name }}
-          path: final_apks/*.apk
-          retention-days: 30
 
       - name: Generate release notes
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
