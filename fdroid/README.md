@@ -218,6 +218,20 @@ create:
 2. Add repository secrets: `KEYSTORE_BASE64` (`base64 -w0 embeddy-release.jks`),
    `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`.
 
+   **Run these from a real terminal.** `gh secret set NAME` with no `--body`
+   reads the value from stdin, so running it anywhere without a TTY — a script,
+   a CI step, an editor's shell integration — silently stores an *empty*
+   string. The secret then appears in `gh secret list` and looks fine, but
+   arrives at the workflow blank. In a step's env dump a non-empty secret shows
+   as `***` and an empty one shows as nothing, which is the quickest way to
+   tell them apart.
+
+   To set one non-interactively without putting the value in shell history:
+
+   ```sh
+   read -rs PW && printf '%s' "$PW" | gh secret set KEYSTORE_PASSWORD && unset PW
+   ```
+
 3. In `release.yml`, before the build step, materialise it and point the existing
    env vars at it:
 

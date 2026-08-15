@@ -80,13 +80,22 @@ jobs:
 
           # Fail here with a clear message rather than 3 ABI builds later with
           # "keystore password was incorrect" from deep inside packageRelease.
+          #
+          # Note "missing" also covers *empty*: `gh secret set NAME` reads the
+          # value from stdin, so running it without a terminal stores an empty
+          # string. The secret then shows up in `gh secret list` but arrives here
+          # blank — GitHub masks a non-empty secret as ***, an empty one prints
+          # as nothing in the step's env dump.
           missing=""
           [ -n "${KEYSTORE_PASSWORD:-}" ] || missing="$missing KEYSTORE_PASSWORD"
           [ -n "${KEY_PASSWORD:-}" ] || missing="$missing KEY_PASSWORD"
           [ -n "${KEY_ALIAS:-}" ] || missing="$missing KEY_ALIAS"
           if [ -n "$missing" ]; then
-            echo "::error::KEYSTORE_BASE64 is set but these secrets are missing:$missing"
-            echo "Set them with: gh secret set <NAME>   (see fdroid/README.md > Signing)"
+            echo "::error::These signing secrets are unset or empty:$missing"
+            echo "A secret can exist but be empty if 'gh secret set' ran without a terminal."
+            echo "Set each from a real shell so gh can prompt, or pipe a value:"
+            echo "  printf '%s' \"\$PASSWORD\" | gh secret set <NAME> --repo ${{ github.repository }}"
+            echo "See fdroid/README.md > Signing."
             exit 1
           fi
 
