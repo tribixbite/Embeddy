@@ -1,0 +1,4 @@
+- let workflow_dispatch actually publish; pin the signing key
+- name the empty-secret failure mode explicitly
+- validate signing secrets up front, pin version only after a build
+- reproducible builds — F-Droid republishes our signed APK
