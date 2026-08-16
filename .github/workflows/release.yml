@@ -168,7 +168,7 @@ jobs:
       # never write that marker in the body of an ordinary commit — doing so
       # silently skips every workflow for that push.
       - name: Pin version into the tagged commit
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         id: pin
         run: |
           set -euo pipefail
@@ -213,7 +213,7 @@ jobs:
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Generate release notes
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         id: notes
         run: |
           set -euo pipefail
@@ -294,14 +294,14 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Write checksum file
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         run: |
           cd final_apks
           sha256sum *.apk > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Create GitHub Release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.version_name }}
