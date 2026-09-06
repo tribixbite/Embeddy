@@ -21,7 +21,14 @@
     help?: string;
   } = $props();
 
-  /** Move selection with arrow keys, as expected of a radiogroup. */
+  /** Button elements so keyboard selection can move DOM focus along (M56) */
+  let buttonRefs: HTMLButtonElement[] = [];
+
+  /**
+   * Move selection with arrow keys, as expected of a radiogroup.
+   * Focus follows selection — without the explicit .focus() the old button
+   * kept focus while its tabindex flipped to -1, breaking further arrowing.
+   */
   function onKeydown(event: KeyboardEvent) {
     const delta =
       event.key === "ArrowRight" || event.key === "ArrowDown" ? 1
@@ -32,6 +39,7 @@
     const index = options.findIndex((o) => o.value === value);
     const next = (index + delta + options.length) % options.length;
     value = options[next]!.value;
+    buttonRefs[next]?.focus();
   }
 </script>
 
@@ -45,8 +53,9 @@
     class="flex flex-wrap gap-2"
     onkeydown={onKeydown}
   >
-    {#each options as option (String(option.value))}
+    {#each options as option, i (String(option.value))}
       <button
+        bind:this={buttonRefs[i]}
         type="button"
         role="radio"
         aria-checked={option.value === value}

@@ -10,11 +10,20 @@
    * - Aspect ratio chips: Free / 1:1 / 16:9 / 4:3 / Custom
    * - Dark mask outside crop, dashed border, rule-of-thirds grid
    * - Touch-friendly: pointer events, 44px hit areas
+   *
+   * All drag/aspect geometry lives in crop-math.ts (pure, unit-tested).
    */
   import type { CropRect } from "../../../lib/convert/types";
+  import {
+    applyAspectToCrop,
+    aspectRatioFor,
+    clamp,
+    resolveCropDrag,
+    type AspectMode,
+    type CropHandle,
+  } from "./crop-math";
 
-  type AspectMode = "free" | "1:1" | "16:9" | "4:3" | "custom";
-  type HandleId = "tl" | "t" | "tr" | "r" | "br" | "b" | "bl" | "l" | "move";
+  type HandleId = CropHandle;
 
   let {
     crop = $bindable({ x: 0.1, y: 0.1, w: 0.8, h: 0.8 }),
@@ -33,17 +42,13 @@
   let aspectMode: AspectMode = $state("free");
   let customW = $state(16);
   let customH = $state(9);
+  /** Pointer offset from the crop origin, recorded at pointerdown (move drag) */
+  let grabOffset = { dx: 0, dy: 0 };
+  /** Chip elements for focus-follows-selection keyboard navigation */
+  let chipRefs: HTMLButtonElement[] = [];
 
-  /** Aspect ratio value or null for free mode */
-  let aspectRatio = $derived.by(() => {
-    switch (aspectMode) {
-      case "1:1": return 1;
-      case "16:9": return 16 / 9;
-      case "4:3": return 4 / 3;
-      case "custom": return customW / (customH || 1);
-      default: return null;
-    }
-  });
+  /** Aspect ratio value or null for free mode — degenerate custom values guarded (M53) */
+  let aspectRatio = $derived(aspectRatioFor(aspectMode, customW, customH));
 
   const HANDLE_SIZE = 12;
   const HANDLE_HIT = 22;
@@ -69,16 +74,20 @@
 
   /** Start dragging a handle or the crop area */
   function onPointerDown(e: PointerEvent, handle: HandleId) {
-    if (disabled) return;
+    if (disabled || !containerRef) return;
     e.preventDefault();
     e.stopPropagation();
     activeHandle = handle;
-    containerRef?.setPointerCapture(e.pointerId);
-  }
-
-  /** Clamp a value between min and max */
-  function clamp(val: number, min: number, max: number): number {
-    return Math.max(min, Math.min(max, val));
+    if (handle === "move") {
+      // Record where inside the rect the user grabbed so the crop keeps its
+      // offset under the pointer instead of teleporting its center (M52).
+      const rect = containerRef.getBoundingClientRect();
+      grabOffset = {
+        dx: (e.clientX - rect.left) / rect.width - crop.x,
+        dy: (e.clientY - rect.top) / rect.height - crop.y,
+      };
+    }
+    containerRef.setPointerCapture(e.pointerId);
   }
 
   /** Get cursor style for a given handle */
@@ -90,7 +99,7 @@
     return "move";
   }
 
-  /** Handle pointer move — update crop rect based on active handle */
+  /** Handle pointer move — geometry resolved by the pure crop-math solver */
   function onPointerMove(e: PointerEvent) {
     if (!activeHandle || !containerRef) return;
     e.preventDefault();
@@ -99,63 +108,15 @@
     const nx = clamp((e.clientX - rect.left) / rect.width, 0, 1);
     const ny = clamp((e.clientY - rect.top) / rect.height, 0, 1);
 
-    let { x, y, w, h } = crop;
-    const MIN = 0.02; // Minimum crop size (2% of source)
-
-    if (activeHandle === "move") {
-      // Reposition entire crop
-      const halfW = w / 2;
-      const halfH = h / 2;
-      x = clamp(nx - halfW, 0, 1 - w);
-      y = clamp(ny - halfH, 0, 1 - h);
-    } else {
-      // Edge/corner resize
-      const right = x + w;
-      const bottom = y + h;
-
-      // Horizontal adjustments
-      if (activeHandle === "l" || activeHandle === "tl" || activeHandle === "bl") {
-        const newX = clamp(nx, 0, right - MIN);
-        w = right - newX;
-        x = newX;
-      }
-      if (activeHandle === "r" || activeHandle === "tr" || activeHandle === "br") {
-        w = clamp(nx - x, MIN, 1 - x);
-      }
-
-      // Vertical adjustments
-      if (activeHandle === "t" || activeHandle === "tl" || activeHandle === "tr") {
-        const newY = clamp(ny, 0, bottom - MIN);
-        h = bottom - newY;
-        y = newY;
-      }
-      if (activeHandle === "b" || activeHandle === "bl" || activeHandle === "br") {
-        h = clamp(ny - y, MIN, 1 - y);
-      }
-
-      // Enforce aspect ratio when set
-      if (aspectRatio !== null) {
-        const sourceAspect = sourceWidth / sourceHeight;
-        const targetH = (w * sourceAspect) / aspectRatio;
-
-        if (activeHandle.includes("t")) {
-          // Anchor bottom edge
-          const newH = clamp(targetH, MIN, 1);
-          y = clamp(y + h - newH, 0, 1 - MIN);
-          h = newH;
-        } else {
-          h = clamp(targetH, MIN, 1 - y);
-        }
-      }
-    }
-
-    // Final clamp
-    crop = {
-      x: clamp(x, 0, 1),
-      y: clamp(y, 0, 1),
-      w: clamp(w, MIN, 1 - x),
-      h: clamp(h, MIN, 1 - y),
-    };
+    crop = resolveCropDrag({
+      crop,
+      handle: activeHandle,
+      nx,
+      ny,
+      grabOffset,
+      aspectRatio,
+      sourceAspect: sourceWidth / sourceHeight,
+    });
   }
 
   function onPointerUp(e: PointerEvent) {
@@ -169,35 +130,27 @@
   function applyAspect(mode: AspectMode) {
     aspectMode = mode;
     if (mode === "free") return;
+    const ratio = aspectRatioFor(mode, customW, customH);
+    if (ratio === null) return;
+    crop = applyAspectToCrop(crop, ratio, sourceWidth / sourceHeight);
+  }
 
-    const ratio = mode === "1:1" ? 1
-      : mode === "16:9" ? 16 / 9
-      : mode === "4:3" ? 4 / 3
-      : customW / (customH || 1);
-
-    const sourceAspect = sourceWidth / sourceHeight;
-    let newW = crop.w;
-    let newH = (newW * sourceAspect) / ratio;
-
-    // If too tall, constrain by height instead
-    if (crop.y + newH > 1) {
-      newH = Math.min(crop.h, 1 - crop.y);
-      newW = (newH * ratio) / sourceAspect;
-    }
-    // If too wide, constrain
-    if (crop.x + newW > 1) {
-      newW = Math.min(1 - crop.x, newW);
-      newH = (newW * sourceAspect) / ratio;
-    }
-
-    const cx = crop.x + crop.w / 2;
-    const cy = crop.y + crop.h / 2;
-    crop = {
-      x: clamp(cx - newW / 2, 0, 1 - newW),
-      y: clamp(cy - newH / 2, 0, 1 - newH),
-      w: clamp(newW, 0.02, 1),
-      h: clamp(newH, 0.02, 1),
-    };
+  /**
+   * Arrow-key navigation for the aspect chips (M54) — the roving tabindex
+   * alone left every unselected chip keyboard-unreachable. Focus follows
+   * selection, per the WAI-ARIA radiogroup pattern.
+   */
+  function onChipKeydown(event: KeyboardEvent) {
+    const delta =
+      event.key === "ArrowRight" || event.key === "ArrowDown" ? 1
+      : event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1
+      : 0;
+    if (delta === 0 || disabled) return;
+    event.preventDefault();
+    const index = ASPECT_MODES.indexOf(aspectMode);
+    const next = (index + delta + ASPECT_MODES.length) % ASPECT_MODES.length;
+    applyAspect(ASPECT_MODES[next]!);
+    chipRefs[next]?.focus();
   }
 
   /** Pixel dimensions of the crop region */
@@ -210,9 +163,15 @@
   <span id="crop-aspect-label" class="text-xs font-medium text-white/40 uppercase tracking-wider">
     Aspect
   </span>
-  <div role="radiogroup" aria-labelledby="crop-aspect-label" class="flex flex-wrap gap-2">
-    {#each ASPECT_MODES as mode}
+  <div
+    role="radiogroup"
+    aria-labelledby="crop-aspect-label"
+    class="flex flex-wrap gap-2"
+    onkeydown={onChipKeydown}
+  >
+    {#each ASPECT_MODES as mode, i}
       <button
+        bind:this={chipRefs[i]}
         type="button"
         role="radio"
         aria-checked={aspectMode === mode}

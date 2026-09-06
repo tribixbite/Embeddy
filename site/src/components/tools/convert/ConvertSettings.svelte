@@ -31,8 +31,14 @@
     onconvert: () => void;
   } = $props();
 
-  /** Show quality slider in lossy WebP mode or always for GIF */
-  let showQuality = $derived(options.outputFormat === "gif" || !options.lossless);
+  /**
+   * Show quality slider for GIF always, and for WebP whenever lossy frames can
+   * exist — i.e. not lossless, OR mixed mode (which encodes lossy frames with
+   * this quality even though the Lossless box could look authoritative) (M33).
+   */
+  let showQuality = $derived(
+    options.outputFormat === "gif" || !options.lossless || options.mixed,
+  );
 
   /**
    * The adaptive target-size loop re-encodes buffered frames at decreasing quality.
@@ -46,8 +52,12 @@
   /** Show target FPS control for video and WebP sources (GIFs have intrinsic timing) */
   let showFps = $derived(info.format === "video" || info.format === "webp");
 
-  /** Crop toggle state */
-  let cropEnabled = $state(false);
+  /**
+   * Crop toggle state — initialized from the bound options so a remount
+   * ("Adjust settings" after a convert) can't show the box unchecked while a
+   * stale crop rect still silently applies (M6).
+   */
+  let cropEnabled = $state(options.crop !== null);
 
   /** Advanced settings disclosure state */
   let advancedOpen = $state(false);
@@ -73,6 +83,21 @@
   /** libwebp int-as-bool fields render as checkboxes but store 0/1 */
   function toggleFlag(current: number): number {
     return current ? 0 : 1;
+  }
+
+  /**
+   * Lossless and mixed are mutually exclusive in practice: mixed mode makes
+   * the per-frame lossless flag ignored (types.ts contract), so leaving both
+   * on turns the Lossless toggle into a silent no-op (M33). Checking either
+   * unchecks the other.
+   */
+  function toggleLossless() {
+    options.lossless = !options.lossless;
+    if (options.lossless) options.mixed = false;
+  }
+  function toggleMixed() {
+    options.mixed = !options.mixed;
+    if (options.mixed) options.lossless = false;
   }
 
   const FORMAT_OPTIONS = [
@@ -156,12 +181,27 @@
           sourceHeight={info.height}
           {disabled}
         >
-          <img
-            src={sourcePreviewUrl}
-            alt="Source preview"
-            class="block w-full"
-            draggable="false"
-          />
+          {#if info.format === "video"}
+            <!-- A video blob URL won't decode in <img> — render the first
+                 frame via a real <video> element instead (M5). Muted preview,
+                 no audio track to caption. -->
+            <!-- svelte-ignore a11y_media_has_caption -->
+            <video
+              src={sourcePreviewUrl}
+              muted
+              playsinline
+              preload="auto"
+              aria-label="Source preview"
+              class="pointer-events-none block w-full"
+            ></video>
+          {:else}
+            <img
+              src={sourcePreviewUrl}
+              alt="Source preview"
+              class="block w-full"
+              draggable="false"
+            />
+          {/if}
         </CropOverlay>
       </div>
     {/if}
@@ -243,11 +283,15 @@
       <label class="flex cursor-pointer items-center gap-3">
         <input
           type="checkbox"
-          bind:checked={options.lossless}
+          checked={options.lossless}
+          onchange={toggleLossless}
           {disabled}
           class="h-4 w-4 rounded border-white/20 bg-white/5 text-brand-500 accent-brand-500"
         />
-        <span class="text-sm text-white/60">Lossless</span>
+        <div>
+          <span class="text-sm text-white/60">Lossless</span>
+          <p class="text-xs text-white/30">Every frame encodes lossless — turns off mixed mode</p>
+        </div>
       </label>
 
       <label class="flex cursor-pointer items-center gap-3">
@@ -266,13 +310,14 @@
       <label class="flex cursor-pointer items-center gap-3">
         <input
           type="checkbox"
-          bind:checked={options.mixed}
+          checked={options.mixed}
+          onchange={toggleMixed}
           {disabled}
           class="h-4 w-4 rounded border-white/20 bg-white/5 text-brand-500 accent-brand-500"
         />
         <div>
           <span class="text-sm text-white/60">Mixed mode</span>
-          <p class="text-xs text-white/30">Auto-pick lossy/lossless per frame for smallest size</p>
+          <p class="text-xs text-white/30">Auto-pick lossy/lossless per frame — quality applies to the lossy frames</p>
         </div>
       </label>
 

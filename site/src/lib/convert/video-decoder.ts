@@ -25,6 +25,9 @@ export function availableFrameCount(durationSeconds: number, targetFps: number):
  * @param targetFps - Frames per second to extract (default 10)
  * @param maxFrames - Safety cap to prevent memory issues (default 1500, auto-reduced for high-res)
  */
+// TODO: accept an AbortSignal so callers can stop an in-flight decode; the UI's
+// generation guard makes orphaned decodes state-inert, but they still burn CPU
+// until completion.
 export async function decodeVideo(
   file: File,
   targetFps = 10,

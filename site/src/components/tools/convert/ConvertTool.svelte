@@ -15,9 +15,17 @@
   import { decodeGif } from "../../../lib/convert/gif-decoder";
   import { decodeVideo, probeVideo, streamDecodeVideo } from "../../../lib/convert/video-decoder";
   import { decodeWebP } from "../../../lib/convert/webp-decoder";
-  import { cropFrame, resizeFrame, subsampleFrames } from "../../../lib/convert/encoder";
+  import {
+    YIELD_EVERY,
+    cropFrame,
+    cropRectToPixels,
+    resizeFrame,
+    subsampleFrames,
+    yieldToEventLoop,
+  } from "../../../lib/convert/encoder";
   import { encodeAnimatedGif } from "../../../lib/convert/gif-encoder";
   import { StreamingWebPEncoder } from "../../../lib/convert/streaming-encoder";
+  import { createGenerationGuard } from "./conversion-guard";
   import type {
     ConvertOptions,
     ConvertProgress,
@@ -58,39 +66,53 @@
   /** Active streaming encoder reference (for abort support) */
   let activeEncoder: StreamingWebPEncoder | null = null;
 
-  let options: ConvertOptions = $state({
-    quality: 75,
-    lossless: false,
-    maxDimension: 0,
-    loops: 0,
-    targetFps: 10,
-    outputFormat: "webp",
-    crop: null,
-    targetSizeBytes: 0,
-    method: 4,
-    minimizeSize: true,
-    exact: false,
-    mixed: true,
-    kmin: 0,
-    kmax: 0,
-    snsStrength: 50,
-    filterStrength: 60,
-    filterSharpness: 0,
-    filterType: 1,
-    autofilter: 0,
-    alphaQuality: 100,
-    alphaCompression: 1,
-    alphaFiltering: 1,
-    passes: 1,
-    preprocessing: 0,
-    nearLossless: 100,
-    sharpYuv: 0,
-    targetSize: 0,
-    segments: 4,
-    partitionLimit: 0,
-    lowMemory: 0,
-    emulateJpegSize: 0,
-  });
+  /**
+   * Generation guard for in-flight async work: reset()/handleFile invalidate,
+   * every async pipeline bails after each await once its token goes stale.
+   * Prevents "Change file" from landing on the error screen when the aborted
+   * encoder's promise rejects (M17) and stops zombie conversions from
+   * clobbering a newly loaded file's state or dead-ending the UI (M18).
+   */
+  const guard = createGenerationGuard();
+
+  /** Per-file defaults — reset() restores these so file B never inherits file A's crop/fps/etc (M6) */
+  function defaultOptions(): ConvertOptions {
+    return {
+      quality: 75,
+      lossless: false,
+      maxDimension: 0,
+      loops: 0,
+      targetFps: 10,
+      outputFormat: "webp",
+      crop: null,
+      targetSizeBytes: 0,
+      method: 4,
+      minimizeSize: true,
+      exact: false,
+      mixed: true,
+      kmin: 0,
+      kmax: 0,
+      snsStrength: 50,
+      filterStrength: 60,
+      filterSharpness: 0,
+      filterType: 1,
+      autofilter: 0,
+      alphaQuality: 100,
+      alphaCompression: 1,
+      alphaFiltering: 1,
+      passes: 1,
+      preprocessing: 0,
+      nearLossless: 100,
+      sharpYuv: 0,
+      targetSize: 0,
+      segments: 4,
+      partitionLimit: 0,
+      lowMemory: 0,
+      emulateJpegSize: 0,
+    };
+  }
+
+  let options: ConvertOptions = $state(defaultOptions());
 
   /** Map camelCase ConvertOptions to snake_case FrameOptions for the WASM encoder */
   function getWebPFrameOptions(opts: ConvertOptions, duration: number) {
@@ -145,6 +167,9 @@
     const file = files[0];
     if (!file) return;
 
+    // A new file supersedes any in-flight decode/convert work
+    const gen = guard.invalidate();
+
     sourceFile = file;
     state = "decoding";
     error = "";
@@ -158,7 +183,8 @@
     try {
       if (isGif(file)) {
         const buffer = await file.arrayBuffer();
-        const decoded = await decodeGif(buffer, (p) => { progress = p; });
+        const decoded = await decodeGif(buffer, (p) => { if (guard.isCurrent(gen)) progress = p; });
+        if (!guard.isCurrent(gen)) return;
         frames = decoded.frames;
         sourceInfo = decoded.info;
         options.outputFormat = "webp";
@@ -166,7 +192,8 @@
           options.targetFps = Math.round(decoded.info.fps);
         }
       } else if (isWebP(file)) {
-        const decoded = await decodeWebP(file, 1500, (p) => { progress = p; });
+        const decoded = await decodeWebP(file, 1500, (p) => { if (guard.isCurrent(gen)) progress = p; });
+        if (!guard.isCurrent(gen)) return;
         frames = decoded.frames;
         sourceInfo = decoded.info;
         options.outputFormat = "gif";
@@ -178,6 +205,10 @@
       } else if (file.type.startsWith("video/")) {
         // Probe first to decide batch vs streaming
         const { info, videoUrl } = await probeVideo(file, options.targetFps);
+        if (!guard.isCurrent(gen)) {
+          URL.revokeObjectURL(videoUrl);
+          return;
+        }
 
         if (wouldExceedMemory(info, options.targetFps)) {
           // Streaming mode: skip frame decode, just use metadata
@@ -193,7 +224,8 @@
         } else {
           // Batch mode: decode all frames into memory
           URL.revokeObjectURL(videoUrl); // probeVideo's URL not needed
-          const decoded = await decodeVideo(file, options.targetFps, 1500, (p) => { progress = p; });
+          const decoded = await decodeVideo(file, options.targetFps, 1500, (p) => { if (guard.isCurrent(gen)) progress = p; });
+          if (!guard.isCurrent(gen)) return;
           frames = decoded.frames;
           sourceInfo = decoded.info;
           options.outputFormat = "webp";
@@ -202,8 +234,15 @@
         throw new Error(`Unsupported format: ${file.type || file.name}`);
       }
 
+      // Preserve the source's own loop behaviour (0 = infinite) so a
+      // play-once input doesn't silently become an infinite loop.
+      if (sourceInfo) options.loops = sourceInfo.loopCount;
+
       state = "settings";
     } catch (e) {
+      // A superseded decode's failure (including deliberate aborts) must not
+      // paint the error screen over whatever the user is doing now
+      if (!guard.isCurrent(gen)) return;
       error = e instanceof Error ? e.message : "Failed to decode file";
       state = "error";
     }
@@ -228,22 +267,32 @@
       // Subsample if target FPS is lower than source
       let workFrames = subsampleFrames(inputFrames, sourceFps, opts.targetFps);
 
-      // Crop all frames if crop is set
+      // Crop all frames if crop is set. Output dims must come from the same
+      // clamped arithmetic cropFrame uses — recomputing from the fraction
+      // could disagree by a pixel and fail the WASM encoder with a size mismatch.
       let outW = width;
       let outH = height;
       if (opts.crop) {
-        outW = Math.max(1, Math.round(opts.crop.w * width));
-        outH = Math.max(1, Math.round(opts.crop.h * height));
-        workFrames = workFrames.map((frame, i) => {
+        const cropRect = opts.crop;
+        const { pw, ph } = cropRectToPixels(width, height, cropRect);
+        outW = pw;
+        outH = ph;
+        // For-loop with periodic yields so the "cropping" progress actually
+        // paints instead of freezing the tab on hundreds of frames (M55)
+        const croppedFrames: DecodedFrame[] = [];
+        for (let i = 0; i < workFrames.length; i++) {
+          if (i % YIELD_EVERY === 0) await yieldToEventLoop();
+          const frame = workFrames[i]!;
           progress = {
             phase: "cropping",
             percent: Math.round((i / workFrames.length) * 100),
             frame: i + 1,
             total: workFrames.length,
           };
-          const cropped = cropFrame(frame.rgba, width, height, opts.crop!);
-          return { rgba: cropped.data, delay: frame.delay };
-        });
+          const cropped = cropFrame(frame.rgba, width, height, cropRect);
+          croppedFrames.push({ rgba: cropped.data, delay: frame.delay });
+        }
+        workFrames = croppedFrames;
       }
 
       // Resize all frames if maxDimension is set
@@ -251,7 +300,11 @@
         const scale = Math.min(opts.maxDimension / outW, opts.maxDimension / outH);
         const newW = Math.round(outW * scale);
         const newH = Math.round(outH * scale);
-        workFrames = workFrames.map((frame, i) => {
+        // Same yield pattern as the crop loop — keep "resizing" painting (M55)
+        const resizedFrames: DecodedFrame[] = [];
+        for (let i = 0; i < workFrames.length; i++) {
+          if (i % YIELD_EVERY === 0) await yieldToEventLoop();
+          const frame = workFrames[i]!;
           progress = {
             phase: "resizing",
             percent: Math.round((i / workFrames.length) * 100),
@@ -259,8 +312,9 @@
             total: workFrames.length,
           };
           const resized = resizeFrame(frame.rgba, outW, outH, opts.maxDimension);
-          return { rgba: resized.data, delay: frame.delay };
-        });
+          resizedFrames.push({ rgba: resized.data, delay: frame.delay });
+        }
+        workFrames = resizedFrames;
         outW = newW;
         outH = newH;
       }
@@ -371,8 +425,33 @@
     state = "converting";
     error = "";
 
+    // Capture the live generation — reset()/"Change file" invalidates it,
+    // after which this conversion must neither touch state nor surface errors
+    const gen = guard.token();
+
     try {
       let blob: Blob;
+
+      // Batch video frames were decoded at the load-time fps; raising the
+      // slider needs frames that don't exist yet. Re-decode at the higher
+      // rate, or fall to the streaming pipeline when that many decoded
+      // frames would blow the memory budget (M31).
+      if (
+        sourceFile &&
+        sourceInfo.format === "video" &&
+        !streamingMode &&
+        options.targetFps > sourceInfo.fps
+      ) {
+        if (wouldExceedMemory(sourceInfo, options.targetFps)) {
+          streamingMode = true;
+          frames = [];
+        } else {
+          const decoded = await decodeVideo(sourceFile, options.targetFps, 1500, (p) => { if (guard.isCurrent(gen)) progress = p; });
+          if (!guard.isCurrent(gen)) return;
+          frames = decoded.frames;
+          sourceInfo = decoded.info;
+        }
+      }
 
       if (streamingMode && options.outputFormat === "webp") {
         // Large video: lazy decode + encode one frame at a time
@@ -382,18 +461,19 @@
         // The frames come back already sampled at options.targetFps, so pass that
         // as the source FPS — sourceInfo.fps is the value probed before the user
         // touched the slider and would make encodeAnimatedGif subsample a second time.
-        const decoded = await decodeVideo(sourceFile!, options.targetFps, 300, (p) => { progress = p; });
+        const decoded = await decodeVideo(sourceFile!, options.targetFps, 300, (p) => { if (guard.isCurrent(gen)) progress = p; });
+        if (!guard.isCurrent(gen)) return; // don't clobber a newly loaded file (M18)
         frames = decoded.frames;
         sourceInfo = decoded.info;
         blob = await encodeAnimatedGif(
           frames, decoded.info.width, decoded.info.height,
-          options, decoded.info.fps, (p) => { progress = p; },
+          options, decoded.info.fps, (p) => { if (guard.isCurrent(gen)) progress = p; },
         );
       } else if (options.outputFormat === "gif") {
         // GIF output from pre-decoded frames
         blob = await encodeAnimatedGif(
           frames, sourceInfo.width, sourceInfo.height,
-          options, sourceInfo.fps, (p) => { progress = p; },
+          options, sourceInfo.fps, (p) => { if (guard.isCurrent(gen)) progress = p; },
         );
       } else {
         // WebP output from pre-decoded frames — all settings applied
@@ -417,17 +497,29 @@
         }
       }
 
+      // A zombie conversion finishing after reset() must not set "done" —
+      // with sourceFile nulled no template branch would match (blank screen),
+      // or worse it would clobber a newly loaded file's state (M18)
+      if (!guard.isCurrent(gen)) return;
+
       if (resultUrl) URL.revokeObjectURL(resultUrl);
       resultBlob = blob;
       resultUrl = URL.createObjectURL(blob);
       state = "done";
     } catch (e) {
+      // reset() aborts the encoder, whose pending promise then rejects with
+      // "Encoder aborted" on a later microtask — swallowing stale-generation
+      // failures keeps "Change file" from landing on the error screen (M17)
+      if (!guard.isCurrent(gen)) return;
       error = e instanceof Error ? e.message : "Encoding failed";
       state = "error";
     }
   }
 
   function reset() {
+    // Orphan all in-flight async work first — their late rejections and
+    // results must not touch state after this point (M17/M18)
+    guard.invalidate();
     // Abort any active streaming encode
     if (activeEncoder) {
       activeEncoder.abort();
@@ -443,6 +535,9 @@
     sourcePreviewUrl = "";
     streamingMode = false;
     streamingFrameCount = 0;
+    // Restore per-file defaults — otherwise file B silently inherits file A's
+    // crop rect, targetFps, loop seed, etc (M6)
+    options = defaultOptions();
     state = "idle";
     error = "";
   }
