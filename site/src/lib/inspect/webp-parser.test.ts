@@ -50,6 +50,38 @@ function anmf(durationMs: number, subChunk = "VP8 "): number[] {
   ]);
 }
 
+/**
+ * ANMF frame whose bitstream leads with an ALPH sub-chunk (how libwebp lays
+ * out every lossy-with-alpha frame), followed by the actual codec chunk.
+ */
+function anmfWithAlpha(durationMs: number, subChunk = "VP8 "): number[] {
+  const alphPayload = [0]; // 1-byte ALPH data (filtering method byte)
+  return chunk("ANMF", [
+    ...u24le(0), ...u24le(0),          // frame x/y offset
+    ...u24le(0), ...u24le(0),          // frame width/height
+    ...u24le(durationMs),              // duration
+    0,                                 // flags
+    ...fourCC("ALPH"),
+    ...u32le(alphPayload.length), ...alphPayload, 0, // odd size → pad byte
+    ...fourCC(subChunk),
+    ...u32le(4), 0, 0, 0, 0,           // minimal codec sub-chunk payload
+  ]);
+}
+
+/** Minimal little-endian TIFF with a single Orientation=1 IFD entry. */
+function minimalTiff(): number[] {
+  return [
+    0x49, 0x49, 0x2a, 0x00,            // "II" + 42
+    ...u32le(8),                       // IFD0 offset
+    1, 0,                              // entry count
+    0x12, 0x01,                        // tag 0x0112 Orientation
+    3, 0,                              // type SHORT
+    ...u32le(1),                       // count
+    1, 0, 0, 0,                        // value 1 (+ padding)
+    ...u32le(0),                       // next IFD offset
+  ];
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 describe("parseWebP — container validation", () => {
@@ -130,6 +162,70 @@ describe("parseWebP — animation", () => {
       ...anmf(50, "VP8L"),
     ]);
     expect(parseWebP(buffer).compression).toBe("mixed");
+  });
+
+  // M21: lossy frames with transparency carry [ALPH][VP8 ] — the sniffer must
+  // skip past ALPH instead of reporting compression "unknown".
+  test("detects lossy compression when frames lead with an ALPH sub-chunk", () => {
+    const buffer = riff([
+      ...vp8x(0x02 | 0x10, 64, 64),
+      ...chunk("ANIM", [0, 0, 0, 0, 0, 0]),
+      ...anmfWithAlpha(50, "VP8 "),
+      ...anmfWithAlpha(50, "VP8 "),
+    ]);
+    const meta = parseWebP(buffer);
+    expect(meta.compression).toBe("lossy");
+    expect(meta.format).toBe("Animated WebP (lossy)");
+  });
+
+  test("detects mixed compression across ALPH-prefixed and plain frames", () => {
+    const buffer = riff([
+      ...vp8x(0x02 | 0x10, 64, 64),
+      ...chunk("ANIM", [0, 0, 0, 0, 0, 0]),
+      ...anmfWithAlpha(50, "VP8 "),
+      ...anmf(50, "VP8L"),
+    ]);
+    expect(parseWebP(buffer).compression).toBe("mixed");
+  });
+});
+
+describe("parseWebP — EXIF chunk flavors", () => {
+  const EXIF_PREFIX = [0x45, 0x78, 0x69, 0x66, 0x00, 0x00]; // "Exif\0\0"
+
+  // M22: libwebp/Chromium write EXIF chunks both as raw TIFF and with a
+  // JPEG-style "Exif\0\0" prefix; exifr only accepts raw TIFF.
+  test("strips the Exif\\0\\0 prefix so exifBytes is raw TIFF", () => {
+    const buffer = riff([
+      ...vp8x(0x08, 32, 32),
+      ...chunk("EXIF", [...EXIF_PREFIX, ...minimalTiff()]),
+    ]);
+    const meta = parseWebP(buffer);
+    expect(meta.exifBytes).not.toBeNull();
+    // Must start with the TIFF byte-order mark, not the prefix
+    expect(meta.exifBytes![0]).toBe(0x49);
+    expect(meta.exifBytes![1]).toBe(0x49);
+    expect(meta.exifBytes![2]).toBe(0x2a);
+  });
+
+  test("passes a raw-TIFF EXIF payload through untouched", () => {
+    const buffer = riff([
+      ...vp8x(0x08, 32, 32),
+      ...chunk("EXIF", minimalTiff()),
+    ]);
+    const meta = parseWebP(buffer);
+    expect(meta.exifBytes).not.toBeNull();
+    expect(meta.exifBytes!.length).toBe(minimalTiff().length);
+    expect(meta.exifBytes![0]).toBe(0x49);
+  });
+
+  test("both flavors parse identically through exifr", async () => {
+    const exifr = await import("exifr");
+    for (const payload of [minimalTiff(), [...EXIF_PREFIX, ...minimalTiff()]]) {
+      const buffer = riff([...vp8x(0x08, 32, 32), ...chunk("EXIF", payload)]);
+      const meta = parseWebP(buffer);
+      const parsed = await exifr.parse(meta.exifBytes!, { translateValues: false });
+      expect(parsed?.Orientation).toBe(1);
+    }
   });
 });
 

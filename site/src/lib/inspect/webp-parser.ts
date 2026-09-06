@@ -204,9 +204,20 @@ export function parseWebP(buffer: ArrayBuffer): WebPMetadata {
           result.frameDurations.push(duration);
           result.totalDurationMs += duration;
 
-          // Check sub-chunk type for lossy/lossless mix detection
+          // Check sub-chunk type for lossy/lossless mix detection. A frame
+          // with transparency stores [ALPH][VP8 ] — skip past the ALPH chunk
+          // (8-byte header + payload + even-byte padding) to reach the codec.
           if (chunkSize >= 24) {
-            const subChunkId = readFourCC(dv, dataStart + 16);
+            let subOffset = dataStart + 16;
+            let subChunkId = readFourCC(dv, subOffset);
+            if (subChunkId === "ALPH") {
+              const alphSize = dv.getUint32(subOffset + 4, true);
+              const next = subOffset + 8 + alphSize + (alphSize % 2);
+              if (next + 4 <= dataStart + chunkSize) {
+                subOffset = next;
+                subChunkId = readFourCC(dv, subOffset);
+              }
+            }
             if (subChunkId === "VP8 ") hasLossy = true;
             else if (subChunkId === "VP8L") hasLossless = true;
           }
@@ -215,9 +226,21 @@ export function parseWebP(buffer: ArrayBuffer): WebPMetadata {
       }
 
       case "EXIF": {
-        // Embedded EXIF data (TIFF format)
+        // Embedded EXIF data (TIFF format). Some writers (libwebp/Chromium
+        // both accept the flavor) prepend the JPEG-style "Exif\0\0" marker;
+        // exifr rejects it, so strip the 6-byte prefix down to raw TIFF.
         if (chunkSize > 0) {
-          result.exifBytes = new Uint8Array(buffer, dataStart, chunkSize);
+          const prefixed =
+            chunkSize > 6 &&
+            dv.getUint8(dataStart) === 0x45 && // E
+            dv.getUint8(dataStart + 1) === 0x78 && // x
+            dv.getUint8(dataStart + 2) === 0x69 && // i
+            dv.getUint8(dataStart + 3) === 0x66 && // f
+            dv.getUint8(dataStart + 4) === 0x00 &&
+            dv.getUint8(dataStart + 5) === 0x00;
+          result.exifBytes = prefixed
+            ? new Uint8Array(buffer, dataStart + 6, chunkSize - 6)
+            : new Uint8Array(buffer, dataStart, chunkSize);
         }
         break;
       }

@@ -10,6 +10,7 @@
   import MetadataTable from "./MetadataTable.svelte";
   import { fetchMetadata } from "../../../lib/inspect/proxy";
   import { parseWebP, webpMetadataToEntries } from "../../../lib/inspect/webp-parser";
+  import { classifyInspectFile } from "../../../lib/inspect/file-support";
   import type { MetadataResult, ExifData } from "../../../lib/inspect/types";
 
   type State = "idle" | "fetching" | "done" | "exif" | "error";
@@ -45,8 +46,11 @@
     const file = files[0];
     if (!file) return;
 
-    if (!file.type.startsWith("image/") && !file.type.startsWith("video/")) {
-      error = "Please select an image or video file to inspect";
+    // exifr has no video parsers — gate non-image picks up front with a
+    // friendly message instead of surfacing a raw "Unknown file format"
+    const classification = classifyInspectFile(file.type);
+    if (!classification.ok) {
+      error = classification.message ?? "Unsupported file type";
       state = "error";
       return;
     }
@@ -137,8 +141,8 @@
     />
   {:else}
     <FileDropZone
-      accept="image/*,video/*"
-      label="Drop an image or video to inspect metadata"
+      accept="image/*"
+      label="Drop an image to inspect metadata"
       onfile={handleFile}
     />
   {/if}

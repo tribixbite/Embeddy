@@ -21,8 +21,12 @@
     { value: "avif", label: "AVIF" },
   ];
 
-  /** PNG is always lossless; AVIF/WebP support lossless toggle */
-  let showLossless = $derived(options.format !== "jpeg");
+  /**
+   * Only WebP and AVIF have a meaningful lossless toggle — JPEG can't be
+   * lossless and PNG always is (encoder takes no options), so showing the
+   * checkbox for PNG would be a no-op that leaks state into WebP/AVIF.
+   */
+  let showLossless = $derived(options.format === "webp" || options.format === "avif");
   let showQuality = $derived(!options.lossless && options.format !== "png");
 </script>
 

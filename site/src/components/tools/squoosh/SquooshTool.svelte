@@ -8,6 +8,7 @@
   import SquooshResult from "./SquooshResult.svelte";
   import BeforeAfter from "./BeforeAfter.svelte";
   import { compress, type CompressOptions } from "../../../lib/squoosh/compress";
+  import { GIF_UNSUPPORTED_MESSAGE } from "../../../lib/squoosh/codecs";
 
   type State = "idle" | "loading" | "settings" | "compressing" | "done" | "error";
 
@@ -34,6 +35,14 @@
     // Validate image type
     if (!file.type.startsWith("image/")) {
       error = "Please select an image file";
+      state = "error";
+      return;
+    }
+
+    // GIF loads fine in <img> but no @jsquash decoder handles it — fail fast
+    // with a pointer at the Convert tool instead of erroring after settings
+    if (file.type === "image/gif") {
+      error = GIF_UNSUPPORTED_MESSAGE;
       state = "error";
       return;
     }
@@ -92,8 +101,8 @@
 <div class="space-y-6">
   {#if state === "idle"}
     <FileDropZone
-      accept="image/*"
-      label="Drop an image here or click to browse"
+      accept="image/jpeg,image/png,image/webp,image/avif"
+      label="Drop a JPEG, PNG, WebP, or AVIF here or click to browse"
       onfile={handleFile}
     />
   {:else if state === "loading"}

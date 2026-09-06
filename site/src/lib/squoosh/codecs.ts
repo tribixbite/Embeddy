@@ -18,6 +18,10 @@ export interface Encoder {
 /** Supported output formats */
 export type OutputFormat = "webp" | "jpeg" | "png" | "avif";
 
+/** Rejection message for GIF input — points users at the tool that handles it */
+export const GIF_UNSUPPORTED_MESSAGE =
+  "GIF isn't supported here — use the Convert tool at /tools/convert to turn GIFs into animated WebP.";
+
 /** Cache loaded codec modules to avoid re-importing */
 const decoderCache = new Map<string, Decoder>();
 const encoderCache = new Map<string, Encoder>();
@@ -44,8 +48,13 @@ export async function getDecoder(mimeType: string): Promise<Decoder> {
     case "avif":
       mod = await import("@jsquash/avif");
       break;
+    case "gif":
+      // Common enough to deserve a pointer at the tool that does handle it
+      throw new Error(GIF_UNSUPPORTED_MESSAGE);
     default:
-      throw new Error(`Unsupported input format: ${mimeType}`);
+      throw new Error(
+        `Unsupported input format: ${mimeType} — supported inputs are JPEG, PNG, WebP, and AVIF`,
+      );
   }
 
   decoderCache.set(key, mod);
