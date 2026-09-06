@@ -18,8 +18,10 @@ declare module "gifenc" {
       },
     ): void;
     finish(): void;
-    bytes(): Uint8Array;
-    bytesView(): Uint8Array;
+    // gifenc's stream is backed by a plain ArrayBuffer, so the views are
+    // BlobPart-compatible under TS 5.7+ strict ArrayBufferLike typing
+    bytes(): Uint8Array<ArrayBuffer>;
+    bytesView(): Uint8Array<ArrayBuffer>;
   };
 
   export function quantize(

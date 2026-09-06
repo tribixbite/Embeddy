@@ -4,7 +4,9 @@
  */
 
 import { parseGIF, decompressFrames } from "gifuct-js";
+import type { ParsedGif } from "gifuct-js";
 import type { DecodedFrame, SourceInfo, ConvertProgress } from "./types";
+import { YIELD_EVERY, yieldToEventLoop } from "./encoder";
 
 /** Same RGBA budget the video and WebP decoders use (512 MB). */
 const MEMORY_BUDGET_BYTES = 512 * 1024 * 1024;
@@ -12,12 +14,41 @@ const MEMORY_BUDGET_BYTES = 512 * 1024 * 1024;
 /** Hard ceiling regardless of frame size, matching the other decoders. */
 const MAX_FRAMES = 1500;
 
-/** Yield to the event loop every N frames so progress actually paints. */
-const YIELD_EVERY = 24;
+/** Fallback frame delay when a frame carries no Graphic Control Extension. */
+const DEFAULT_DELAY_MS = 100;
 
-/** Hand control back to the browser so the progress bar can render. */
-function yieldToEventLoop(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
+/**
+ * Normalize a decoded gifuct-js frame delay to milliseconds.
+ * gifuct-js already converts the GIF centisecond delay to ms (and defaults
+ * missing GCE delays of 0 to 100 ms), so the value passes through verbatim;
+ * a frame with no GCE at all yields `undefined`, which becomes 100 ms.
+ * The 20 ms floor matches how browsers clamp too-fast GIF timing.
+ * Exported for testing.
+ */
+export function normalizeGifDelay(delayMs: number | undefined): number {
+  return Math.max(delayMs ?? DEFAULT_DELAY_MS, 20);
+}
+
+/**
+ * Read the Netscape/ANIMEXTS loop count from a parsed GIF.
+ * Returns the extension's value verbatim (0 = loop forever, N = loop N times);
+ * a GIF without the extension plays exactly once, which maps to 1.
+ * Exported for testing.
+ */
+export function readGifLoopCount(parsed: ParsedGif): number {
+  for (const block of parsed.frames) {
+    if (!("application" in block)) continue;
+    const app = block.application;
+    // Loop sub-block: id 0x01 followed by a little-endian uint16 count
+    if (
+      (app.id === "NETSCAPE2.0" || app.id === "ANIMEXTS1.0") &&
+      app.blocks.length >= 3 &&
+      app.blocks[0] === 1
+    ) {
+      return app.blocks[1]! | (app.blocks[2]! << 8);
+    }
+  }
+  return 1;
 }
 
 /**
@@ -96,7 +127,7 @@ export async function decodeGif(
 
     // Capture the full composited canvas as RGBA
     const fullFrame = ctx.getImageData(0, 0, width, height);
-    const frameDelay = Math.max(delay * 10, 20); // GIF delay is in centiseconds; enforce 20ms minimum
+    const frameDelay = normalizeGifDelay(delay);
     frames.push({
       rgba: new Uint8Array(fullFrame.data.buffer),
       delay: frameDelay,
@@ -129,6 +160,7 @@ export async function decodeGif(
       totalDuration,
       fps: Math.round(avgFps * 10) / 10,
       format: "gif",
+      loopCount: readGifLoopCount(parsed),
       frameCapped: frameLimit < rawFrames.length,
     },
   };

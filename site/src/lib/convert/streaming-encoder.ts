@@ -36,6 +36,18 @@ export class StreamingWebPEncoder {
       { type: "module" },
     );
 
+    // A Worker whose script (or vendored WASM import) fails to fetch fires
+    // "error" and never posts a message — without these listeners init(),
+    // pushFrame() and finalize() would hang the conversion forever.
+    this.worker.addEventListener("error", (e) => {
+      this.failPending(
+        new Error(e.message ? `Encoder worker error: ${e.message}` : "Encoder worker failed to load"),
+      );
+    });
+    this.worker.addEventListener("messageerror", () => {
+      this.failPending(new Error("Encoder worker message could not be deserialized"));
+    });
+
     return new Promise<void>((resolve, reject) => {
       this.rejectActive = reject;
       const handler = (e: MessageEvent<FromWorker>) => {
@@ -63,8 +75,10 @@ export class StreamingWebPEncoder {
 
   /**
    * Push one RGBA frame to the encoder.
-   * The ArrayBuffer is transferred (zero-copy) to the Worker.
-   * After this call, the rgba buffer is neutered and cannot be reused.
+   * A copy of the pixel data is transferred to the Worker — the caller's
+   * rgba buffer stays valid. The copy is load-bearing: the same frames are
+   * re-pushed when the user adjusts settings or the adaptive target-size
+   * loop re-encodes at a lower quality.
    */
   async pushFrame(
     rgba: Uint8Array,
@@ -157,6 +171,14 @@ export class StreamingWebPEncoder {
       this.rejectActive(new Error("Encoder aborted"));
       this.rejectActive = undefined;
     }
+  }
+
+  /** Reject the in-flight operation (if any) and tear the Worker down. */
+  private failPending(err: Error) {
+    const reject = this.rejectActive;
+    this.rejectActive = undefined;
+    this.terminate();
+    reject?.(err);
   }
 
   private terminate() {

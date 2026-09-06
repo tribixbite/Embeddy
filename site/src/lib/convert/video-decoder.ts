@@ -9,6 +9,17 @@ import type { DecodedFrame, SourceInfo, ConvertProgress, CropRect } from "./type
 import { cropFrame, resizeFrame } from "./encoder";
 
 /**
+ * Number of frames extractable from a video of the given duration at a
+ * target frame rate. Never less than 1 — a sub-frame-interval video
+ * (e.g. 0.05 s at 10 fps) still yields its t=0 frame, which the seek
+ * path already handles; flooring to 0 left a dead Convert button.
+ * Exported for testing.
+ */
+export function availableFrameCount(durationSeconds: number, targetFps: number): number {
+  return Math.max(1, Math.floor(durationSeconds * targetFps));
+}
+
+/**
  * Decode a video file into RGBA frames by stepping through with seek.
  * @param file - Video file (MP4, WebM, etc.)
  * @param targetFps - Frames per second to extract (default 10)
@@ -46,7 +57,7 @@ export async function decodeVideo(
     const memoryMaxFrames = Math.max(30, Math.floor(memoryBudget / bytesPerFrame));
 
     const frameInterval = 1 / targetFps;
-    const availableFrames = Math.floor(duration * targetFps);
+    const availableFrames = availableFrameCount(duration, targetFps);
     const totalFrames = Math.min(availableFrames, maxFrames, memoryMaxFrames);
     const delayMs = Math.round(1000 / targetFps);
 
@@ -96,6 +107,7 @@ export async function decodeVideo(
         totalDuration: Math.round(duration * 1000),
         fps: targetFps,
         format: "video",
+        loopCount: 0, // videos carry no loop metadata — default to looping forever
         // The memory budget can silently cut a long/high-res video short —
         // surface it so the settings panel can warn instead of quietly truncating.
         frameCapped: totalFrames < availableFrames,
@@ -205,7 +217,7 @@ export async function probeVideo(
   if (!width || !height) throw new Error("Could not determine video dimensions");
   if (!duration || !isFinite(duration)) throw new Error("Could not determine video duration");
 
-  const frameCount = Math.floor(duration * targetFps);
+  const frameCount = availableFrameCount(duration, targetFps);
 
   // Release the decoder now that metadata is read. The object URL stays valid —
   // the caller reuses it for the crop preview and owns revoking it.
@@ -219,6 +231,7 @@ export async function probeVideo(
       totalDuration: Math.round(duration * 1000),
       fps: targetFps,
       format: "video",
+      loopCount: 0, // videos carry no loop metadata — default to looping forever
       frameCapped: false,
     },
     // Caller must call URL.revokeObjectURL(videoUrl) when done
@@ -274,7 +287,7 @@ export async function* streamDecodeVideo(
 
     const frameInterval = 1 / options.targetFps;
     const totalFrames = Math.min(
-      Math.floor(duration * options.targetFps),
+      availableFrameCount(duration, options.targetFps),
       options.maxFrames,
     );
     const delayMs = Math.round(1000 / options.targetFps);

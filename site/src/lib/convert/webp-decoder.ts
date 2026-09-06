@@ -9,10 +9,20 @@ import type { DecodedFrame, SourceInfo, ConvertProgress } from "./types";
 import { splitAnimatedWebP, type WebPFrame } from "./webp-frames";
 
 /**
+ * Map a WebCodecs ImageTrack.repetitionCount to our loop-count convention
+ * (0 = loop forever, N = play N times). WebCodecs reports Infinity for
+ * loop-forever and 0 for play-once. Exported for testing.
+ */
+export function repetitionCountToLoops(repetitionCount: number): number {
+  if (!Number.isFinite(repetitionCount)) return 0;
+  if (repetitionCount <= 0) return 1;
+  return Math.round(repetitionCount);
+}
+
+/**
  * Decode a WebP file into RGBA frames.
  * Static WebP returns a single frame. Animated WebP extracts all frames.
  * @param file - WebP file
- * @param targetFps - Frames per second to capture (used only by canvas fallback)
  * @param maxFrames - Safety cap to prevent memory issues (default 1500, auto-reduced for high-res)
  */
 export async function decodeWebP(
@@ -141,6 +151,7 @@ async function decodeWithImageDecoder(
       totalDuration,
       fps,
       format: "webp",
+      loopCount: repetitionCountToLoops(track.repetitionCount),
       frameCapped: frames.length < sourceFrames,
     },
   };
@@ -229,6 +240,8 @@ async function decodeFromContainer(
       totalDuration,
       fps,
       format: "webp",
+      // ANIM chunk semantics match ours directly: 0 = forever, N = N times
+      loopCount: frameSet.loopCount,
       frameCapped: limit < frameSet.frames.length,
     },
   };
@@ -266,6 +279,7 @@ async function decodeStill(
       totalDuration: 0,
       fps: 0,
       format: "webp",
+      loopCount: 0, // a still image has no animation — loop value is moot
       frameCapped: false,
     },
   };

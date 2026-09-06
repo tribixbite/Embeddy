@@ -35,6 +35,12 @@ export interface SourceInfo {
   /** Source format */
   format: "gif" | "video" | "webp";
   /**
+   * Source loop count: 0 = loop forever, N = play/loop N times.
+   * Play-once sources report 1 so the output preserves their behaviour
+   * instead of silently becoming an infinite loop.
+   */
+  loopCount: number;
+  /**
    * True when the decoder stopped early because of the frame/memory budget,
    * so `frameCount` is less than the source actually contains.
    */
