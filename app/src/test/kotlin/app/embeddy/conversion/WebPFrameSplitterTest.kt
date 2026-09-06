@@ -93,8 +93,63 @@ class WebPFrameSplitterTest {
     @Test
     fun `isAnimatedWebP only needs the header, not the whole file`() {
         val animated = riff(vp8x(0x02, 32, 32) + anmf(32, 32, 100))
-        val headerOnly = animated.copyOfRange(0, 21)
+        val headerOnly = animated.copyOfRange(0, WebPFrameSplitter.HEADER_BYTES)
         assertTrue(WebPFrameSplitter.isAnimatedWebP(headerOnly))
+    }
+
+    // ── isAnimatedWebP(InputStream): bounded sniff (OOM guard) ──────────────
+
+    /** Wraps a stream and counts how many bytes were actually consumed. */
+    private class CountingInputStream(data: ByteArray) : java.io.InputStream() {
+        private val inner = java.io.ByteArrayInputStream(data)
+        var bytesRead = 0
+            private set
+
+        override fun read(): Int =
+            inner.read().also { if (it >= 0) bytesRead++ }
+
+        override fun read(b: ByteArray, off: Int, len: Int): Int =
+            inner.read(b, off, len).also { if (it > 0) bytesRead += it }
+    }
+
+    @Test
+    fun `stream sniff reads at most the header for a large non-WebP input`() {
+        // Simulate a picked video: 1 MB of non-WebP bytes. The sniff must not
+        // consume the whole stream — that is the read pattern that OOM'd the
+        // probe on multi-GB inputs.
+        val stream = CountingInputStream(ByteArray(1_000_000) { (it % 251).toByte() })
+        assertFalse(WebPFrameSplitter.isAnimatedWebP(stream))
+        assertTrue(
+            "sniff consumed ${stream.bytesRead} bytes, expected <= ${WebPFrameSplitter.HEADER_BYTES}",
+            stream.bytesRead <= WebPFrameSplitter.HEADER_BYTES,
+        )
+    }
+
+    @Test
+    fun `stream sniff accepts an animated WebP without needing the full body`() {
+        val animated = riff(vp8x(0x02, 32, 32) + anmf(32, 32, 100))
+        val stream = CountingInputStream(animated)
+        assertTrue(WebPFrameSplitter.isAnimatedWebP(stream))
+        assertTrue(stream.bytesRead <= WebPFrameSplitter.HEADER_BYTES)
+    }
+
+    @Test
+    fun `stream sniff rejects input shorter than the header`() {
+        val stream = CountingInputStream(byteArrayOf(0x52, 0x49, 0x46, 0x46))
+        assertFalse(WebPFrameSplitter.isAnimatedWebP(stream))
+    }
+
+    @Test
+    fun `stream sniff survives one-byte-at-a-time reads`() {
+        // A stream returning short reads must still fill the full header.
+        val animated = riff(vp8x(0x02, 32, 32) + anmf(32, 32, 100))
+        val trickle = object : java.io.InputStream() {
+            private val inner = java.io.ByteArrayInputStream(animated)
+            override fun read(): Int = inner.read()
+            override fun read(b: ByteArray, off: Int, len: Int): Int =
+                inner.read(b, off, minOf(len, 1))
+        }
+        assertTrue(WebPFrameSplitter.isAnimatedWebP(trickle))
     }
 
     // ── split: rejection cases ──────────────────────────────────────────────

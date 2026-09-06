@@ -3,6 +3,7 @@ package app.embeddy.conversion
 import android.content.Context
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import androidx.annotation.VisibleForTesting
 import app.embeddy.util.FileInfoUtils
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.FFprobeKit
@@ -15,7 +16,9 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import timber.log.Timber
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.InputStream
 import java.util.Locale
 import java.util.UUID
 import kotlin.coroutines.resume
@@ -74,9 +77,21 @@ class ConversionEngine(private val context: Context) {
      * Returns null for anything that isn't one.
      */
     private fun probeAnimatedWebP(uri: Uri): MediaInfo? {
-        val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-            ?: return null
-        if (!WebPFrameSplitter.isAnimatedWebP(bytes)) return null
+        // Sniff only the 21-byte header first — reading the whole stream up front
+        // would allocate a picked 2 GB video on the Java heap and OutOfMemoryError
+        // (an Error, not an Exception) would crash the app before any probe ran.
+        val animated = context.contentResolver.openInputStream(uri)?.use { stream ->
+            WebPFrameSplitter.isAnimatedWebP(stream)
+        } ?: return null
+        if (!animated) return null
+
+        // Confirmed animated WebP — now the full read is justified, but still capped.
+        val fullStream = context.contentResolver.openInputStream(uri) ?: return null
+        val bytes = fullStream.use { stream -> readAtMost(stream, MAX_ANIMATED_WEBP_BYTES) }
+        if (bytes == null) {
+            Timber.w("Animated WebP exceeds %d bytes, skipping RIFF probe", MAX_ANIMATED_WEBP_BYTES)
+            return null
+        }
         val frameSet = WebPFrameSplitter.split(bytes) ?: return null
 
         return MediaInfo(
@@ -87,7 +102,26 @@ class ConversionEngine(private val context: Context) {
             rotation = 0,
             mimeType = "image/webp",
             frameCount = frameSet.frames.size,
+            loopCount = frameSet.loopCount,
         )
+    }
+
+    /**
+     * Read a stream fully, or return null once it exceeds [maxBytes].
+     * Guards heap allocation for reads whose size the ContentResolver can't report.
+     */
+    private fun readAtMost(stream: InputStream, maxBytes: Int): ByteArray? {
+        val out = ByteArrayOutputStream()
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        var total = 0L
+        while (true) {
+            val n = stream.read(buffer)
+            if (n < 0) break
+            total += n
+            if (total > maxBytes) return null
+            out.write(buffer, 0, n)
+        }
+        return out.toByteArray()
     }
 
     /** Probe using Android's MediaMetadataRetriever (fast, but fragile for some files). */
@@ -116,9 +150,13 @@ class ConversionEngine(private val context: Context) {
             val frameCount = retriever.extractMetadata(
                 MediaMetadataRetriever.METADATA_KEY_VIDEO_FRAME_COUNT
             )?.toIntOrNull() ?: 0
+            // FFmpeg autorotates on decode, so a portrait phone MP4 stored as
+            // 1920x1080 + rotate=90 effectively converts at 1080x1920 — report
+            // the display dimensions, keeping the rotation value for the UI.
+            val (displayWidth, displayHeight) = normalizeDimensions(width, height, rotation)
             return MediaInfo(
-                width = width,
-                height = height,
+                width = displayWidth,
+                height = displayHeight,
                 durationMs = durationMs,
                 bitrate = bitrate,
                 rotation = rotation,
@@ -150,14 +188,25 @@ class ConversionEngine(private val context: Context) {
 
             val durationSec = mediaInfo.duration?.toDoubleOrNull() ?: 0.0
 
+            // session.output is the raw `-print_format json` dump FFprobeKit parsed
+            // MediaInformation from — rotation (side_data_list) and nb_frames are
+            // only present there, not on the convenience accessors.
+            val rawJson = session.output ?: ""
+            val rotation = FfprobeJsonParser.rotationDegrees(rawJson)
+            val (displayWidth, displayHeight) = normalizeDimensions(
+                videoStream?.width?.toInt() ?: 0,
+                videoStream?.height?.toInt() ?: 0,
+                rotation,
+            )
+
             return MediaInfo(
-                width = videoStream?.width?.toInt() ?: 0,
-                height = videoStream?.height?.toInt() ?: 0,
+                width = displayWidth,
+                height = displayHeight,
                 durationMs = (durationSec * 1000).toLong(),
                 bitrate = mediaInfo.bitrate?.toLongOrNull()?.toInt() ?: 0,
-                rotation = 0, // FFprobe rotation requires parsing side_data
+                rotation = rotation,
                 mimeType = mediaInfo.format ?: "",
-                frameCount = 0, // Not directly available from FFprobe info
+                frameCount = FfprobeJsonParser.frameCount(rawJson),
             )
         } finally {
             tempFile.delete()
@@ -222,6 +271,7 @@ class ConversionEngine(private val context: Context) {
             var bestOutputSize = Long.MAX_VALUE
             var bestQuality = config.startQuality
             var hasAnyOutput = false
+            var producedEmptyOutput = false
             var lastFfmpegError: String? = null
 
             while (quality >= minQuality) {
@@ -233,6 +283,7 @@ class ConversionEngine(private val context: Context) {
                     config = config,
                     quality = quality,
                     concatScript = extracted?.concatScript,
+                    sourceLoopCount = extracted?.loopCount,
                 )
                 Timber.d("FFmpeg command (q=%d): %s", quality, command)
 
@@ -271,13 +322,20 @@ class ConversionEngine(private val context: Context) {
                 }
 
                 val fileSize = tempOutput.length()
-                if (fileSize > 0) {
-                    // Save best output so far (smallest file = lowest quality)
-                    tempOutput.copyTo(finalOutput, overwrite = true)
-                    bestOutputSize = fileSize
-                    bestQuality = quality
-                    hasAnyOutput = true
+                if (fileSize <= 0) {
+                    // FFmpeg exited 0 but wrote nothing (e.g. -ss past the end of
+                    // the input). Retrying at a lower quality can't conjure frames,
+                    // and emitting Complete here would hand the UI a path to a file
+                    // that was never written.
+                    producedEmptyOutput = true
+                    break
                 }
+
+                // Save best output so far (smallest file = lowest quality)
+                tempOutput.copyTo(finalOutput, overwrite = true)
+                bestOutputSize = fileSize
+                bestQuality = quality
+                hasAnyOutput = true
 
                 // No target size → one-shot encode, skip adaptive loop
                 if (config.targetSizeBytes <= 0 || fileSize <= config.targetSizeBytes) {
@@ -316,7 +374,11 @@ class ConversionEngine(private val context: Context) {
                 )
             } else {
                 // Extract a user-friendly reason from FFmpeg's output
-                val reason = extractErrorReason(lastFfmpegError)
+                val reason = if (producedEmptyOutput) {
+                    "Nothing was encoded — check that the trim range overlaps the video"
+                } else {
+                    extractErrorReason(lastFfmpegError)
+                }
                 send(ConversionProgress.Failed(reason))
             }
         } catch (e: Exception) {
@@ -330,183 +392,6 @@ class ConversionEngine(private val context: Context) {
 
         close()
     }.flowOn(Dispatchers.IO)
-
-    /**
-     * Format a millisecond timestamp as an FFmpeg seconds argument.
-     * Always uses [Locale.US] — FFmpeg only accepts `.` as the decimal separator,
-     * and the default locale would emit `1,500` on e.g. de-DE/fr-FR devices.
-     */
-    private fun formatSeconds(millis: Long): String =
-        String.format(Locale.US, "%.3f", millis / 1000.0)
-
-    /**
-     * Build the core video filter chain (scale, fps, denoise, sharpen, dither).
-     * Shared between single-segment and multi-segment (stitching) modes.
-     */
-    private fun buildVideoFilters(config: ConversionConfig): String {
-        return buildList {
-            // Scaling: exact dimensions take precedence over maxDimension
-            if (config.exactWidth > 0 && config.exactHeight > 0) {
-                add("scale=${config.exactWidth}:${config.exactHeight}:force_original_aspect_ratio=increase:flags=lanczos")
-                add("crop=${config.exactWidth}:${config.exactHeight}")
-            } else if (config.exactWidth > 0) {
-                add("scale=${config.exactWidth}:-2:flags=lanczos")
-            } else if (config.exactHeight > 0) {
-                add("scale=-2:${config.exactHeight}:flags=lanczos")
-            } else {
-                add("scale='min(${config.maxDimension},iw)':'min(${config.maxDimension},ih)':force_original_aspect_ratio=decrease:flags=lanczos")
-            }
-            add("fps=${config.fps}")
-            if (config.denoiseStrength > 0) {
-                val strength = config.denoiseStrength.coerceIn(1, 10)
-                add("hqdn3d=$strength:$strength:${strength / 2}:${strength / 2}")
-            }
-            if (config.sharpen) {
-                add("unsharp=5:5:1.2:5:5:0.6")
-            }
-            if (config.ditherMode != DitherMode.NONE) {
-                add("split[a][b];[a]palettegen[p];[b][p]paletteuse=dither=${config.ditherMode.ffmpegValue}")
-            }
-        }.joinToString(",")
-    }
-
-    /** Append encoder flags common to both single and multi-segment modes. */
-    private fun StringBuilder.appendEncoderFlags(config: ConversionConfig, quality: Int) {
-        append("-c:v libwebp_anim ")
-        append("-quality $quality ")
-        append("-compression_level ${config.compressionLevel} ")
-        append("-loop ${config.loop} ")
-        append("-an ")
-        append("-vsync vfr ")
-        if (config.colorSpace != ColorSpace.AUTO) {
-            append("-pix_fmt ${config.colorSpace.ffmpegValue} ")
-        }
-        if (config.keyframeInterval > 0) {
-            append("-g ${config.keyframeInterval} ")
-        }
-    }
-
-    /**
-     * Build the FFmpeg command matching the discwebp algorithm.
-     * Supports:
-     * - Single trim (trimStartMs/trimEndMs)
-     * - Multi-segment stitching via concat filter (segments list)
-     * - Exact crop, denoise, sharpen, dither, color space, keyframe interval
-     */
-    private fun buildFfmpegCommand(
-        inputPath: String,
-        outputPath: String,
-        config: ConversionConfig,
-        quality: Int,
-        /** Set when the input was pre-decoded to a PNG sequence (animated WebP) */
-        concatScript: File? = null,
-    ): String {
-        val filters = buildVideoFilters(config)
-
-        // Pre-decoded frame sequence: read via the concat demuxer so each frame
-        // keeps its own duration, then apply the usual filter chain.
-        if (concatScript != null) {
-            return buildConcatCommand(concatScript, outputPath, config, quality, filters)
-        }
-
-        // Multi-segment stitching mode: use complex filtergraph with concat
-        if (config.segments.size > 1) {
-            return buildStitchCommand(inputPath, outputPath, config, quality, filters)
-        }
-
-        // Single-segment mode (legacy trim or single segment)
-        val effectiveStart = config.segments.firstOrNull()?.startMs ?: config.trimStartMs
-        val effectiveEnd = config.segments.firstOrNull()?.endMs ?: config.trimEndMs
-
-        return buildString {
-            append("-y ")
-            if (effectiveStart > 0) {
-                append("-ss ${formatSeconds(effectiveStart)} ")
-            }
-            append("-i \"$inputPath\" ")
-            if (effectiveEnd > 0) {
-                // -to is an output option here, so it is relative to the seek point
-                append("-to ${formatSeconds(effectiveEnd - effectiveStart)} ")
-            }
-            append("-vf \"$filters\" ")
-            appendEncoderFlags(config, quality)
-            append("\"$outputPath\"")
-        }
-    }
-
-    /**
-     * Build an FFmpeg command that reads a pre-decoded PNG sequence.
-     *
-     * Used for animated WebP, which FFmpeg 6.0 cannot demux. Trimming is applied
-     * on the output side since the concat demuxer has no seekable timeline.
-     */
-    private fun buildConcatCommand(
-        concatScript: File,
-        outputPath: String,
-        config: ConversionConfig,
-        quality: Int,
-        filters: String,
-    ): String = buildString {
-        append("-y ")
-        append("-f concat -safe 0 ")
-        val effectiveStart = config.segments.firstOrNull()?.startMs ?: config.trimStartMs
-        val effectiveEnd = config.segments.firstOrNull()?.endMs ?: config.trimEndMs
-        if (effectiveStart > 0) {
-            append("-ss ${formatSeconds(effectiveStart)} ")
-        }
-        append("-i \"${concatScript.absolutePath}\" ")
-        if (effectiveEnd > effectiveStart) {
-            append("-to ${formatSeconds(effectiveEnd - effectiveStart)} ")
-        }
-        append("-vf \"$filters\" ")
-        appendEncoderFlags(config, quality)
-        append("\"$outputPath\"")
-    }
-
-    /**
-     * Build an FFmpeg command that stitches multiple segments using the concat filter.
-     * Each segment is trimmed from the same input, concatenated, THEN filtered.
-     *
-     * Filters are applied AFTER concat to avoid FFmpeg label collisions — some
-     * filters (e.g. palettegen/paletteuse for dithering) use internal labels like
-     * [a][b][p] that would conflict if duplicated per segment.
-     *
-     * Complex filtergraph structure:
-     *   [0:v]trim=start:end,setpts=PTS-STARTPTS[v0];
-     *   [0:v]trim=start:end,setpts=PTS-STARTPTS[v1];
-     *   [v0][v1]concat=n=2:v=1:a=0[cat];[cat]<filters>[vout]
-     */
-    private fun buildStitchCommand(
-        inputPath: String,
-        outputPath: String,
-        config: ConversionConfig,
-        quality: Int,
-        filters: String,
-    ): String {
-        val n = config.segments.size
-
-        val filterGraph = buildString {
-            config.segments.forEachIndexed { i, seg ->
-                // Trim each segment and reset PTS (no per-segment filters)
-                append(
-                    "[0:v]trim=${formatSeconds(seg.startMs)}:${formatSeconds(seg.endMs)}," +
-                        "setpts=PTS-STARTPTS[v$i];"
-                )
-            }
-            // Concatenate all segments, then apply filters to the combined stream
-            val inputs = (0 until n).joinToString("") { "[v$it]" }
-            append("${inputs}concat=n=$n:v=1:a=0[cat];[cat]$filters[vout]")
-        }
-
-        return buildString {
-            append("-y ")
-            append("-i \"$inputPath\" ")
-            append("-filter_complex \"$filterGraph\" ")
-            append("-map \"[vout]\" ")
-            appendEncoderFlags(config, quality)
-            append("\"$outputPath\"")
-        }
-    }
 
     /**
      * Execute an FFmpeg command with a statistics callback.
@@ -548,21 +433,18 @@ class ConversionEngine(private val context: Context) {
         frameDir: File,
     ): AnimatedWebPExtractor.Extracted? {
         // Cheap header sniff before loading the whole file into memory.
-        // readNBytes-style loop: a single read() may return a short count.
-        val header = ByteArray(WEBP_HEADER_BYTES)
-        var filled = 0
-        inputFile.inputStream().use { stream ->
-            while (filled < WEBP_HEADER_BYTES) {
-                val n = stream.read(header, filled, WEBP_HEADER_BYTES - filled)
-                if (n < 0) break
-                filled += n
-            }
+        val animated = inputFile.inputStream().use { stream ->
+            WebPFrameSplitter.isAnimatedWebP(stream)
         }
-        if (filled < WEBP_HEADER_BYTES) {
-            Timber.d("Input too small for a WebP header (%d bytes)", filled)
+        if (!animated) return null
+
+        if (inputFile.length() > MAX_ANIMATED_WEBP_BYTES) {
+            Timber.w(
+                "Animated WebP too large to pre-decode (%d bytes), falling back to direct decode",
+                inputFile.length(),
+            )
             return null
         }
-        if (!WebPFrameSplitter.isAnimatedWebP(header)) return null
 
         Timber.d("Input is an animated WebP — pre-decoding frames for FFmpeg")
         return AnimatedWebPExtractor(frameDir).extract(inputFile.readBytes())
@@ -591,8 +473,18 @@ class ConversionEngine(private val context: Context) {
     ): Flow<ConversionProgress> = callbackFlow {
         val inputFile = copyUriToTemp(inputUri)
         val previewOutput = File(tempDir, "preview_${UUID.randomUUID()}.webp")
+        // Animated WebP needs the same pre-decode as convert() — FFmpeg can't
+        // demux it, so feeding the raw file would preview a single-frame still.
+        val frameDir = File(tempDir, "frames_${UUID.randomUUID()}").also { it.mkdirs() }
 
         try {
+            val extracted = try {
+                extractAnimatedWebP(inputFile, frameDir)
+            } catch (e: Exception) {
+                Timber.w(e, "Animated WebP extraction failed for preview, falling back to direct decode")
+                null
+            }
+
             // Determine the preview start point from trim/segment settings
             val startMs = config.segments.firstOrNull()?.startMs
                 ?: config.trimStartMs.takeIf { it > 0 }
@@ -615,6 +507,8 @@ class ConversionEngine(private val context: Context) {
                 outputPath = previewOutput.absolutePath,
                 config = previewConfig,
                 quality = config.startQuality,
+                concatScript = extracted?.concatScript,
+                sourceLoopCount = extracted?.loopCount,
             )
             Timber.d("Preview FFmpeg command (q=%d): %s", config.startQuality, command)
 
@@ -662,6 +556,7 @@ class ConversionEngine(private val context: Context) {
             send(ConversionProgress.Failed(e.message ?: "Unknown error"))
         } finally {
             inputFile.delete()
+            frameDir.deleteRecursively()
             // Note: previewOutput is NOT deleted here — caller owns cleanup
         }
 
@@ -721,8 +616,12 @@ class ConversionEngine(private val context: Context) {
     }
 
     private companion object {
-        /** Enough to cover RIFF + size + WEBP + VP8X header and its flags byte. */
-        const val WEBP_HEADER_BYTES = 21
+        /**
+         * Cap on how much of an animated WebP is loaded onto the heap for
+         * splitting/probing — anything larger is skipped rather than risking
+         * OutOfMemoryError (which no `catch (e: Exception)` would intercept).
+         */
+        const val MAX_ANIMATED_WEBP_BYTES = 100_000_000
     }
 }
 
@@ -734,7 +633,266 @@ data class MediaInfo(
     val rotation: Int = 0,
     val mimeType: String = "",
     val frameCount: Int = 0,
+    /** Source animation loop count (0 = infinite/unknown); set for animated WebP. */
+    val loopCount: Int = 0,
 )
+
+/**
+ * Swap probed width/height when rotation metadata indicates a ±90° display
+ * rotation. FFmpeg autorotates on decode, so the effective dimensions of a
+ * portrait phone MP4 (stored 1920x1080 + rotate=90) are 1080x1920 — reporting
+ * the stored values transposes every displayed dimension and size estimate.
+ */
+internal fun normalizeDimensions(width: Int, height: Int, rotationDegrees: Int): Pair<Int, Int> {
+    val normalized = ((rotationDegrees % 360) + 360) % 360
+    return if (normalized == 90 || normalized == 270) height to width else width to height
+}
+
+/**
+ * Resolve the loop count passed to `-loop`.
+ *
+ * `configLoop` 0 means infinite; when the user has left it at the default and
+ * the source (an animated WebP) declares a finite loop count, preserve it so a
+ * play-once input doesn't silently become an infinite loop.
+ *
+ * TODO: 0 is ambiguous between "untouched default" and "explicitly infinite" —
+ * forcing infinite loop on a finite-loop source needs a UI-level tri-state
+ * (Auto/Infinite/N); see the WS-G handoff notes for M76.
+ */
+internal fun resolveLoopCount(configLoop: Int, sourceLoopCount: Int?): Int =
+    if (configLoop == 0 && sourceLoopCount != null && sourceLoopCount > 0) {
+        sourceLoopCount
+    } else {
+        configLoop
+    }
+
+/**
+ * Targeted extraction of scalar fields from FFprobe's `-print_format json`
+ * output that FFprobeKit's convenience accessors do not surface.
+ *
+ * Regex-over-JSON is deliberate: `org.json` is an unmocked stub in plain JVM
+ * unit tests and only two well-known scalar fields are needed. Both patterns
+ * accept quoted and unquoted values, matching ffprobe's actual emissions.
+ */
+internal object FfprobeJsonParser {
+    private val ROTATION_REGEX = Regex("\"rotation\"\\s*:\\s*\"?(-?\\d+)\"?")
+    private val NB_FRAMES_REGEX = Regex("\"nb_frames\"\\s*:\\s*\"?(\\d+)\"?")
+
+    /**
+     * Display rotation in MediaMetadataRetriever convention (0/90/180/270).
+     * ffprobe's side_data_list rotation is counter-clockwise-positive, while
+     * MMR reports the clockwise rotation to apply — negate and normalize.
+     */
+    fun rotationDegrees(ffprobeJson: String): Int {
+        val raw = ROTATION_REGEX.find(ffprobeJson)?.groupValues?.get(1)?.toIntOrNull() ?: return 0
+        return ((-raw) % 360 + 360) % 360
+    }
+
+    /** First stream's `nb_frames`, or 0 when the container doesn't declare it. */
+    fun frameCount(ffprobeJson: String): Int =
+        NB_FRAMES_REGEX.find(ffprobeJson)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+}
+
+/**
+ * Format a millisecond timestamp as an FFmpeg seconds argument.
+ * Always uses [Locale.US] — FFmpeg only accepts `.` as the decimal separator,
+ * and the default locale would emit `1,500` on e.g. de-DE/fr-FR devices.
+ */
+private fun formatSeconds(millis: Long): String =
+    String.format(Locale.US, "%.3f", millis / 1000.0)
+
+/**
+ * Build the core video filter chain (scale, fps, denoise, sharpen, dither).
+ * Shared between single-segment and multi-segment (stitching) modes.
+ */
+private fun buildVideoFilters(config: ConversionConfig): String {
+    return buildList {
+        // Scaling: exact dimensions take precedence over maxDimension
+        if (config.exactWidth > 0 && config.exactHeight > 0) {
+            add("scale=${config.exactWidth}:${config.exactHeight}:force_original_aspect_ratio=increase:flags=lanczos")
+            add("crop=${config.exactWidth}:${config.exactHeight}")
+        } else if (config.exactWidth > 0) {
+            add("scale=${config.exactWidth}:-2:flags=lanczos")
+        } else if (config.exactHeight > 0) {
+            add("scale=-2:${config.exactHeight}:flags=lanczos")
+        } else {
+            add("scale='min(${config.maxDimension},iw)':'min(${config.maxDimension},ih)':force_original_aspect_ratio=decrease:flags=lanczos")
+        }
+        add("fps=${config.fps}")
+        if (config.denoiseStrength > 0) {
+            val strength = config.denoiseStrength.coerceIn(1, 10)
+            add("hqdn3d=$strength:$strength:${strength / 2}:${strength / 2}")
+        }
+        if (config.sharpen) {
+            add("unsharp=5:5:1.2:5:5:0.6")
+        }
+        if (config.ditherMode != DitherMode.NONE) {
+            add("split[a][b];[a]palettegen[p];[b][p]paletteuse=dither=${config.ditherMode.ffmpegValue}")
+        }
+    }.joinToString(",")
+}
+
+/**
+ * Append encoder flags common to all encode modes.
+ *
+ * NOTE: keyframeInterval used to emit `-g N` here — libwebp_anim never reads
+ * gop_size (frame decisions come from its internal kmin/kmax logic), so the
+ * flag was a silent no-op and has been removed.
+ */
+private fun StringBuilder.appendEncoderFlags(config: ConversionConfig, quality: Int, loop: Int) {
+    append("-c:v libwebp_anim ")
+    append("-quality $quality ")
+    append("-compression_level ${config.compressionLevel} ")
+    append("-loop $loop ")
+    append("-an ")
+    append("-vsync vfr ")
+    if (config.colorSpace != ColorSpace.AUTO) {
+        append("-pix_fmt ${config.colorSpace.ffmpegValue} ")
+    }
+}
+
+/**
+ * Build the FFmpeg command matching the discwebp algorithm.
+ * Supports:
+ * - Single trim (trimStartMs/trimEndMs)
+ * - Multi-segment stitching via concat filter (segments list) — including over a
+ *   pre-decoded PNG sequence, which previously fell into the single-segment
+ *   concat branch and silently dropped every segment but the first
+ * - Exact crop, denoise, sharpen, dither, color space
+ *
+ * Top-level (not a ConversionEngine member) so JVM tests can pin the generated
+ * commands without an Android Context.
+ */
+@VisibleForTesting
+internal fun buildFfmpegCommand(
+    inputPath: String,
+    outputPath: String,
+    config: ConversionConfig,
+    quality: Int,
+    /** Set when the input was pre-decoded to a PNG sequence (animated WebP) */
+    concatScript: File? = null,
+    /** Loop count declared by the source animation, when known */
+    sourceLoopCount: Int? = null,
+): String {
+    val filters = buildVideoFilters(config)
+    val loop = resolveLoopCount(config.loop, sourceLoopCount)
+
+    // Pre-decoded frame sequences are read via the concat demuxer so each frame
+    // keeps its own duration.
+    val inputArgs = if (concatScript != null) {
+        "-f concat -safe 0 -i \"${concatScript.absolutePath}\""
+    } else {
+        "-i \"$inputPath\""
+    }
+
+    // Multi-segment stitching mode: complex filtergraph with concat. The trim
+    // filter operates on timestamps, which the concat demuxer synthesizes from
+    // per-frame durations, so the same graph works for both input kinds.
+    if (config.segments.size > 1) {
+        return buildStitchCommand(inputArgs, outputPath, config, quality, filters, loop)
+    }
+
+    if (concatScript != null) {
+        return buildConcatCommand(concatScript, outputPath, config, quality, filters, loop)
+    }
+
+    // Single-segment mode (legacy trim or single segment)
+    val effectiveStart = config.segments.firstOrNull()?.startMs ?: config.trimStartMs
+    val effectiveEnd = config.segments.firstOrNull()?.endMs ?: config.trimEndMs
+
+    return buildString {
+        append("-y ")
+        if (effectiveStart > 0) {
+            append("-ss ${formatSeconds(effectiveStart)} ")
+        }
+        append("-i \"$inputPath\" ")
+        if (effectiveEnd > 0) {
+            // -to is an output option here, so it is relative to the seek point
+            append("-to ${formatSeconds(effectiveEnd - effectiveStart)} ")
+        }
+        append("-vf \"$filters\" ")
+        appendEncoderFlags(config, quality, loop)
+        append("\"$outputPath\"")
+    }
+}
+
+/**
+ * Build an FFmpeg command that reads a pre-decoded PNG sequence (single segment).
+ *
+ * Used for animated WebP, which FFmpeg 6.0 cannot demux. Trimming is applied
+ * on the output side since the concat demuxer has no seekable timeline.
+ */
+private fun buildConcatCommand(
+    concatScript: File,
+    outputPath: String,
+    config: ConversionConfig,
+    quality: Int,
+    filters: String,
+    loop: Int,
+): String = buildString {
+    append("-y ")
+    append("-f concat -safe 0 ")
+    val effectiveStart = config.segments.firstOrNull()?.startMs ?: config.trimStartMs
+    val effectiveEnd = config.segments.firstOrNull()?.endMs ?: config.trimEndMs
+    if (effectiveStart > 0) {
+        append("-ss ${formatSeconds(effectiveStart)} ")
+    }
+    append("-i \"${concatScript.absolutePath}\" ")
+    if (effectiveEnd > effectiveStart) {
+        append("-to ${formatSeconds(effectiveEnd - effectiveStart)} ")
+    }
+    append("-vf \"$filters\" ")
+    appendEncoderFlags(config, quality, loop)
+    append("\"$outputPath\"")
+}
+
+/**
+ * Build an FFmpeg command that stitches multiple segments using the concat filter.
+ * Each segment is trimmed from the same input, concatenated, THEN filtered.
+ *
+ * Filters are applied AFTER concat to avoid FFmpeg label collisions — some
+ * filters (e.g. palettegen/paletteuse for dithering) use internal labels like
+ * [a][b][p] that would conflict if duplicated per segment.
+ *
+ * Complex filtergraph structure:
+ *   [0:v]trim=start:end,setpts=PTS-STARTPTS[v0];
+ *   [0:v]trim=start:end,setpts=PTS-STARTPTS[v1];
+ *   [v0][v1]concat=n=2:v=1:a=0[cat];[cat]<filters>[vout]
+ *
+ * @param inputArgs full input specification (`-i "path"` or the concat-demuxer form)
+ */
+private fun buildStitchCommand(
+    inputArgs: String,
+    outputPath: String,
+    config: ConversionConfig,
+    quality: Int,
+    filters: String,
+    loop: Int,
+): String {
+    val n = config.segments.size
+
+    val filterGraph = buildString {
+        config.segments.forEachIndexed { i, seg ->
+            // Trim each segment and reset PTS (no per-segment filters)
+            append(
+                "[0:v]trim=${formatSeconds(seg.startMs)}:${formatSeconds(seg.endMs)}," +
+                    "setpts=PTS-STARTPTS[v$i];"
+            )
+        }
+        // Concatenate all segments, then apply filters to the combined stream
+        val inputs = (0 until n).joinToString("") { "[v$it]" }
+        append("${inputs}concat=n=$n:v=1:a=0[cat];[cat]$filters[vout]")
+    }
+
+    return buildString {
+        append("-y ")
+        append("$inputArgs ")
+        append("-filter_complex \"$filterGraph\" ")
+        append("-map \"[vout]\" ")
+        appendEncoderFlags(config, quality, loop)
+        append("\"$outputPath\"")
+    }
+}
 
 /** Progress events emitted during conversion. */
 sealed interface ConversionProgress {

@@ -4,26 +4,15 @@ import org.junit.Assert.*
 import org.junit.Test
 
 /**
- * Tests for segment overlap merging logic.
- * The merge algorithm is extracted here for testability — mirrors the
- * implementation in MainViewModel.mergeOverlappingSegments().
+ * Tests for [mergeOverlappingSegments] — the PRODUCTION top-level function in
+ * ConversionConfig.kt that MainViewModel calls before building FFmpeg commands.
+ * (This suite previously tested a private mirror copy of the algorithm, which
+ * let a production regression pass unnoticed.)
  */
 class SegmentMergeTest {
 
-    /** Merge overlapping segments — same algorithm as MainViewModel. */
-    private fun mergeOverlapping(segments: List<TrimSegment>): List<TrimSegment> {
-        if (segments.size <= 1) return segments
-        val sorted = segments.sortedBy { it.startMs }
-        return sorted.fold(mutableListOf<TrimSegment>()) { acc, seg ->
-            val last = acc.lastOrNull()
-            if (last != null && seg.startMs <= last.endMs) {
-                acc[acc.lastIndex] = TrimSegment(last.startMs, maxOf(last.endMs, seg.endMs))
-            } else {
-                acc.add(seg)
-            }
-            acc
-        }
-    }
+    private fun mergeOverlapping(segments: List<TrimSegment>): List<TrimSegment> =
+        mergeOverlappingSegments(segments)
 
     @Test
     fun `single segment unchanged`() {

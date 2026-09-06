@@ -33,6 +33,8 @@ class AnimatedWebPExtractor(private val workDir: File) {
         val frameCount: Int,
         val totalDurationMs: Int,
         val averageFps: Double,
+        /** Source loop count from the ANIM chunk (0 = loop forever) */
+        val loopCount: Int,
         /** True when the frame cap stopped extraction before the end */
         val truncated: Boolean,
     )
@@ -125,6 +127,7 @@ class AnimatedWebPExtractor(private val workDir: File) {
             averageFps = if (totalDurationMs > 0 && written > 1) {
                 written * 1000.0 / totalDurationMs
             } else 0.0,
+            loopCount = frameSet.loopCount,
             truncated = limit < frameSet.frames.size,
         )
     }

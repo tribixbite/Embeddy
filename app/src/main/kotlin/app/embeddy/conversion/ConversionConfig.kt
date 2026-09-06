@@ -14,6 +14,29 @@ data class TrimSegment(
     val durationMs: Long get() = (endMs - startMs).coerceAtLeast(0)
 }
 
+/**
+ * Merge overlapping or adjacent [TrimSegment]s so FFmpeg's concat filter never
+ * receives duplicate frames. Segments are sorted by start time first; a segment
+ * whose start falls at or before the previous segment's end extends it.
+ *
+ * Pure and top-level so the unit suite exercises the exact symbol production
+ * uses (it previously lived as a private copy inside MainViewModel).
+ */
+fun mergeOverlappingSegments(segments: List<TrimSegment>): List<TrimSegment> {
+    if (segments.size <= 1) return segments
+    val sorted = segments.sortedBy { it.startMs }
+    return sorted.fold(mutableListOf<TrimSegment>()) { acc, seg ->
+        val last = acc.lastOrNull()
+        if (last != null && seg.startMs <= last.endMs) {
+            // Overlapping or adjacent — merge by extending the end
+            acc[acc.lastIndex] = TrimSegment(last.startMs, maxOf(last.endMs, seg.endMs))
+        } else {
+            acc.add(seg)
+        }
+        acc
+    }
+}
+
 data class ConversionConfig(
     val maxDimension: Int = 720,
     val fps: Int = 12,
@@ -37,7 +60,12 @@ data class ConversionConfig(
     val colorSpace: ColorSpace = ColorSpace.AUTO, // Output color space / pixel format
     val denoiseStrength: Int = 0,           // hqdn3d denoise (0=off, 1-10 strength)
     val ditherMode: DitherMode = DitherMode.NONE, // Bayer/Floyd-Steinberg for palette reduction
-    val keyframeInterval: Int = 0,          // -g flag: force keyframe every N frames (0=auto)
+    @Deprecated(
+        "No effect: libwebp_anim never reads gop_size, so the -g flag this mapped to " +
+            "was a silent no-op. Kept only until the SettingsPanel slider is removed; " +
+            "no longer emitted, persisted, or restored."
+    )
+    val keyframeInterval: Int = 0,
 ) {
     /**
      * Quality floor the adaptive loop may descend to.
@@ -70,12 +98,17 @@ data class ConversionConfig(
     }
 }
 
-/** Output color space / pixel format for encoding. */
+/**
+ * Output color space / pixel format for encoding.
+ *
+ * Restricted to what libwebp_anim actually consumes (bgra/yuv420p/yuva420p):
+ * the former YUV444/RGB entries mapped to yuv444p/rgb24, which FFmpeg silently
+ * auto-substitutes with bgra — the settings were persisted no-ops. Previously
+ * saved "YUV444"/"RGB" preference strings fall back to AUTO on restore.
+ */
 enum class ColorSpace(val label: String, val ffmpegValue: String) {
     AUTO("Auto", ""),
     YUV420("YUV 4:2:0", "yuv420p"),    // Standard, best compat
-    YUV444("YUV 4:4:4", "yuv444p"),    // Higher chroma fidelity, larger
-    RGB("RGB", "rgb24"),                // Lossless color, largest
 }
 
 /** Dithering mode for color quantization (useful for palette-constrained formats). */

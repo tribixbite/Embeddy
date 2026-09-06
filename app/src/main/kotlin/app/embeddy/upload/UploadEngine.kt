@@ -39,10 +39,14 @@ class UploadEngine(private val context: Context) {
         val fileName = queryFileName(uri) ?: "file"
         val mimeType = context.contentResolver.getType(uri) ?: "application/octet-stream"
 
-        // Copy to temp once — retries reuse the same file
+        // Copy to temp once — retries reuse the same file.
+        // Track the strip outcome instead of swallowing it: a HEIC with GPS data
+        // must not upload publicly while the UI claims metadata was removed.
         val tempFile = copyToTemp(uri, fileName)
-        if (stripMetadata && isExifSupported(mimeType)) {
-            stripExifData(tempFile)
+        val metadataStripped: Boolean? = if (stripMetadata) {
+            isExifSupported(mimeType) && stripExifData(tempFile)
+        } else {
+            null
         }
 
         var lastException: Exception? = null
@@ -61,6 +65,7 @@ class UploadEngine(private val context: Context) {
                     fileName = fileName,
                     host = host,
                     fileSizeBytes = fileSize,
+                    metadataStripped = metadataStripped,
                 )
             } catch (e: IOException) {
                 lastException = e
@@ -204,22 +209,25 @@ class UploadEngine(private val context: Context) {
         output.write("\r\n".toByteArray())
     }
 
-    /** Strip EXIF metadata from an image file in-place. */
-    private fun stripExifData(file: File) {
-        try {
+    /**
+     * Strip EXIF metadata from an image file in-place.
+     * @return true when the tags were removed and saved; false on any failure,
+     * so the caller can surface "metadata was NOT stripped" instead of silently
+     * uploading GPS coordinates to a public host.
+     */
+    private fun stripExifData(file: File): Boolean {
+        return try {
             val exif = ExifInterface(file)
             EXIF_TAGS_TO_STRIP.forEach { tag ->
                 exif.setAttribute(tag, null)
             }
             exif.saveAttributes()
-        } catch (_: Exception) {
-            // Non-fatal — file may not support EXIF
+            true
+        } catch (e: Exception) {
+            Timber.w(e, "EXIF strip failed for %s", file.name)
+            false
         }
     }
-
-    /** Check if the MIME type supports EXIF metadata. */
-    private fun isExifSupported(mimeType: String): Boolean =
-        mimeType in setOf("image/jpeg", "image/png", "image/webp", "image/heif", "image/heic")
 
     private fun copyToTemp(uri: Uri, fileName: String): File {
         val safeName = FileInfoUtils.sanitizeFileName(fileName)
@@ -245,6 +253,17 @@ class UploadEngine(private val context: Context) {
     companion object {
         private const val MAX_RETRIES = 3
         private const val RETRY_DELAY_MS = 1500L // Linear backoff: 1.5s, 3s, 4.5s
+
+        /**
+         * MIME types androidx ExifInterface can both read AND write.
+         *
+         * heif/heic are deliberately excluded: [ExifInterface.saveAttributes]
+         * only supports JPEG, PNG and WebP and throws
+         * UnsupportedOperationException for HEIF — which was previously swallowed,
+         * letting a HEIC with GPS coordinates upload publicly with no warning.
+         */
+        internal fun isExifSupported(mimeType: String): Boolean =
+            mimeType in setOf("image/jpeg", "image/png", "image/webp")
 
         /** EXIF tags that may contain sensitive/identifying info. */
         private val EXIF_TAGS_TO_STRIP = listOf(
@@ -329,6 +348,12 @@ data class UploadResult(
     val fileName: String,
     val host: UploadHost,
     val fileSizeBytes: Long = 0,
+    /**
+     * Outcome of the metadata strip: null = strip not requested,
+     * true = EXIF removed, false = requested but the format is unsupported or
+     * saving failed — the file may still carry GPS/EXIF data and the UI should warn.
+     */
+    val metadataStripped: Boolean? = null,
 )
 
 class UploadException(message: String, cause: Throwable? = null) : Exception(message, cause)

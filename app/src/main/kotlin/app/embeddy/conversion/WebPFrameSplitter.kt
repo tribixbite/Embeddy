@@ -1,5 +1,7 @@
 package app.embeddy.conversion
 
+import java.io.InputStream
+
 /**
  * Splits an animated WebP into standalone still-image WebPs, one per frame.
  *
@@ -14,6 +16,9 @@ package app.embeddy.conversion
  * Container reference: https://developers.google.com/speed/webp/docs/riff_container
  */
 object WebPFrameSplitter {
+
+    /** Bytes needed to sniff animation: RIFF + size + WEBP + VP8X header + flags byte. */
+    const val HEADER_BYTES = 21
 
     /** How a frame combines with the canvas beneath it. */
     enum class Blend { BLEND, REPLACE }
@@ -74,10 +79,30 @@ object WebPFrameSplitter {
 
     /** Cheap check that avoids a full parse when the file clearly isn't animated. */
     fun isAnimatedWebP(bytes: ByteArray): Boolean {
-        if (bytes.size < 21) return false
+        if (bytes.size < HEADER_BYTES) return false
         if (fourCC(bytes, 0) != "RIFF" || fourCC(bytes, 8) != "WEBP") return false
         if (fourCC(bytes, 12) != "VP8X") return false
         return (bytes[20].toInt() and 0x02) != 0
+    }
+
+    /**
+     * Stream variant of [isAnimatedWebP] that reads at most [HEADER_BYTES] bytes.
+     *
+     * This exists so callers can sniff a picked file WITHOUT loading it into
+     * memory first — reading a 2 GB video into a ByteArray just to check 21
+     * header bytes throws OutOfMemoryError before any probe runs. The caller
+     * owns (and closes) the stream; its position advances past the header.
+     */
+    fun isAnimatedWebP(stream: InputStream): Boolean {
+        // readNBytes-style loop: a single read() may return a short count.
+        val header = ByteArray(HEADER_BYTES)
+        var filled = 0
+        while (filled < HEADER_BYTES) {
+            val n = stream.read(header, filled, HEADER_BYTES - filled)
+            if (n < 0) break
+            filled += n
+        }
+        return filled == HEADER_BYTES && isAnimatedWebP(header)
     }
 
     /**

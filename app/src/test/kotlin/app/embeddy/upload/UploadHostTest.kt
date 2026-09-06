@@ -42,5 +42,30 @@ class UploadHostTest {
         assertEquals("test.webp", result.fileName)
         assertEquals(UploadHost.ZER0X0, result.host)
         assertEquals(1024L, result.fileSizeBytes)
+        // Strip-not-requested default
+        assertNull(result.metadataStripped)
+    }
+
+    // ── EXIF strip support (M12) ──
+
+    @Test
+    fun `exif strip is claimed only for formats ExifInterface can save`() {
+        assertTrue(UploadEngine.isExifSupported("image/jpeg"))
+        assertTrue(UploadEngine.isExifSupported("image/png"))
+        assertTrue(UploadEngine.isExifSupported("image/webp"))
+    }
+
+    @Test
+    fun `heif and heic are rejected because saveAttributes cannot write them`() {
+        // androidx ExifInterface.saveAttributes() throws UnsupportedOperationException
+        // for HEIF — claiming support let GPS EXIF reach public hosts unstripped.
+        assertFalse(UploadEngine.isExifSupported("image/heif"))
+        assertFalse(UploadEngine.isExifSupported("image/heic"))
+    }
+
+    @Test
+    fun `non-image mime types are not exif-strippable`() {
+        assertFalse(UploadEngine.isExifSupported("video/mp4"))
+        assertFalse(UploadEngine.isExifSupported("application/octet-stream"))
     }
 }

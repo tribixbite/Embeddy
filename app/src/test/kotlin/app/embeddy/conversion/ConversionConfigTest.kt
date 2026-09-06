@@ -138,7 +138,6 @@ class ConversionConfigTest {
         assertEquals(0, config.exactWidth)
         assertEquals(0, config.exactHeight)
         assertEquals(0, config.denoiseStrength)
-        assertEquals(0, config.keyframeInterval)
         assertEquals(ColorSpace.AUTO, config.colorSpace)
         assertEquals(DitherMode.NONE, config.ditherMode)
         assertTrue(config.segments.isEmpty())
@@ -152,8 +151,13 @@ class ConversionConfigTest {
     fun `ColorSpace ffmpegValue matches expected`() {
         assertEquals("", ColorSpace.AUTO.ffmpegValue)
         assertEquals("yuv420p", ColorSpace.YUV420.ffmpegValue)
-        assertEquals("yuv444p", ColorSpace.YUV444.ffmpegValue)
-        assertEquals("rgb24", ColorSpace.RGB.ffmpegValue)
+    }
+
+    @Test
+    fun `ColorSpace only offers formats libwebp_anim actually consumes`() {
+        // yuv444p/rgb24 were silently auto-substituted with bgra by FFmpeg,
+        // so YUV444/RGB were persisted no-ops and must not come back.
+        assertEquals(listOf(ColorSpace.AUTO, ColorSpace.YUV420), ColorSpace.entries.toList())
     }
 
     @Test

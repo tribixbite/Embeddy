@@ -13,6 +13,7 @@ import app.embeddy.conversion.ConversionProgress
 import app.embeddy.conversion.ConversionState
 import app.embeddy.conversion.Preset
 import app.embeddy.conversion.TrimSegment
+import app.embeddy.conversion.mergeOverlappingSegments
 import app.embeddy.util.FileInfoUtils
 import app.embeddy.util.SettingsRepository
 import kotlinx.coroutines.Job
@@ -165,22 +166,6 @@ class MainViewModel(
             // file into an invisible Convert tab. No replay is needed: on a cold start
             // Convert is already the default tab, so only the live-collector case matters.
             _navigateToConvert.tryEmit(Unit)
-        }
-    }
-
-    /** Merge overlapping segments to prevent duplicate frames in FFmpeg concat. */
-    private fun mergeOverlappingSegments(segments: List<TrimSegment>): List<TrimSegment> {
-        if (segments.size <= 1) return segments
-        val sorted = segments.sortedBy { it.startMs }
-        return sorted.fold(mutableListOf<TrimSegment>()) { acc, seg ->
-            val last = acc.lastOrNull()
-            if (last != null && seg.startMs <= last.endMs) {
-                // Overlapping or adjacent — merge by extending end
-                acc[acc.lastIndex] = TrimSegment(last.startMs, maxOf(last.endMs, seg.endMs))
-            } else {
-                acc.add(seg)
-            }
-            acc
         }
     }
 

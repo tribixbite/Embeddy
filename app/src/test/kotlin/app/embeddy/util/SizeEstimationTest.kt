@@ -37,6 +37,43 @@ class SizeEstimationTest {
         assertEquals(640, SizeEstimation.estimateOutputWidth(640, 480, config))
     }
 
+    // ── maxDimension must trigger when EITHER axis exceeds it (mirrors
+    //    FFmpeg's force_original_aspect_ratio=decrease behavior) ──
+
+    @Test
+    fun `maxDimension scales width even when only height exceeds it`() {
+        val config = ConversionConfig(maxDimension = 720)
+        // FFmpeg: scale='min(720,iw)':'min(720,ih)':decrease → 500x1000 → 360x720
+        assertEquals(360, SizeEstimation.estimateOutputWidth(500, 1000, config))
+        assertEquals(720, SizeEstimation.estimateOutputHeight(500, 1000, config))
+    }
+
+    @Test
+    fun `maxDimension scales height even when only width exceeds it`() {
+        val config = ConversionConfig(maxDimension = 720)
+        assertEquals(720, SizeEstimation.estimateOutputWidth(1000, 500, config))
+        assertEquals(360, SizeEstimation.estimateOutputHeight(1000, 500, config))
+    }
+
+    // ── single exact dimension derives the other axis from aspect ratio
+    //    (mirrors the engine's scale=W:-2 / scale=-2:H filters) ──
+
+    @Test
+    fun `exactHeight only derives width from aspect ratio, not maxDimension`() {
+        val config = ConversionConfig(maxDimension = 720, exactHeight = 540)
+        // Engine emits scale=-2:540 → 1920x1080 becomes 960x540
+        assertEquals(960, SizeEstimation.estimateOutputWidth(1920, 1080, config))
+        assertEquals(540, SizeEstimation.estimateOutputHeight(1920, 1080, config))
+    }
+
+    @Test
+    fun `exactWidth only derives height from aspect ratio, not maxDimension`() {
+        val config = ConversionConfig(maxDimension = 720, exactWidth = 540)
+        // Engine emits scale=540:-2 → 1080x1920 becomes 540x960
+        assertEquals(540, SizeEstimation.estimateOutputWidth(1080, 1920, config))
+        assertEquals(960, SizeEstimation.estimateOutputHeight(1080, 1920, config))
+    }
+
     // --- estimateOutputHeight ---
 
     @Test

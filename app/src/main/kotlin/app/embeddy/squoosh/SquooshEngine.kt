@@ -59,12 +59,16 @@ class SquooshEngine(private val context: Context) {
             config.exactHeight > 0 -> config.exactHeight
             else -> config.maxDimension
         }
-        val rawBitmap = decodeBitmap(uri, targetDim)
+        val decoded = decodeBitmap(uri, targetDim)
             ?: throw SquooshException("Failed to decode image")
-        val bitmap = applyExifRotation(uri, rawBitmap)
+        val orientation = readExifOrientation(uri)
+        val bitmap = rotateForExif(decoded.bitmap, orientation)
 
-        val originalWidth = bitmap.width
-        val originalHeight = bitmap.height
+        // Report the TRUE source dimensions from the bounds pass, not the
+        // subsampled decode size (inSampleSize made a 4032x3024 photo claim
+        // "original 1008x756"). EXIF 90/270-family orientations swap the axes.
+        val (originalWidth, originalHeight) =
+            orientedDimensions(orientation, decoded.sourceWidth, decoded.sourceHeight)
         Timber.d("Squoosh: %s (%dx%d, %d bytes) → %s q=%d",
             fileName, originalWidth, originalHeight, originalSize,
             config.format.label, config.quality)
@@ -184,12 +188,23 @@ class SquooshEngine(private val context: Context) {
 
     private fun ceilToInt(value: Float): Int = kotlin.math.ceil(value.toDouble()).toInt()
 
+    /** A decoded (possibly subsampled) bitmap plus the TRUE source dimensions. */
+    private data class DecodedImage(
+        val bitmap: Bitmap,
+        /** Full-resolution width from the bounds pass, before inSampleSize */
+        val sourceWidth: Int,
+        /** Full-resolution height from the bounds pass, before inSampleSize */
+        val sourceHeight: Int,
+    )
+
     /**
      * Decode bitmap from URI with efficient subsampling.
      * First pass decodes bounds only, then calculates inSampleSize to load
-     * at roughly the target dimension to conserve memory.
+     * at roughly the target dimension to conserve memory. The bounds-pass
+     * dimensions are returned alongside the bitmap so callers can report the
+     * real source size rather than the subsampled decode size.
      */
-    private fun decodeBitmap(uri: Uri, maxDimension: Int): Bitmap? {
+    private fun decodeBitmap(uri: Uri, maxDimension: Int): DecodedImage? {
         // Pass 1: decode bounds
         val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         context.contentResolver.openInputStream(uri)?.use { stream ->
@@ -212,28 +227,30 @@ class SquooshEngine(private val context: Context) {
             inSampleSize = sampleSize
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
-        return context.contentResolver.openInputStream(uri)?.use { stream ->
+        val bitmap = context.contentResolver.openInputStream(uri)?.use { stream ->
             BitmapFactory.decodeStream(stream, null, decodeOpts)
-        }
+        } ?: return null
+        return DecodedImage(bitmap, origW, origH)
+    }
+
+    /** Read the EXIF orientation tag, defaulting to NORMAL on any failure. */
+    private fun readExifOrientation(uri: Uri): Int = try {
+        context.contentResolver.openInputStream(uri)?.use { stream ->
+            ExifInterface(stream).getAttributeInt(
+                ExifInterface.TAG_ORIENTATION,
+                ExifInterface.ORIENTATION_NORMAL,
+            )
+        } ?: ExifInterface.ORIENTATION_NORMAL
+    } catch (_: Exception) {
+        ExifInterface.ORIENTATION_NORMAL
     }
 
     /**
-     * Read EXIF orientation from the source URI and rotate/flip the bitmap to match.
+     * Rotate/flip the bitmap to match its EXIF orientation.
      * BitmapFactory ignores EXIF orientation — without this, photos from cameras
      * that store rotation in EXIF (most phones) appear sideways or upside-down.
      */
-    private fun applyExifRotation(uri: Uri, bitmap: Bitmap): Bitmap {
-        val orientation = try {
-            context.contentResolver.openInputStream(uri)?.use { stream ->
-                ExifInterface(stream).getAttributeInt(
-                    ExifInterface.TAG_ORIENTATION,
-                    ExifInterface.ORIENTATION_NORMAL,
-                )
-            } ?: ExifInterface.ORIENTATION_NORMAL
-        } catch (_: Exception) {
-            ExifInterface.ORIENTATION_NORMAL
-        }
-
+    private fun rotateForExif(bitmap: Bitmap, orientation: Int): Bitmap {
         val matrix = Matrix()
         when (orientation) {
             ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
@@ -302,6 +319,21 @@ class SquooshEngine(private val context: Context) {
         fun isAvifEncodingAvailable(): Boolean = true
     }
 }
+
+/**
+ * True source dimensions after applying an EXIF orientation: the four
+ * 90°/270°-family orientations swap width and height. Pure and top-level so
+ * the JVM unit suite can pin the swap logic without BitmapFactory.
+ */
+internal fun orientedDimensions(orientation: Int, width: Int, height: Int): Pair<Int, Int> =
+    when (orientation) {
+        ExifInterface.ORIENTATION_ROTATE_90,
+        ExifInterface.ORIENTATION_ROTATE_270,
+        ExifInterface.ORIENTATION_TRANSPOSE,
+        ExifInterface.ORIENTATION_TRANSVERSE,
+        -> height to width
+        else -> width to height
+    }
 
 /** Supported output formats for still image compression. */
 enum class OutputFormat(val label: String, val extension: String, val mimeType: String) {

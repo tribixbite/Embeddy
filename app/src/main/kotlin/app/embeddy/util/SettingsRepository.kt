@@ -50,7 +50,8 @@ class SettingsRepository(private val context: Context) {
         val DENOISE = intPreferencesKey("convert_denoise")
         val COLOR_SPACE = stringPreferencesKey("convert_color_space")
         val DITHER_MODE = stringPreferencesKey("convert_dither_mode")
-        val KEYFRAME_INTERVAL = intPreferencesKey("convert_keyframe_interval")
+        // "convert_keyframe_interval" was removed: the setting mapped to -g,
+        // which libwebp_anim never reads. Stale persisted values are ignored.
         val EXACT_WIDTH = intPreferencesKey("convert_exact_width")
         val EXACT_HEIGHT = intPreferencesKey("convert_exact_height")
     }
@@ -94,7 +95,6 @@ class SettingsRepository(private val context: Context) {
             ditherMode = prefs[ConvertKeys.DITHER_MODE]?.let { name ->
                 DitherMode.entries.firstOrNull { it.name == name }
             } ?: DitherMode.NONE,
-            keyframeInterval = prefs[ConvertKeys.KEYFRAME_INTERVAL] ?: 0,
         )
     }
 
@@ -127,7 +127,6 @@ class SettingsRepository(private val context: Context) {
             prefs[ConvertKeys.DENOISE] = config.denoiseStrength
             prefs[ConvertKeys.COLOR_SPACE] = config.colorSpace.name
             prefs[ConvertKeys.DITHER_MODE] = config.ditherMode.name
-            prefs[ConvertKeys.KEYFRAME_INTERVAL] = config.keyframeInterval
         }
     }
 }

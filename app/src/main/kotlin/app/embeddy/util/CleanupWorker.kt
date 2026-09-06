@@ -22,23 +22,38 @@ class CleanupWorker(
         // Clean every cache subdirectory the engines write to. Keep this list in sync
         // with ConversionEngine, SquooshEngine, UploadEngine and MetadataEngine.
         CACHE_DIRS.forEach { dirName ->
-            val dir = File(applicationContext.cacheDir, dirName)
-            dir.listFiles()?.filter { it.lastModified() < cutoff }?.forEach { file ->
-                if (file.delete()) deleted++
-            }
+            deleted += deleteStaleEntries(File(applicationContext.cacheDir, dirName), cutoff)
         }
 
-        Timber.d("CleanupWorker: deleted %d stale cache files", deleted)
+        Timber.d("CleanupWorker: deleted %d stale cache entries", deleted)
         return Result.success()
     }
 
     private companion object {
         val CACHE_DIRS = listOf(
             "converted",     // ConversionEngine final output
-            "temp",          // ConversionEngine input copies + previews
+            "temp",          // ConversionEngine input copies + previews + frames_* dirs
             "squoosh_out",   // SquooshEngine output
             "upload_temp",   // UploadEngine staged uploads
             "inspect_temp",  // MetadataEngine FFprobe copies
         )
     }
 }
+
+/**
+ * Delete every entry in [dir] whose lastModified is older than [cutoffMs].
+ *
+ * Uses [File.deleteRecursively] because conversions killed mid-run leave
+ * `frames_*` DIRECTORIES full of PNGs behind — plain [File.delete] returns
+ * false for non-empty directories, so hundreds of MB of orphaned frames were
+ * never reclaimed by the periodic worker.
+ *
+ * Top-level and framework-free so the JVM unit suite exercises the exact
+ * deletion primitive the worker uses.
+ *
+ * @return the number of top-level entries removed
+ */
+internal fun deleteStaleEntries(dir: File, cutoffMs: Long): Int =
+    dir.listFiles().orEmpty()
+        .filter { it.lastModified() < cutoffMs }
+        .count { it.deleteRecursively() }
