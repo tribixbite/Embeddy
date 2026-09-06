@@ -7,9 +7,11 @@ export type UploadHost = "0x0.st" | "catbox.moe";
 
 /**
  * Largest body the Cloudflare Worker relay will accept.
- * Must stay in sync with MAX_UPLOAD_BYTES in worker/src/index.ts.
+ * Must stay in sync with MAX_UPLOAD_BYTES in worker/src/index.ts (pinned by
+ * types.test.ts). 50 MB because the relay double-buffers the multipart body,
+ * so peak memory is ~2x the file size against the 128 MB isolate limit.
  */
-export const RELAY_MAX_BYTES = 95 * 1024 * 1024;
+export const RELAY_MAX_BYTES = 50 * 1024 * 1024;
 
 /** Each host's published size limit, clamped by what the relay can pass through. */
 export const HOST_LIMITS: Record<UploadHost, number> = {

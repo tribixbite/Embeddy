@@ -3,8 +3,8 @@
    * Interactive ABI picker — Svelte 5 island hydrated via client:visible.
    * Lets users select their device architecture and get a direct download link.
    */
-  const RELEASE_URL =
-    "https://github.com/tribixbite/Embeddy/releases/latest";
+  import { APP_VERSION } from "../lib/build";
+  import { apkDownloadUrl, RELEASES_LATEST_URL } from "../lib/release";
 
   interface AbiOption {
     abi: string;
@@ -38,6 +38,10 @@
   ];
 
   let selected = $state("arm64-v8a");
+
+  /** Direct per-ABI asset link — matches `Embeddy-v<version>-<abi>.apk`
+   * published by .github/workflows/release.yml under the latest release. */
+  let downloadUrl = $derived(apkDownloadUrl(APP_VERSION, selected));
 </script>
 
 <div class="space-y-4">
@@ -68,7 +72,7 @@
   </div>
 
   <a
-    href={RELEASE_URL}
+    href={downloadUrl}
     target="_blank"
     rel="noopener noreferrer"
     class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand-500 px-6 py-3.5 font-semibold text-white transition-all hover:bg-brand-400 hover:shadow-lg hover:shadow-brand-500/20 sm:w-auto"
@@ -91,6 +95,14 @@
     Download {selected} APK
   </a>
   <p class="text-xs text-white/40">
-    v0.1.12 &middot; Requires Android 7.0+
+    v{APP_VERSION} &middot; Requires Android 8.0+ &middot;
+    <a
+      href={RELEASES_LATEST_URL}
+      target="_blank"
+      rel="noopener noreferrer"
+      class="underline decoration-white/20 underline-offset-2 transition-colors hover:text-white/60"
+    >
+      All downloads
+    </a>
   </p>
 </div>

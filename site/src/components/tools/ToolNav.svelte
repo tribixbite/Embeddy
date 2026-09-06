@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * Horizontal tab bar linking the 3 browser tools.
+   * Horizontal tab bar linking the browser tools.
    * Highlights the currently active tool based on the current path.
    */
   interface Tool {

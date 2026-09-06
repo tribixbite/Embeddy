@@ -7,7 +7,7 @@
   import HostSelector from "./HostSelector.svelte";
   import UploadProgressBar from "./UploadProgress.svelte";
   import UploadResultCard from "./UploadResult.svelte";
-  import { uploadFile, type UploadHandle } from "../../../lib/upload/proxy";
+  import { CancelledError, uploadFile, type UploadHandle } from "../../../lib/upload/proxy";
   import { stripExif, canStripExif } from "../../../lib/upload/strip-exif";
   import { formatFileSize } from "../shared/format-size";
   import { HOST_LIMITS } from "../../../lib/upload/types";
@@ -89,6 +89,9 @@
       result = await handle.result;
       state = "done";
     } catch (e) {
+      // cancelUpload()/reset() already moved the state machine on; the late
+      // CancelledError rejection must not drag it to the error screen (M23).
+      if (e instanceof CancelledError) return;
       error = e instanceof Error ? e.message : "Upload failed";
       state = "error";
     } finally {

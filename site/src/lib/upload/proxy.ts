@@ -30,8 +30,12 @@ export interface UploadHandle {
 /** Raised for failures that retrying cannot fix (4xx, bad payload, cancelled). */
 class PermanentUploadError extends Error {}
 
-/** Raised when the user aborts — never retried, and reported verbatim. */
-class CancelledError extends Error {}
+/**
+ * Raised when the user aborts — never retried, and reported verbatim.
+ * Exported so callers can tell a cancellation apart from a real failure
+ * (the UI must not paint the error screen for a cancel it initiated).
+ */
+export class CancelledError extends Error {}
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 

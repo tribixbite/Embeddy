@@ -2,7 +2,9 @@
   /**
    * Upload host selection chips — 0x0.st vs catbox.moe.
    */
+  import { HOST_LIMITS } from "../../../lib/upload/types";
   import type { UploadHost } from "../../../lib/upload/types";
+  import { formatFileSize } from "../shared/format-size";
 
   let {
     selected = $bindable(),
@@ -12,9 +14,19 @@
     disabled?: boolean;
   } = $props();
 
+  /** Retention differs per host; the size cap comes from HOST_LIMITS so the
+   * chip copy can never drift from what the preflight actually enforces. */
   const hosts: { value: UploadHost; label: string; desc: string }[] = [
-    { value: "0x0.st", label: "0x0.st", desc: "512 MB max, temp storage" },
-    { value: "catbox.moe", label: "catbox.moe", desc: "200 MB max, persistent" },
+    {
+      value: "0x0.st",
+      label: "0x0.st",
+      desc: `${formatFileSize(HOST_LIMITS["0x0.st"])} max, temp storage`,
+    },
+    {
+      value: "catbox.moe",
+      label: "catbox.moe",
+      desc: `${formatFileSize(HOST_LIMITS["catbox.moe"])} max, persistent`,
+    },
   ];
 </script>
 

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { uploadFile } from "./proxy";
+import { CancelledError, uploadFile } from "./proxy";
 
 /**
  * The upload path retries transient failures. These tests drive it with a fake
@@ -151,4 +151,32 @@ describe("uploadFile — cancellation", () => {
     expect(await rejectionMessage(handle.result)).toMatch(/cancelled/i);
     expect(log.aborted).toBeGreaterThan(0);
   }, 15000);
+
+  // M23: the UI must be able to tell "user cancelled" apart from real failures
+  // (cancelUpload() already moved the state machine on; the late rejection must
+  // not drag it to the error screen). That requires the rejection to be an
+  // exported, instanceof-checkable type — not a plain Error.
+  test("cancellation rejects with the exported CancelledError type", async () => {
+    installFakeXhr([{ kind: "status", status: 502, body: "{}" }]);
+    const handle = uploadFile(file(), "0x0.st");
+    handle.cancel();
+    let caught: unknown;
+    try {
+      await handle.result;
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(CancelledError);
+  }, 15000);
+
+  test("a mid-flight abort event also surfaces as CancelledError", async () => {
+    installFakeXhr([{ kind: "abort" }]);
+    let caught: unknown;
+    try {
+      await uploadFile(file(), "0x0.st").result;
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(CancelledError);
+  });
 });
