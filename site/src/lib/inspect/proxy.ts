@@ -19,7 +19,16 @@ export async function fetchMetadata(url: string): Promise<MetadataResult> {
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(text || `HTTP ${response.status}`);
+    // The worker reports failures as {"error":"..."} — surface the message,
+    // not the raw JSON blob (mirrors lib/upload/proxy.ts).
+    let message = text || `HTTP ${response.status}`;
+    try {
+      const payload = JSON.parse(text) as { error?: string };
+      if (payload?.error) message = payload.error;
+    } catch {
+      // Non-JSON body (e.g. a plain-text gateway error) — keep the raw text
+    }
+    throw new Error(message);
   }
 
   return response.json();

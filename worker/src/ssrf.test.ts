@@ -118,4 +118,47 @@ describe("isAllowedHostname — IPv6", () => {
   test("allows an IPv4-mapped public address", () => {
     expect(isAllowedHostname("[::ffff:8.8.8.8]")).toBe(true);
   });
+
+  // M1: WHATWG URL canonicalizes ::ffff:127.0.0.1 to the hex form ::ffff:7f00:1,
+  // so isAllowedUrl never sees the dotted spelling.
+  test("blocks IPv4-mapped addresses in canonical hex form", () => {
+    expect(isAllowedHostname("[::ffff:7f00:1]")).toBe(false);
+    expect(isAllowedHostname("[::ffff:a9fe:a9fe]")).toBe(false); // 169.254.169.254
+    expect(isAllowedUrl("http://[::ffff:127.0.0.1]/")).toBe(false);
+    expect(isAllowedUrl("http://[::ffff:169.254.169.254]/")).toBe(false);
+  });
+
+  test("allows hex-form IPv4-mapped public addresses", () => {
+    expect(isAllowedHostname("[::ffff:808:808]")).toBe(true); // 8.8.8.8
+    expect(isAllowedUrl("http://[::ffff:8.8.8.8]/")).toBe(true);
+  });
+
+  // M41: deprecated site-local fec0::/10 and NAT64 64:ff9b::/96 embeddings
+  test("blocks site-local fec0::/10", () => {
+    expect(isAllowedHostname("[fec0::1]")).toBe(false);
+    expect(isAllowedHostname("[feff::1]")).toBe(false);
+  });
+
+  test("blocks NAT64 addresses embedding a private IPv4", () => {
+    expect(isAllowedHostname("[64:ff9b::7f00:1]")).toBe(false); // 127.0.0.1
+    expect(isAllowedHostname("[64:ff9b::a9fe:a9fe]")).toBe(false); // 169.254.169.254
+    expect(isAllowedHostname("[64:ff9b::1]")).toBe(false); // 0.0.0.1
+  });
+
+  test("allows NAT64 addresses embedding a public IPv4", () => {
+    expect(isAllowedHostname("[64:ff9b::808:808]")).toBe(true); // 8.8.8.8
+  });
+});
+
+describe("isAllowedHostname — trailing-dot FQDNs (M2)", () => {
+  test("blocks blocked hostnames and suffixes with a trailing dot", () => {
+    expect(isAllowedHostname("localhost.")).toBe(false);
+    expect(isAllowedHostname("metadata.google.internal.")).toBe(false);
+    expect(isAllowedHostname("db.internal.")).toBe(false);
+    expect(isAllowedUrl("http://localhost./")).toBe(false);
+  });
+
+  test("still allows ordinary public FQDNs with a trailing dot", () => {
+    expect(isAllowedHostname("example.com.")).toBe(true);
+  });
 });

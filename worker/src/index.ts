@@ -18,7 +18,7 @@
 
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { MAX_REDIRECTS, isAllowedUrl, safeFetch } from "./ssrf";
+import { BlockedRequestError, MAX_REDIRECTS, isAllowedUrl, safeFetch } from "./ssrf";
 
 type Bindings = {
   // Add KV/D1/R2 bindings here if needed later
@@ -47,8 +47,14 @@ app.use(
 /** Stop reading upstream HTML after this many bytes (meta tags live in <head>). */
 const MAX_INSPECT_BYTES = 2 * 1024 * 1024; // 2 MB
 
-/** Largest file the relay will accept, below the Workers request body limit. */
-const MAX_UPLOAD_BYTES = 95 * 1024 * 1024; // 95 MB
+/**
+ * Largest file the relay will accept. The relay holds TWO in-memory copies of
+ * the payload (formData() materializes the request, and the rebuilt upstream
+ * FormData is serialized again), so the cap must keep 2x + overhead under the
+ * 128 MB Workers isolate memory limit. Must stay in sync with RELAY_MAX_BYTES
+ * in site/src/lib/upload/types.ts.
+ */
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024; // 50 MB
 
 // ── /api/inspect ─────────────────────────────────────────────────────────────
 
@@ -173,6 +179,11 @@ app.get("/api/inspect", async (c) => {
 
     return c.json(result);
   } catch (err) {
+    // Policy refusals (blocked redirect target, hostname resolving into
+    // private space) are the same contract as the up-front check: 403.
+    if (err instanceof BlockedRequestError) {
+      return c.json({ error: err.message }, 403);
+    }
     const message = err instanceof Error ? err.message : "Unknown error";
     return c.json({ error: `Failed to fetch URL: ${message}` }, 502);
   }
@@ -245,8 +256,18 @@ const UPLOAD_HOSTS: Record<
 
 app.post("/api/upload", async (c) => {
   try {
-    // Reject oversized bodies before buffering the multipart payload
-    const declaredLength = Number(c.req.header("content-length") ?? 0);
+    // Reject oversized bodies before buffering the multipart payload. A
+    // missing/unparseable Content-Length (chunked encoding) would bypass this
+    // pre-buffer check entirely, so a declared length is mandatory — browser
+    // FormData uploads always send one.
+    const declaredHeader = c.req.header("content-length");
+    const declaredLength = Number(declaredHeader);
+    if (!declaredHeader || !Number.isFinite(declaredLength) || declaredLength < 0) {
+      return c.json(
+        { error: "Content-Length request header is required" },
+        411,
+      );
+    }
     if (declaredLength > MAX_UPLOAD_BYTES) {
       return c.json(
         {
