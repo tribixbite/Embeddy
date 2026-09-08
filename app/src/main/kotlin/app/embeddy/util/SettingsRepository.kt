@@ -11,6 +11,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import app.embeddy.conversion.ColorSpace
 import app.embeddy.conversion.ConversionConfig
 import app.embeddy.conversion.DitherMode
+import app.embeddy.conversion.OutputMediaFormat
 import app.embeddy.conversion.Preset
 import app.embeddy.squoosh.OutputFormat
 import app.embeddy.squoosh.SquooshConfig
@@ -63,6 +64,8 @@ class SettingsRepository(private val context: Context) {
         val EXACT_HEIGHT = intPreferencesKey("convert_exact_height")
         // 0 = Auto (match the source's loop count, or infinite for video inputs)
         val LOOP = intPreferencesKey("convert_loop")
+        // Output media format (WEBP / MP4 / ORIGINAL), stored as the enum name
+        val OUTPUT_FORMAT = stringPreferencesKey("convert_output_format")
     }
 
     // ── Upload preference keys ──
@@ -111,6 +114,9 @@ class SettingsRepository(private val context: Context) {
                 DitherMode.entries.firstOrNull { it.name == name }
             } ?: DitherMode.NONE,
             loop = prefs[ConvertKeys.LOOP] ?: 0,
+            outputFormat = prefs[ConvertKeys.OUTPUT_FORMAT]?.let { name ->
+                OutputMediaFormat.entries.firstOrNull { it.name == name }
+            } ?: OutputMediaFormat.WEBP,
         )
     }
 
@@ -154,6 +160,7 @@ class SettingsRepository(private val context: Context) {
             prefs[ConvertKeys.COLOR_SPACE] = config.colorSpace.name
             prefs[ConvertKeys.DITHER_MODE] = config.ditherMode.name
             prefs[ConvertKeys.LOOP] = config.loop
+            prefs[ConvertKeys.OUTPUT_FORMAT] = config.outputFormat.name
         }
     }
 

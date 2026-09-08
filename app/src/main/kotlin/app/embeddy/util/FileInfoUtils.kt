@@ -63,6 +63,25 @@ object FileInfoUtils {
         return cleaned.ifBlank { fallback }
     }
 
+    /**
+     * MIME type for a produced output file, derived from its extension.
+     * Covers every format the Convert tab can emit (WebP/GIF/MP4/WebM/MKV)
+     * so share intents and MediaStore rows advertise the right type.
+     */
+    fun mimeTypeForFile(fileName: String): String =
+        when (fileName.substringAfterLast('.', missingDelimiterValue = "").lowercase(Locale.US)) {
+            "webp" -> "image/webp"
+            "gif" -> "image/gif"
+            "mp4", "m4v" -> "video/mp4"
+            "mov" -> "video/quicktime"
+            "webm" -> "video/webm"
+            "mkv" -> "video/x-matroska"
+            "png" -> "image/png"
+            "jpg", "jpeg" -> "image/jpeg"
+            "avif" -> "image/avif"
+            else -> "application/octet-stream"
+        }
+
     /** Anything outside this set is replaced — covers quotes, separators, and control chars. */
     private val UNSAFE_NAME_CHARS = Regex("""[^A-Za-z0-9._\- ]""")
 

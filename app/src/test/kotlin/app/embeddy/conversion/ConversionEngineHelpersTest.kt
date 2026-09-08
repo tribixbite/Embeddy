@@ -95,6 +95,89 @@ class ConversionEngineHelpersTest {
         assertTrue(cmd, "-to 2.000" in cmd)
     }
 
+    // ── stitch edge cases (segment list robustness) ──
+
+    @Test
+    fun `single segment uses the seek path, not a filtergraph`() {
+        val cmd = command(ConversionConfig(segments = listOf(TrimSegment(1000, 4000))))
+        assertTrue(cmd, "-ss 1.000" in cmd)
+        assertTrue(cmd, "-to 3.000" in cmd)
+        assertFalse(cmd, "-filter_complex" in cmd)
+    }
+
+    @Test
+    fun `many segments all appear in the filtergraph in order`() {
+        val segments = (0 until 6).map { TrimSegment(it * 2000L, it * 2000L + 1000L) }
+        val cmd = command(ConversionConfig(segments = segments))
+        assertTrue(cmd, "concat=n=6" in cmd)
+        (0 until 6).forEach { i ->
+            assertTrue(cmd, "[v$i]" in cmd)
+            assertTrue(cmd, "trim=${i * 2}.000:${i * 2 + 1}.000" in cmd)
+        }
+    }
+
+    @Test
+    fun `segment end beyond the probed duration passes through unclamped`() {
+        // The builder has no duration knowledge; FFmpeg's trim simply stops at
+        // EOF, so the values must be emitted as given rather than dropped.
+        val cmd = command(
+            ConversionConfig(segments = listOf(TrimSegment(0, 1000), TrimSegment(2000, 125_000))),
+        )
+        assertTrue(cmd, "trim=2.000:125.000" in cmd)
+    }
+
+    @Test
+    fun `zero-length segments are dropped from the filtergraph`() {
+        val cmd = command(
+            ConversionConfig(
+                segments = listOf(
+                    TrimSegment(0, 1000),
+                    TrimSegment(3000, 3000), // empty trim stream would abort concat
+                    TrimSegment(4000, 5000),
+                ),
+            ),
+        )
+        assertTrue(cmd, "concat=n=2" in cmd)
+        assertFalse(cmd, "trim=3.000:3.000" in cmd)
+    }
+
+    @Test
+    fun `dropping zero-length segments can collapse stitching to the seek path`() {
+        val cmd = command(
+            ConversionConfig(segments = listOf(TrimSegment(1000, 4000), TrimSegment(6000, 6000))),
+        )
+        assertFalse(cmd, "-filter_complex" in cmd)
+        assertTrue(cmd, "-ss 1.000" in cmd)
+        assertTrue(cmd, "-to 3.000" in cmd)
+    }
+
+    @Test
+    fun `unsorted segments are emitted in start-time order`() {
+        val cmd = command(
+            ConversionConfig(segments = listOf(TrimSegment(4000, 5000), TrimSegment(0, 1000))),
+        )
+        val first = cmd.indexOf("trim=0.000:1.000")
+        val second = cmd.indexOf("trim=4.000:5.000")
+        assertTrue(cmd, first in 0 until second)
+    }
+
+    @Test
+    fun `zero-length segments are dropped on the concat-script input too`() {
+        val cmd = command(
+            ConversionConfig(
+                segments = listOf(
+                    TrimSegment(0, 1000),
+                    TrimSegment(2000, 2000),
+                    TrimSegment(3000, 4000),
+                ),
+            ),
+            concatScript = script,
+        )
+        assertTrue(cmd, "concat=n=2" in cmd)
+        assertTrue(cmd, "-f concat -safe 0" in cmd)
+        assertFalse(cmd, "trim=2.000:2.000" in cmd)
+    }
+
     // ── encoder flags: keyframeInterval removed (M64), colorSpace mapping (M39) ──
 
     @Test

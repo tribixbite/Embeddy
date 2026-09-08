@@ -39,11 +39,10 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import app.embeddy.R
 import app.embeddy.conversion.ConversionState
+import app.embeddy.util.FileInfoUtils
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import java.io.File
-
-private const val WEBP_MIME_TYPE = "image/webp"
 
 @Composable
 fun OutputPreviewCard(
@@ -128,7 +127,12 @@ fun OutputPreviewCard(
                 }
 
                 FilledTonalButton(
-                    onClick = { saveToDownloads(state.outputPath, WEBP_MIME_TYPE) },
+                    onClick = {
+                        saveToDownloads(
+                            state.outputPath,
+                            FileInfoUtils.mimeTypeForFile(state.outputPath),
+                        )
+                    },
                     modifier = Modifier.weight(1f),
                 ) {
                     Icon(Icons.Outlined.Save, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -159,11 +163,11 @@ private fun shareOutput(context: Context, path: String) {
         file,
     )
     val intent = Intent(Intent.ACTION_SEND).apply {
-        type = WEBP_MIME_TYPE
+        type = FileInfoUtils.mimeTypeForFile(file.name)
         putExtra(Intent.EXTRA_STREAM, uri)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     context.startActivity(
-        Intent.createChooser(intent, context.getString(R.string.share_webp)),
+        Intent.createChooser(intent, context.getString(R.string.share_output)),
     )
 }

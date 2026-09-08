@@ -44,6 +44,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.embeddy.R
 import app.embeddy.conversion.ConversionState
+import app.embeddy.conversion.OutputMediaFormat
 import app.embeddy.ui.isAnimatedImageFile
 import app.embeddy.ui.components.ConversionProgressCard
 import app.embeddy.ui.components.MediaPickerCard
@@ -96,6 +97,7 @@ fun ConvertScreen(
             }
 
             is ConversionState.Ready -> {
+                val animatedImageInput = isAnimatedImageFile(s.fileName)
                 // File info card with inspect button
                 ReadyCard(
                     state = s,
@@ -131,7 +133,10 @@ fun ConvertScreen(
                         onSegmentsChanged = viewModel::setSegments,
                         // GIF/animated WebP would render as a dead black ExoPlayer
                         // surface — show a Coil animated preview instead (sliders kept).
-                        animatedImagePreview = isAnimatedImageFile(s.fileName),
+                        animatedImagePreview = animatedImageInput,
+                        // Per-segment volume only matters when the output keeps
+                        // audio: video format selected AND the input has a track.
+                        showVolume = config.outputFormat != OutputMediaFormat.WEBP && s.hasAudio,
                     )
                 }
 
@@ -140,14 +145,16 @@ fun ConvertScreen(
                     onPresetSelected = viewModel::setPreset,
                     onConfigChanged = viewModel::updateConfig,
                     onPreview = viewModel::startPreview,
+                    showVideoFormats = !animatedImageInput,
                 )
 
-                // Convert button — shows target size when enabled
+                // Convert button — shows the selected format and target size
+                val formatLabel = config.outputFormat.label
                 val convertLabel = if (config.targetSizeBytes > 0) {
                     val mb = String.format("%.1f MB", config.targetSizeBytes / 1_000_000.0)
-                    stringResource(R.string.convert_with_target, mb)
+                    stringResource(R.string.convert_to_with_target, formatLabel, mb)
                 } else {
-                    stringResource(R.string.convert)
+                    stringResource(R.string.convert_to, formatLabel)
                 }
                 Button(
                     onClick = viewModel::startConversion,

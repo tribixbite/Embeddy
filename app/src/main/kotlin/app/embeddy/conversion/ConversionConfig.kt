@@ -10,26 +10,43 @@ package app.embeddy.conversion
 data class TrimSegment(
     val startMs: Long,
     val endMs: Long,
+    /**
+     * Per-segment audio gain for video outputs: 0f (mute) to 2f (200%),
+     * default 1f (unchanged). Ignored for WebP output, which is always silent.
+     */
+    val volume: Float = 1f,
 ) {
     val durationMs: Long get() = (endMs - startMs).coerceAtLeast(0)
 }
 
 /**
  * Merge overlapping or adjacent [TrimSegment]s so FFmpeg's concat filter never
- * receives duplicate frames. Segments are sorted by start time first; a segment
- * whose start falls at or before the previous segment's end extends it.
+ * receives duplicate frames. Segments are sorted by start time first.
+ *
+ * Volume semantics (documented choice):
+ * - **Overlapping** segments always merge, FIRST-WINS: the earlier segment's
+ *   volume covers the whole merged range (mirroring how the merge already keeps
+ *   the earlier segment's start).
+ * - **Adjacent** segments (`start == previous end`) merge only when their
+ *   volumes are equal — a volume change at a cut point is an intentional audio
+ *   edit and must survive the merge.
+ * - **Zero/negative-length** segments are dropped: they contribute no frames
+ *   and would otherwise become empty trim streams that abort FFmpeg's concat.
  *
  * Pure and top-level so the unit suite exercises the exact symbol production
  * uses (it previously lived as a private copy inside MainViewModel).
  */
 fun mergeOverlappingSegments(segments: List<TrimSegment>): List<TrimSegment> {
-    if (segments.size <= 1) return segments
-    val sorted = segments.sortedBy { it.startMs }
+    val nonEmpty = segments.filter { it.durationMs > 0 }
+    if (nonEmpty.size <= 1) return nonEmpty
+    val sorted = nonEmpty.sortedBy { it.startMs }
     return sorted.fold(mutableListOf<TrimSegment>()) { acc, seg ->
         val last = acc.lastOrNull()
-        if (last != null && seg.startMs <= last.endMs) {
-            // Overlapping or adjacent — merge by extending the end
-            acc[acc.lastIndex] = TrimSegment(last.startMs, maxOf(last.endMs, seg.endMs))
+        val overlaps = last != null && seg.startMs < last.endMs
+        val adjacentSameVolume = last != null && seg.startMs == last.endMs && seg.volume == last.volume
+        if (last != null && (overlaps || adjacentSameVolume)) {
+            // Merge by extending the end; start AND volume stay first-wins.
+            acc[acc.lastIndex] = last.copy(endMs = maxOf(last.endMs, seg.endMs))
         } else {
             acc.add(seg)
         }
@@ -60,6 +77,9 @@ data class ConversionConfig(
     val colorSpace: ColorSpace = ColorSpace.AUTO, // Output color space / pixel format
     val denoiseStrength: Int = 0,           // hqdn3d denoise (0=off, 1-10 strength)
     val ditherMode: DitherMode = DitherMode.NONE, // Bayer/Floyd-Steinberg for palette reduction
+    // Output media format — WEBP (animated image), MP4, or ORIGINAL (match the
+    // input container). MP4/ORIGINAL apply to video inputs only.
+    val outputFormat: OutputMediaFormat = OutputMediaFormat.WEBP,
 ) {
     /**
      * Quality floor the adaptive loop may descend to.
@@ -105,6 +125,21 @@ enum class ColorSpace(val label: String, val ffmpegValue: String) {
     YUV420("YUV 4:2:0", "yuv420p"),    // Standard, best compat
 }
 
+/**
+ * Output media format for the Convert tab.
+ *
+ * WEBP is the classic animated-image output; MP4 and ORIGINAL re-encode video
+ * inputs as video (the bundled non-GPL FFmpeg build has libopenh264 + native
+ * aac + libvpx + libopus, but no libx264/x265, so stream copy or x264 are not
+ * options). ORIGINAL matches the input container where recognized and falls
+ * back to MP4 otherwise — see resolveOutputContainer in ConversionEngine.
+ */
+enum class OutputMediaFormat(val label: String) {
+    WEBP("WebP"),
+    MP4("MP4"),
+    ORIGINAL("Original"),
+}
+
 /** Dithering mode for color quantization (useful for palette-constrained formats). */
 enum class DitherMode(val label: String, val ffmpegValue: String) {
     NONE("None", ""),
@@ -124,6 +159,8 @@ sealed interface ConversionState {
         val durationMs: Long = 0,
         val width: Int = 0,
         val height: Int = 0,
+        /** True when the probe found an audio track (drives the volume UI). */
+        val hasAudio: Boolean = false,
         /** Transient message (e.g. a failed preview) shown alongside the file info. */
         val notice: String? = null,
     ) : ConversionState

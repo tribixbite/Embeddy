@@ -29,6 +29,16 @@ class ConversionConfigTest {
         assertEquals(0, seg.durationMs)
     }
 
+    @Test
+    fun `TrimSegment volume defaults to unity gain`() {
+        assertEquals(1f, TrimSegment(0, 1000).volume)
+    }
+
+    @Test
+    fun `TrimSegment carries an explicit volume`() {
+        assertEquals(0.5f, TrimSegment(0, 1000, volume = 0.5f).volume)
+    }
+
     // ── ConversionConfig.totalKeptDurationMs ──
 
     @Test
@@ -143,6 +153,15 @@ class ConversionConfigTest {
         assertTrue(config.segments.isEmpty())
         assertEquals(0L, config.trimStartMs)
         assertEquals(0L, config.trimEndMs)
+        assertEquals(OutputMediaFormat.WEBP, config.outputFormat)
+    }
+
+    @Test
+    fun `OutputMediaFormat offers exactly WebP, MP4, and Original`() {
+        assertEquals(
+            listOf(OutputMediaFormat.WEBP, OutputMediaFormat.MP4, OutputMediaFormat.ORIGINAL),
+            OutputMediaFormat.entries.toList(),
+        )
     }
 
     // ── Enum values ──

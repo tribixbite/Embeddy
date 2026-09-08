@@ -67,4 +67,22 @@ class FileInfoUtilsTest {
         assertTrue(sanitized.endsWith(".gif"))
         assertTrue(sanitized.isNotBlank())
     }
+
+    // ── mimeTypeForFile: share/save intents for every produced output kind ──
+
+    @Test
+    fun `mime type is derived from the output extension`() {
+        assertEquals("image/webp", FileInfoUtils.mimeTypeForFile("out_embeddy.webp"))
+        assertEquals("image/gif", FileInfoUtils.mimeTypeForFile("out.gif"))
+        assertEquals("video/mp4", FileInfoUtils.mimeTypeForFile("out_embeddy.mp4"))
+        assertEquals("video/webm", FileInfoUtils.mimeTypeForFile("out.webm"))
+        assertEquals("video/x-matroska", FileInfoUtils.mimeTypeForFile("out.mkv"))
+    }
+
+    @Test
+    fun `mime type is case-insensitive and falls back to octet-stream`() {
+        assertEquals("video/mp4", FileInfoUtils.mimeTypeForFile("CLIP.MP4"))
+        assertEquals("application/octet-stream", FileInfoUtils.mimeTypeForFile("mystery.bin"))
+        assertEquals("application/octet-stream", FileInfoUtils.mimeTypeForFile("noextension"))
+    }
 }

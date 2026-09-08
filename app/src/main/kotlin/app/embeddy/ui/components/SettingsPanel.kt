@@ -45,6 +45,7 @@ import app.embeddy.R
 import app.embeddy.conversion.ColorSpace
 import app.embeddy.conversion.ConversionConfig
 import app.embeddy.conversion.DitherMode
+import app.embeddy.conversion.OutputMediaFormat
 import app.embeddy.conversion.Preset
 import kotlin.math.roundToInt
 
@@ -55,6 +56,11 @@ fun SettingsPanel(
     onPresetSelected: (Preset) -> Unit,
     onConfigChanged: (ConversionConfig.() -> ConversionConfig) -> Unit,
     onPreview: (() -> Unit)? = null,
+    /**
+     * True when the loaded input is a real video: shows the WebP/MP4/Original
+     * output-format picker. GIF/animated-WebP inputs stay WebP-only.
+     */
+    showVideoFormats: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -96,6 +102,27 @@ fun SettingsPanel(
                         onClick = { onPresetSelected(preset) },
                         label = { Text(preset.label) },
                     )
+                }
+            }
+
+            // Output format picker — video inputs only, always visible so the
+            // choice isn't buried behind the expand toggle
+            if (showVideoFormats) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = stringResource(R.string.output_format),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Spacer(Modifier.height(4.dp))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutputMediaFormat.entries.forEach { format ->
+                        FilterChip(
+                            selected = config.outputFormat == format,
+                            onClick = { onConfigChanged { copy(outputFormat = format) } },
+                            label = { Text(format.label) },
+                        )
+                    }
                 }
             }
 
@@ -266,6 +293,11 @@ fun SettingsPanel(
                                 },
                             )
 
+                            // WebP-only encoder options — pixel-format choice,
+                            // palette dithering, animation looping, and libwebp's
+                            // compression effort have no meaning for MP4/WebM
+                            // encodes and must not leak into them.
+                            if (config.outputFormat == OutputMediaFormat.WEBP) {
                             // 2. Color space selector
                             Text(
                                 text = stringResource(R.string.color_space),
@@ -332,6 +364,7 @@ fun SettingsPanel(
                                     onConfigChanged { copy(compressionLevel = v.roundToInt()) }
                                 },
                             )
+                            } // end WebP-only options
 
                             // 6. Preview button — generates a 3-second clip
                             if (onPreview != null) {

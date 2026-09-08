@@ -10,6 +10,7 @@ import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.decode.GifDecoder
 import coil.decode.ImageDecoderDecoder
+import coil.decode.VideoFrameDecoder
 import timber.log.Timber
 import java.util.concurrent.TimeUnit
 
@@ -42,6 +43,10 @@ class EmbeddyApp : Application(), ImageLoaderFactory {
      * (minSdk 26) made every animated preview fail to render. Pre-28 falls back
      * to [GifDecoder], which animates GIFs; animated WebP has no pre-28 platform
      * decoder and renders its first frame statically there.
+     *
+     * [VideoFrameDecoder] renders a still frame for the MP4/WebM outputs the
+     * Convert tab can now produce, so the Done card shows something instead of
+     * a blank box.
      */
     override fun newImageLoader(): ImageLoader =
         ImageLoader.Builder(this)
@@ -51,6 +56,7 @@ class EmbeddyApp : Application(), ImageLoaderFactory {
                 } else {
                     add(GifDecoder.Factory())
                 }
+                add(VideoFrameDecoder.Factory())
             }
             .build()
 }

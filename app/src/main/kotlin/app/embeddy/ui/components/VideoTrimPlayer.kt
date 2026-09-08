@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Pause
@@ -29,6 +30,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RangeSlider
+import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -60,6 +62,7 @@ import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 
 /**
  * Video preview with playback controls and trim/stitch support.
@@ -97,6 +100,11 @@ fun VideoTrimPlayer(
      * of an ExoPlayer surface; the trim/stitch sliders keep working.
      */
     animatedImagePreview: Boolean = false,
+    /**
+     * True when a per-segment volume slider should be shown (video output format
+     * selected and the input actually has an audio track).
+     */
+    showVolume: Boolean = false,
 ) {
     val context = LocalContext.current
     val effectiveDuration = if (durationMs > 0) durationMs else 1L
@@ -315,6 +323,7 @@ fun VideoTrimPlayer(
                     durationMs = effectiveDuration,
                     exoPlayer = exoPlayer,
                     onSegmentsChanged = onSegmentsChanged,
+                    showVolume = showVolume,
                 )
             } else {
                 // Simple single-range trim slider
@@ -396,6 +405,8 @@ private fun StitchSegments(
     /** Null for animated-image inputs (no player to seek). */
     exoPlayer: ExoPlayer?,
     onSegmentsChanged: (List<TrimSegment>) -> Unit,
+    /** Show the compact per-segment volume slider (video outputs with audio). */
+    showVolume: Boolean = false,
 ) {
     val sliderRange = 0f..durationMs.toFloat()
 
@@ -441,8 +452,9 @@ private fun StitchSegments(
                     // Seek to whichever handle the user is dragging
                     if (newStart != segment.startMs) exoPlayer?.seekTo(newStart)
                     else if (newEnd != segment.endMs) exoPlayer?.seekTo(newEnd)
+                    // copy() so the segment's volume survives a handle drag
                     val updated = segments.toMutableList().apply {
-                        set(index, TrimSegment(newStart, newEnd))
+                        set(index, segment.copy(startMs = newStart, endMs = newEnd))
                     }
                     // Don't sort during drag — index swap breaks the gesture
                     onSegmentsChanged(updated)
@@ -476,6 +488,48 @@ private fun StitchSegments(
                     style = MaterialTheme.typography.labelSmall,
                     color = segmentColor(index),
                 )
+            }
+
+            // Compact per-segment volume (0–200%, default 100%) for video
+            // outputs with an audio track. WebP output is always silent, so
+            // the row is hidden entirely there.
+            if (showVolume) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.VolumeUp,
+                        contentDescription = stringResource(R.string.segment_volume_desc),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Slider(
+                        value = segment.volume,
+                        onValueChange = { v ->
+                            val updated = segments.toMutableList().apply {
+                                set(index, segment.copy(volume = v))
+                            }
+                            onSegmentsChanged(updated)
+                        },
+                        valueRange = 0f..2f,
+                        modifier = Modifier.weight(1f),
+                        colors = SliderDefaults.colors(
+                            activeTrackColor = segmentColor(index),
+                            inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant,
+                        ),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = stringResource(
+                            R.string.volume_percent,
+                            (segment.volume * 100).roundToInt(),
+                        ),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
 

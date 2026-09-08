@@ -92,4 +92,73 @@ class SegmentMergeTest {
     fun `empty list returns empty`() {
         assertEquals(emptyList<TrimSegment>(), mergeOverlapping(emptyList()))
     }
+
+    // ── zero-length segments (would create empty trim streams in the graph) ──
+
+    @Test
+    fun `zero-length segments are dropped`() {
+        val input = listOf(
+            TrimSegment(0, 2000),
+            TrimSegment(3000, 3000),
+            TrimSegment(4000, 6000),
+        )
+        val expected = listOf(TrimSegment(0, 2000), TrimSegment(4000, 6000))
+        assertEquals(expected, mergeOverlapping(input))
+    }
+
+    @Test
+    fun `a single zero-length segment yields an empty list`() {
+        assertEquals(emptyList<TrimSegment>(), mergeOverlapping(listOf(TrimSegment(5000, 5000))))
+    }
+
+    @Test
+    fun `negative-length segments are dropped`() {
+        val input = listOf(TrimSegment(0, 2000), TrimSegment(5000, 3000))
+        assertEquals(listOf(TrimSegment(0, 2000)), mergeOverlapping(input))
+    }
+
+    // ── volume-aware merge semantics ──
+    // Documented choice: overlapping segments merge FIRST-WINS (the earlier
+    // segment's volume covers the whole merged range, matching how the merge
+    // already keeps the earlier segment's start). Adjacent segments merge only
+    // when their volumes are equal — a volume change at a cut point is an
+    // intentional audio edit and must survive the merge.
+
+    @Test
+    fun `overlapping segments with different volumes merge first-wins`() {
+        val input = listOf(
+            TrimSegment(0, 3000, volume = 0.5f),
+            TrimSegment(2000, 5000, volume = 1.5f),
+        )
+        val expected = listOf(TrimSegment(0, 5000, volume = 0.5f))
+        assertEquals(expected, mergeOverlapping(input))
+    }
+
+    @Test
+    fun `adjacent segments with different volumes stay separate`() {
+        val input = listOf(
+            TrimSegment(0, 3000, volume = 1f),
+            TrimSegment(3000, 6000, volume = 0.25f),
+        )
+        assertEquals(input, mergeOverlapping(input))
+    }
+
+    @Test
+    fun `adjacent segments with equal volumes still merge`() {
+        val input = listOf(
+            TrimSegment(0, 3000, volume = 1.5f),
+            TrimSegment(3000, 6000, volume = 1.5f),
+        )
+        val expected = listOf(TrimSegment(0, 6000, volume = 1.5f))
+        assertEquals(expected, mergeOverlapping(input))
+    }
+
+    @Test
+    fun `contained segment with a different volume disappears into the container`() {
+        val input = listOf(
+            TrimSegment(0, 10000, volume = 1f),
+            TrimSegment(2000, 5000, volume = 2f),
+        )
+        assertEquals(listOf(TrimSegment(0, 10000, volume = 1f)), mergeOverlapping(input))
+    }
 }

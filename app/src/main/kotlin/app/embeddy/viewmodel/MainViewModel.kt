@@ -11,9 +11,11 @@ import app.embeddy.conversion.ConversionConfig
 import app.embeddy.conversion.ConversionEngine
 import app.embeddy.conversion.ConversionProgress
 import app.embeddy.conversion.ConversionState
+import app.embeddy.conversion.OutputMediaFormat
 import app.embeddy.conversion.Preset
 import app.embeddy.conversion.TrimSegment
 import app.embeddy.conversion.mergeOverlappingSegments
+import app.embeddy.ui.isAnimatedImageFile
 import app.embeddy.R
 import app.embeddy.util.FileInfoUtils
 import app.embeddy.util.SettingsRepository
@@ -61,6 +63,7 @@ class MainViewModel(
         const val KEY_DURATION_MS = "ss_duration_ms"
         const val KEY_WIDTH = "ss_width"
         const val KEY_HEIGHT = "ss_height"
+        const val KEY_HAS_AUDIO = "ss_has_audio"
     }
 
     init {
@@ -89,6 +92,7 @@ class MainViewModel(
             durationMs = savedState.get<Long>(KEY_DURATION_MS) ?: 0L,
             width = savedState.get<Int>(KEY_WIDTH) ?: 0,
             height = savedState.get<Int>(KEY_HEIGHT) ?: 0,
+            hasAudio = savedState.get<Boolean>(KEY_HAS_AUDIO) ?: false,
         )
     }
 
@@ -100,6 +104,7 @@ class MainViewModel(
         savedState[KEY_DURATION_MS] = ready.durationMs
         savedState[KEY_WIDTH] = ready.width
         savedState[KEY_HEIGHT] = ready.height
+        savedState[KEY_HAS_AUDIO] = ready.hasAudio
     }
 
     /** Clear saved Ready state when leaving that state. */
@@ -110,6 +115,7 @@ class MainViewModel(
         savedState.remove<Long>(KEY_DURATION_MS)
         savedState.remove<Int>(KEY_WIDTH)
         savedState.remove<Int>(KEY_HEIGHT)
+        savedState.remove<Boolean>(KEY_HAS_AUDIO)
     }
 
     /** Persist current config to DataStore. */
@@ -154,7 +160,16 @@ class MainViewModel(
                         durationMs = info.durationMs,
                         width = info.width,
                         height = info.height,
+                        hasAudio = info.hasAudio,
                     )
+                }
+                // GIF/animated-WebP inputs only ever produce WebP; the format
+                // picker is hidden for them, so a persisted MP4/Original choice
+                // from a previous video must not silently apply.
+                if (isAnimatedImageFile(ready.fileName) &&
+                    _config.value.outputFormat != OutputMediaFormat.WEBP
+                ) {
+                    _config.update { it.copy(outputFormat = OutputMediaFormat.WEBP) }
                 }
                 _state.value = ready
                 saveReadyState(ready)
@@ -203,7 +218,7 @@ class MainViewModel(
         conversionJob = viewModelScope.launch {
             _state.value = ConversionState.Converting()
 
-            engine.convert(uri, currentConfig, baseName).collect { progress ->
+            engine.convert(uri, currentConfig, baseName, sourceFileName = ready.fileName).collect { progress ->
                 when (progress) {
                     is ConversionProgress.Attempt -> {
                         _state.update { current ->
