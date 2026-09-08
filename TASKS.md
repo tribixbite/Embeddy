@@ -274,3 +274,5 @@ MASTER-TODO. Ordered by severity: M1-M10 high, M11-M40 med, M41-M79 low.
 - [x] **8.3** app: video output formats MP4 + Original (openh264/aac, libvpx/opus; quality→bitrate mapping; WebP command pinned unchanged)
 - [x] **8.4** app: per-segment volume control (TrimSegment.volume, atrim+volume+concat graph, audio-less handling, 0-200% slider)
 - [ ] **8.5** on-device: verify MP4/Original encodes (A/V sync, volume steps), no-audio inputs, container mapping, share/save mime — see feat-app-stitch report checklist
+- [x] **8.6** site: percent + ETA on convert progress (per-phase clock, per-attempt reset); dead wasm-webp dep removed
+- [x] **8.7** app: ETA on conversion card; per-attempt elapsed baseline fix
