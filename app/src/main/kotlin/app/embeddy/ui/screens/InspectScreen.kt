@@ -68,26 +68,16 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 
 @Composable
-fun InspectScreen(
-    viewModel: InspectViewModel = viewModel(),
-    /** Optional URI to inspect immediately (from Convert tab info icon). */
-    initialFileUri: Uri? = null,
-) {
+fun InspectScreen(viewModel: InspectViewModel = viewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val urlInput by viewModel.urlInput.collectAsStateWithLifecycle()
 
-    // File picker for local file inspection
+    // File picker for local file inspection. (The Convert tab's info icon drives
+    // inspection through the shared InspectViewModel directly — no parameter needed.)
     val filePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         uri?.let { viewModel.inspectFile(it) }
-    }
-
-    // Auto-inspect if launched with a file URI
-    var hasAutoInspected by remember { mutableStateOf(false) }
-    if (initialFileUri != null && !hasAutoInspected) {
-        hasAutoInspected = true
-        viewModel.inspectFile(initialFileUri)
     }
 
     Column(
@@ -337,7 +327,7 @@ private fun SocialPreviewCard(result: MetadataResult) {
                         .data(imageUrl)
                         .crossfade(true)
                         .build(),
-                    contentDescription = "Social preview image",
+                    contentDescription = stringResource(R.string.social_preview_desc),
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(max = 200.dp)
@@ -378,7 +368,9 @@ private fun MetadataSection(
                 )
                 Icon(
                     imageVector = if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
-                    contentDescription = if (expanded) "Collapse" else "Expand",
+                    contentDescription = stringResource(
+                        if (expanded) R.string.collapse else R.string.expand,
+                    ),
                     modifier = Modifier.size(20.dp),
                 )
             }

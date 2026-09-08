@@ -35,6 +35,7 @@ import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Upload
 import androidx.compose.material.icons.outlined.UploadFile
+import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -63,6 +64,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.embeddy.R
 import app.embeddy.upload.UploadHost
+import app.embeddy.upload.UploadResult
 import app.embeddy.upload.UploadState
 import app.embeddy.viewmodel.UploadViewModel
 
@@ -146,9 +148,7 @@ fun UploadScreen(viewModel: UploadViewModel = viewModel()) {
 
             is UploadState.Done -> {
                 UploadDoneCard(
-                    url = s.result.url,
-                    fileName = s.result.fileName,
-                    host = s.result.host,
+                    result = s.result,
                     onReset = viewModel::reset,
                 )
             }
@@ -337,12 +337,11 @@ private fun MetadataToggle(checked: Boolean, onCheckedChange: (Boolean) -> Unit)
 
 @Composable
 private fun UploadDoneCard(
-    url: String,
-    fileName: String,
-    host: UploadHost,
+    result: UploadResult,
     onReset: () -> Unit,
 ) {
     val context = LocalContext.current
+    val url = result.url
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -368,10 +367,31 @@ private fun UploadDoneCard(
 
             Spacer(Modifier.height(4.dp))
             Text(
-                text = "$fileName → ${host.label}",
+                text = "${result.fileName} → ${result.host.label}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+
+            // Strip was requested but could not be performed (unsupported format or
+            // save failure) — the file went out with its metadata intact, so warn
+            // instead of silently pretending it was removed.
+            if (result.metadataStripped == false) {
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.Top) {
+                    Icon(
+                        Icons.Outlined.Warning,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = stringResource(R.string.metadata_strip_failed),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
 
             Spacer(Modifier.height(16.dp))
 
@@ -439,7 +459,7 @@ private fun UploadDoneCard(
 private fun copyToClipboard(context: Context, text: String) {
     val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     clipboardManager.setPrimaryClip(ClipData.newPlainText("Embeddy URL", text))
-    Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+    Toast.makeText(context, context.getString(R.string.copied_to_clipboard), Toast.LENGTH_SHORT).show()
 }
 
 private fun shareUrl(context: Context, url: String) {
@@ -447,7 +467,9 @@ private fun shareUrl(context: Context, url: String) {
         type = "text/plain"
         putExtra(Intent.EXTRA_TEXT, url)
     }
-    context.startActivity(Intent.createChooser(intent, "Share URL"))
+    context.startActivity(
+        Intent.createChooser(intent, context.getString(R.string.share_url)),
+    )
 }
 
 @Composable

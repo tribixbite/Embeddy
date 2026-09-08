@@ -21,7 +21,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -30,9 +29,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import app.embeddy.R
-import coil.ImageLoader
 import coil.compose.AsyncImage
-import coil.decode.ImageDecoderDecoder
 import coil.request.ImageRequest
 import java.io.File
 
@@ -47,13 +44,6 @@ fun PreviewCard(
 ) {
     val context = LocalContext.current
     val sizeMb = String.format("%.2f MB", fileSizeBytes / 1_000_000.0)
-
-    // Animated WebP requires ImageDecoderDecoder
-    val imageLoader = remember {
-        ImageLoader.Builder(context)
-            .components { add(ImageDecoderDecoder.Factory()) }
-            .build()
-    }
 
     Card(
         modifier = modifier.fillMaxWidth(),
@@ -90,13 +80,13 @@ fun PreviewCard(
                     .background(MaterialTheme.colorScheme.surfaceVariant),
                 contentAlignment = Alignment.Center,
             ) {
+                // Uses the app-wide Coil loader (EmbeddyApp) with API-gated animated decoders
                 AsyncImage(
                     model = ImageRequest.Builder(context)
                         .data(File(previewPath))
                         .crossfade(true)
                         .build(),
-                    imageLoader = imageLoader,
-                    contentDescription = "Preview clip",
+                    contentDescription = stringResource(R.string.preview_title),
                     modifier = Modifier.fillMaxWidth(),
                     contentScale = ContentScale.FillWidth,
                 )
@@ -106,7 +96,7 @@ fun PreviewCard(
 
             // File info: size and quality used
             Text(
-                text = "$sizeMb · quality $qualityUsed",
+                text = stringResource(R.string.output_size, sizeMb, qualityUsed),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

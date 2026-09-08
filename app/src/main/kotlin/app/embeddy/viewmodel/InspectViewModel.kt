@@ -55,6 +55,8 @@ class InspectViewModel(application: Application) : AndroidViewModel(application)
                 val result = engine.inspectLocalFile(ctx, uri)
                 _state.value = InspectState.Success(result)
             } catch (e: Exception) {
+                // Cancellation (a superseding fetch/inspect) must not surface as Error.
+                e.rethrowIfCancellation()
                 _state.value = InspectState.Error(e.message ?: "Failed to inspect file")
             }
         }

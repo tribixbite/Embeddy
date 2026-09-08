@@ -2,7 +2,6 @@ package app.embeddy.ui.components
 
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -30,7 +29,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -41,11 +39,11 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import app.embeddy.R
 import app.embeddy.conversion.ConversionState
-import coil.ImageLoader
 import coil.compose.AsyncImage
-import coil.decode.ImageDecoderDecoder
 import coil.request.ImageRequest
 import java.io.File
+
+private const val WEBP_MIME_TYPE = "image/webp"
 
 @Composable
 fun OutputPreviewCard(
@@ -55,13 +53,7 @@ fun OutputPreviewCard(
 ) {
     val context = LocalContext.current
     val sizeMb = String.format("%.2f", state.outputSizeBytes / 1_000_000.0)
-
-    // Cache ImageLoader across recompositions to avoid recreation per frame
-    val imageLoader = remember {
-        ImageLoader.Builder(context)
-            .components { add(ImageDecoderDecoder.Factory()) }
-            .build()
-    }
+    val saveToDownloads = rememberDownloadsSaver()
 
     Card(
         modifier = modifier.fillMaxWidth(),
@@ -89,7 +81,8 @@ fun OutputPreviewCard(
 
             Spacer(Modifier.height(12.dp))
 
-            // Animated WebP preview
+            // Animated WebP preview — uses the app-wide Coil loader (EmbeddyApp),
+            // which carries the API-gated animated-image decoders.
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -103,8 +96,7 @@ fun OutputPreviewCard(
                         .data(File(state.outputPath))
                         .crossfade(true)
                         .build(),
-                    imageLoader = imageLoader,
-                    contentDescription = "Converted WebP preview",
+                    contentDescription = stringResource(R.string.converted_preview_desc),
                     modifier = Modifier.fillMaxWidth(),
                     contentScale = ContentScale.FillWidth,
                 )
@@ -114,7 +106,7 @@ fun OutputPreviewCard(
 
             // File info badge
             Text(
-                text = stringResource(R.string.output_size, "${sizeMb} MB", state.qualityUsed),
+                text = stringResource(R.string.output_size, "$sizeMb MB", state.qualityUsed),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -136,7 +128,7 @@ fun OutputPreviewCard(
                 }
 
                 FilledTonalButton(
-                    onClick = { saveToDownloads(context, state.outputPath) },
+                    onClick = { saveToDownloads(state.outputPath, WEBP_MIME_TYPE) },
                     modifier = Modifier.weight(1f),
                 ) {
                     Icon(Icons.Outlined.Save, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -167,34 +159,11 @@ private fun shareOutput(context: Context, path: String) {
         file,
     )
     val intent = Intent(Intent.ACTION_SEND).apply {
-        type = "image/webp"
+        type = WEBP_MIME_TYPE
         putExtra(Intent.EXTRA_STREAM, uri)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
-    context.startActivity(Intent.createChooser(intent, "Share WebP"))
-}
-
-private fun saveToDownloads(context: Context, path: String) {
-    val file = File(path)
-    val contentValues = android.content.ContentValues().apply {
-        put(android.provider.MediaStore.Downloads.DISPLAY_NAME, file.name)
-        put(android.provider.MediaStore.Downloads.MIME_TYPE, "image/webp")
-        put(android.provider.MediaStore.Downloads.IS_PENDING, 1)
-    }
-    val resolver = context.contentResolver
-    val uri = resolver.insert(
-        android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-        contentValues,
+    context.startActivity(
+        Intent.createChooser(intent, context.getString(R.string.share_webp)),
     )
-    if (uri == null) {
-        android.widget.Toast.makeText(context, "Failed to save to Downloads", android.widget.Toast.LENGTH_SHORT).show()
-        return
-    }
-    resolver.openOutputStream(uri)?.use { output ->
-        file.inputStream().use { input -> input.copyTo(output) }
-    }
-    contentValues.clear()
-    contentValues.put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
-    resolver.update(uri, contentValues, null, null)
-    android.widget.Toast.makeText(context, "Saved to Downloads", android.widget.Toast.LENGTH_SHORT).show()
 }

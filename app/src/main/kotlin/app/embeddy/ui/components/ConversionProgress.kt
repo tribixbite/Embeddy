@@ -1,5 +1,6 @@
 package app.embeddy.ui.components
 
+import android.os.SystemClock
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
@@ -17,7 +18,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -25,6 +30,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import app.embeddy.R
 import app.embeddy.conversion.ConversionState
+import kotlinx.coroutines.delay
 
 @Composable
 fun ConversionProgressCard(
@@ -41,8 +47,23 @@ fun ConversionProgressCard(
         label = "progress",
     )
 
+    // Wall-clock ticker: the engine only updates elapsedMs from FFmpeg stats
+    // events, so "stats not arriving" (exactly what the indeterminate fallback
+    // exists for) used to leave elapsedMs at 0 forever — a frozen "0% · 0s" bar
+    // — and previews hardcode elapsedMs = 0. The displayed elapsed time is the
+    // max of the engine's report and time since this card appeared.
+    val startedAtMs = remember { SystemClock.elapsedRealtime() }
+    var wallElapsedMs by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            wallElapsedMs = SystemClock.elapsedRealtime() - startedAtMs
+            delay(1_000)
+        }
+    }
+    val elapsedMs = effectiveElapsedMs(state.elapsedMs, wallElapsedMs)
+
     // Use indeterminate bar when progress hasn't moved (duration unknown / stats not arriving)
-    val indeterminate = state.progress <= 0f && state.elapsedMs > 1000
+    val indeterminate = isProgressIndeterminate(state.progress, elapsedMs)
 
     Card(
         modifier = modifier.fillMaxWidth(),
@@ -62,12 +83,14 @@ fun ConversionProgressCard(
 
             Spacer(Modifier.height(4.dp))
 
-            val targetLabel = if (targetSizeBytes > 0) {
+            val attemptText = if (targetSizeBytes > 0) {
                 val mb = String.format("%.1f MB", targetSizeBytes / 1_000_000.0)
-                " · target $mb"
-            } else ""
+                stringResource(R.string.attempt_quality_target, state.currentQuality, mb)
+            } else {
+                stringResource(R.string.attempt_quality, state.currentQuality)
+            }
             Text(
-                text = stringResource(R.string.attempt_quality, state.currentQuality) + targetLabel,
+                text = attemptText,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -101,12 +124,11 @@ fun ConversionProgressCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                val elapsed = formatElapsed(state.elapsedMs)
+                val elapsed = formatElapsed(elapsedMs)
                 val statusText = if (indeterminate) {
-                    "Encoding… · $elapsed"
+                    stringResource(R.string.encoding_status, elapsed)
                 } else {
-                    val pct = (animatedProgress * 100).toInt()
-                    "$pct% · $elapsed"
+                    stringResource(R.string.progress_status, (animatedProgress * 100).toInt(), elapsed)
                 }
                 Text(
                     text = statusText,

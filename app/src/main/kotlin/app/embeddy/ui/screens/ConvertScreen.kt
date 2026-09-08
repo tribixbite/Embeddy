@@ -44,6 +44,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.embeddy.R
 import app.embeddy.conversion.ConversionState
+import app.embeddy.ui.isAnimatedImageFile
 import app.embeddy.ui.components.ConversionProgressCard
 import app.embeddy.ui.components.MediaPickerCard
 import app.embeddy.ui.components.OutputPreviewCard
@@ -94,14 +95,6 @@ fun ConvertScreen(
                 )
             }
 
-            is ConversionState.Picking -> {
-                MediaPickerCard(
-                    onClick = {
-                        filePicker.launch(CONVERT_MIME_TYPES)
-                    },
-                )
-            }
-
             is ConversionState.Ready -> {
                 // File info card with inspect button
                 ReadyCard(
@@ -136,6 +129,9 @@ fun ConvertScreen(
                         outputQuality = config.startQuality,
                         segments = config.segments,
                         onSegmentsChanged = viewModel::setSegments,
+                        // GIF/animated WebP would render as a dead black ExoPlayer
+                        // surface — show a Coil animated preview instead (sliders kept).
+                        animatedImagePreview = isAnimatedImageFile(s.fileName),
                     )
                 }
 
@@ -147,10 +143,12 @@ fun ConvertScreen(
                 )
 
                 // Convert button — shows target size when enabled
-                val targetLabel = if (config.targetSizeBytes > 0) {
+                val convertLabel = if (config.targetSizeBytes > 0) {
                     val mb = String.format("%.1f MB", config.targetSizeBytes / 1_000_000.0)
-                    " ($mb target)"
-                } else ""
+                    stringResource(R.string.convert_with_target, mb)
+                } else {
+                    stringResource(R.string.convert)
+                }
                 Button(
                     onClick = viewModel::startConversion,
                     modifier = Modifier
@@ -165,7 +163,7 @@ fun ConvertScreen(
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        text = stringResource(R.string.convert) + targetLabel,
+                        text = convertLabel,
                         style = MaterialTheme.typography.titleMedium,
                     )
                 }
@@ -265,7 +263,7 @@ private fun ReadyCard(
                 ) {
                     Icon(
                         Icons.Outlined.Info,
-                        contentDescription = "Inspect media metadata",
+                        contentDescription = stringResource(R.string.inspect_media_desc),
                         tint = MaterialTheme.colorScheme.secondary,
                         modifier = Modifier.size(20.dp),
                     )
@@ -278,12 +276,14 @@ private fun ReadyCard(
             // as a misleading "0.0 MB" for a multi-megabyte file.
             val sizeLabel = if (state.fileSize > 0) {
                 FileInfoUtils.formatFileSize(state.fileSize)
-            } else "Unknown size"
+            } else stringResource(R.string.unknown_size)
             val duration = if (state.durationMs > 0) {
                 val secs = state.durationMs / 1000
                 "${secs / 60}m ${secs % 60}s"
-            } else "N/A"
-            val resolution = if (state.width > 0) "${state.width}x${state.height}" else "N/A"
+            } else stringResource(R.string.not_available)
+            val resolution = if (state.width > 0) {
+                "${state.width}x${state.height}"
+            } else stringResource(R.string.not_available)
 
             Text(
                 text = "$sizeLabel · $resolution · $duration",
@@ -367,7 +367,7 @@ private fun SizeWarningCard(
             Spacer(Modifier.height(4.dp))
 
             Text(
-                text = "Quality: ${state.qualityUsed} (lowest tried)",
+                text = stringResource(R.string.quality_lowest_tried, state.qualityUsed),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.7f),
             )

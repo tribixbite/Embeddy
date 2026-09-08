@@ -14,8 +14,15 @@ import app.embeddy.conversion.DitherMode
 import app.embeddy.conversion.Preset
 import app.embeddy.squoosh.OutputFormat
 import app.embeddy.squoosh.SquooshConfig
+import app.embeddy.upload.UploadHost
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+
+/** Persisted Upload-tab preferences (the picked file itself lives in SavedStateHandle). */
+data class UploadPrefs(
+    val host: UploadHost = UploadHost.ZER0X0,
+    val stripMetadata: Boolean = true,
+)
 
 /** Single DataStore instance for the app, scoped via extension property. */
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "embeddy_settings")
@@ -54,6 +61,14 @@ class SettingsRepository(private val context: Context) {
         // which libwebp_anim never reads. Stale persisted values are ignored.
         val EXACT_WIDTH = intPreferencesKey("convert_exact_width")
         val EXACT_HEIGHT = intPreferencesKey("convert_exact_height")
+        // 0 = Auto (match the source's loop count, or infinite for video inputs)
+        val LOOP = intPreferencesKey("convert_loop")
+    }
+
+    // ── Upload preference keys ──
+    private object UploadKeys {
+        val HOST = stringPreferencesKey("upload_host")
+        val STRIP_METADATA = booleanPreferencesKey("upload_strip_metadata")
     }
 
     /** Flow of saved SquooshConfig, falls back to defaults for missing keys. */
@@ -95,6 +110,17 @@ class SettingsRepository(private val context: Context) {
             ditherMode = prefs[ConvertKeys.DITHER_MODE]?.let { name ->
                 DitherMode.entries.firstOrNull { it.name == name }
             } ?: DitherMode.NONE,
+            loop = prefs[ConvertKeys.LOOP] ?: 0,
+        )
+    }
+
+    /** Flow of saved Upload-tab preferences, defaulting to 0x0.st with strip on. */
+    val uploadPrefs: Flow<UploadPrefs> = context.dataStore.data.map { prefs ->
+        UploadPrefs(
+            host = prefs[UploadKeys.HOST]?.let { name ->
+                UploadHost.entries.firstOrNull { it.name == name }
+            } ?: UploadHost.ZER0X0,
+            stripMetadata = prefs[UploadKeys.STRIP_METADATA] ?: true,
         )
     }
 
@@ -127,6 +153,15 @@ class SettingsRepository(private val context: Context) {
             prefs[ConvertKeys.DENOISE] = config.denoiseStrength
             prefs[ConvertKeys.COLOR_SPACE] = config.colorSpace.name
             prefs[ConvertKeys.DITHER_MODE] = config.ditherMode.name
+            prefs[ConvertKeys.LOOP] = config.loop
+        }
+    }
+
+    /** Persist the current Upload-tab preferences. */
+    suspend fun saveUploadPrefs(uploadPrefs: UploadPrefs) {
+        context.dataStore.edit { prefs ->
+            prefs[UploadKeys.HOST] = uploadPrefs.host.name
+            prefs[UploadKeys.STRIP_METADATA] = uploadPrefs.stripMetadata
         }
     }
 }

@@ -60,12 +60,6 @@ data class ConversionConfig(
     val colorSpace: ColorSpace = ColorSpace.AUTO, // Output color space / pixel format
     val denoiseStrength: Int = 0,           // hqdn3d denoise (0=off, 1-10 strength)
     val ditherMode: DitherMode = DitherMode.NONE, // Bayer/Floyd-Steinberg for palette reduction
-    @Deprecated(
-        "No effect: libwebp_anim never reads gop_size, so the -g flag this mapped to " +
-            "was a silent no-op. Kept only until the SettingsPanel slider is removed; " +
-            "no longer emitted, persisted, or restored."
-    )
-    val keyframeInterval: Int = 0,
 ) {
     /**
      * Quality floor the adaptive loop may descend to.
@@ -122,8 +116,6 @@ enum class DitherMode(val label: String, val ffmpegValue: String) {
 /** Represents the current state of a conversion operation. */
 sealed interface ConversionState {
     data object Idle : ConversionState
-
-    data class Picking(val message: String = "") : ConversionState
 
     data class Ready(
         val inputUri: String,

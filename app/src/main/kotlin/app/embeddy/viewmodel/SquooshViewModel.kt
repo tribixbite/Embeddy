@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class SquooshViewModel(
     application: Application,
@@ -81,22 +82,27 @@ class SquooshViewModel(
 
     /** Handle a file picked from the image picker. Single query for name+size. */
     fun onFilePicked(uri: Uri) {
-        val ctx = getApplication<Application>()
-        // Take persistable permission so URI survives process death
-        try {
-            ctx.contentResolver.takePersistableUriPermission(
-                uri, Intent.FLAG_GRANT_READ_URI_PERMISSION,
+        viewModelScope.launch {
+            val ctx = getApplication<Application>()
+            // ContentResolver work off the main thread; state writes back on main.
+            val (fileName, fileSize) = withContext(Dispatchers.IO) {
+                // Take persistable permission so URI survives process death
+                try {
+                    ctx.contentResolver.takePersistableUriPermission(
+                        uri, Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                    )
+                } catch (_: SecurityException) { /* non-fatal */ }
+
+                FileInfoUtils.queryFileInfo(ctx, uri)
+            }
+
+            _state.value = SquooshState.Ready(
+                fileName = fileName,
+                fileSize = fileSize,
+                uri = uri.toString(),
             )
-        } catch (_: SecurityException) { /* non-fatal */ }
-
-        val (fileName, fileSize) = FileInfoUtils.queryFileInfo(ctx, uri)
-
-        _state.value = SquooshState.Ready(
-            fileName = fileName,
-            fileSize = fileSize,
-            uri = uri.toString(),
-        )
-        saveReadyState(fileName, fileSize, uri.toString())
+            saveReadyState(fileName, fileSize, uri.toString())
+        }
     }
 
     /** Start compression — cancels any prior in-flight job. */
@@ -111,6 +117,9 @@ class SquooshViewModel(
                 val result = engine.compress(uri, _config.value)
                 _state.value = SquooshState.Done(result, ready.fileName, ready.uri)
             } catch (e: Exception) {
+                // Cancellation (Cancel button / superseding job) must not paint an
+                // Error card over whatever state the canceller just set.
+                e.rethrowIfCancellation()
                 _state.value = SquooshState.Error(e.message ?: "Compression failed")
             }
         }

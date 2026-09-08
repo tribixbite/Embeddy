@@ -14,19 +14,20 @@ import app.embeddy.conversion.ConversionState
 import app.embeddy.conversion.Preset
 import app.embeddy.conversion.TrimSegment
 import app.embeddy.conversion.mergeOverlappingSegments
+import app.embeddy.R
 import app.embeddy.util.FileInfoUtils
 import app.embeddy.util.SettingsRepository
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 
 class MainViewModel(
     application: Application,
@@ -46,8 +47,11 @@ class MainViewModel(
     private var previewJob: Job? = null
 
     /** One-shot signal telling the scaffold to bring the Convert tab to the front. */
-    private val _navigateToConvert = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
-    val navigateToConvert: SharedFlow<Unit> = _navigateToConvert.asSharedFlow()
+    private val _navigateToConvert = NavigationSignal()
+    val navigateToConvert: SharedFlow<Unit> = _navigateToConvert.signal
+
+    /** Called by the scaffold after it has switched tabs, so the signal is not replayed. */
+    fun onNavigateToConvertHandled() = _navigateToConvert.markHandled()
 
     // SavedStateHandle keys for process death restoration
     private companion object {
@@ -117,33 +121,48 @@ class MainViewModel(
 
     /** Handle a file picked via the system file picker. */
     fun onFilePicked(uri: Uri) {
+        // A new input supersedes any in-flight work — without these cancels the old
+        // conversion/preview keeps running and later paints its Done/PreviewReady
+        // state (for the PREVIOUS file) over this file's Ready state.
+        conversionJob?.cancel()
+        conversionJob = null
+        previewJob?.cancel()
+        previewJob = null
+
         viewModelScope.launch {
             try {
                 val ctx = getApplication<Application>()
-                // Take persistable permission so URI survives process death
-                try {
-                    ctx.contentResolver.takePersistableUriPermission(
-                        uri, Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                // ContentResolver queries and the probe are disk/IPC work — keep them
+                // off the main thread; state + SavedStateHandle writes stay on main.
+                val ready = withContext(Dispatchers.IO) {
+                    // Take persistable permission so URI survives process death
+                    try {
+                        ctx.contentResolver.takePersistableUriPermission(
+                            uri, Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                        )
+                    } catch (_: SecurityException) {
+                        // Not all URIs support persistable permission — non-fatal
+                    }
+
+                    val (fileName, fileSize) = FileInfoUtils.queryFileInfo(ctx, uri)
+                    val info = engine.probeInput(uri)
+
+                    ConversionState.Ready(
+                        inputUri = uri.toString(),
+                        fileName = fileName,
+                        fileSize = fileSize,
+                        durationMs = info.durationMs,
+                        width = info.width,
+                        height = info.height,
                     )
-                } catch (_: SecurityException) {
-                    // Not all URIs support persistable permission — non-fatal
                 }
-
-                val (fileName, fileSize) = FileInfoUtils.queryFileInfo(ctx, uri)
-                val info = engine.probeInput(uri)
-
-                val ready = ConversionState.Ready(
-                    inputUri = uri.toString(),
-                    fileName = fileName,
-                    fileSize = fileSize,
-                    durationMs = info.durationMs,
-                    width = info.width,
-                    height = info.height,
-                )
                 _state.value = ready
                 saveReadyState(ready)
             } catch (e: Exception) {
-                _state.value = ConversionState.Error("Failed to read file: ${e.message}")
+                e.rethrowIfCancellation()
+                _state.value = ConversionState.Error(
+                    getApplication<Application>().getString(R.string.error_read_file, e.message ?: ""),
+                )
             }
         }
     }
@@ -163,9 +182,9 @@ class MainViewModel(
         if (uri != null) {
             onFilePicked(uri)
             // A share that arrives while another tab is open would otherwise load the
-            // file into an invisible Convert tab. No replay is needed: on a cold start
-            // Convert is already the default tab, so only the live-collector case matters.
-            _navigateToConvert.tryEmit(Unit)
+            // file into an invisible Convert tab. NavigationSignal replays the emission,
+            // covering the onNewIntent-before-first-frame-collector race as well.
+            _navigateToConvert.emit()
         }
     }
 
@@ -346,18 +365,19 @@ class MainViewModel(
 
     /** Dismiss preview result, delete temp file, restore Ready state. */
     fun dismissPreview() {
-        val preview = _state.value as? ConversionState.PreviewReady
-        if (preview != null) {
-            // Delete the temp preview file
-            java.io.File(preview.previewPath).delete()
-            _state.value = preview.previousReady
-        }
+        val preview = _state.value as? ConversionState.PreviewReady ?: return
+        // Delete the temp preview file off the main thread
+        val path = preview.previewPath
+        viewModelScope.launch(Dispatchers.IO) { File(path).delete() }
+        _state.value = preview.previousReady
     }
 
     /** Cancel an in-progress conversion. */
     fun cancelConversion() {
         conversionJob?.cancel()
         conversionJob = null
+        previewJob?.cancel()
+        previewJob = null
         _state.value = ConversionState.Idle
         clearSavedReadyState()
     }
@@ -366,6 +386,8 @@ class MainViewModel(
     fun reset() {
         conversionJob?.cancel()
         conversionJob = null
+        previewJob?.cancel()
+        previewJob = null
         _state.value = ConversionState.Idle
         clearSavedReadyState()
     }

@@ -74,6 +74,7 @@ import app.embeddy.R
 import app.embeddy.squoosh.OutputFormat
 import app.embeddy.squoosh.SquooshResult
 import app.embeddy.squoosh.SquooshState
+import app.embeddy.ui.components.rememberDownloadsSaver
 import app.embeddy.util.FileInfoUtils
 import app.embeddy.viewmodel.SquooshViewModel
 import coil.compose.AsyncImage
@@ -357,7 +358,9 @@ private fun SquooshSettings(
                 label = stringResource(R.string.max_dimension),
                 value = dimValue,
                 valueRange = 0f..4096f,
-                valueLabel = if (maxDimension == 0) "Original" else "${maxDimension}px",
+                valueLabel = if (maxDimension == 0) {
+                    stringResource(R.string.original_label)
+                } else stringResource(R.string.pixels_value, maxDimension),
                 onValueChange = { onMaxDimensionChanged(it.roundToInt()) },
             )
 
@@ -370,7 +373,7 @@ private fun SquooshSettings(
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                text = "Set exact output size (overrides max dimension)",
+                text = stringResource(R.string.exact_dimensions_desc),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -496,7 +499,7 @@ private fun BeforeAfterSlider(
                 .data(File(compressedPath))
                 .crossfade(false)
                 .build(),
-            contentDescription = "Compressed",
+            contentDescription = stringResource(R.string.compressed_label),
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Fit,
         )
@@ -509,7 +512,7 @@ private fun BeforeAfterSlider(
                 .data(originalUri)
                 .crossfade(false)
                 .build(),
-            contentDescription = "Original",
+            contentDescription = stringResource(R.string.original_label),
             modifier = Modifier
                 .fillMaxSize()
                 .drawWithContent {
@@ -581,6 +584,7 @@ private fun CompressionResultCard(
     onReset: () -> Unit,
 ) {
     val context = LocalContext.current
+    val saveToDownloads = rememberDownloadsSaver()
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -619,7 +623,7 @@ private fun CompressionResultCard(
                         .data(File(result.outputPath))
                         .crossfade(true)
                         .build(),
-                    contentDescription = "Compressed image preview",
+                    contentDescription = stringResource(R.string.compressed_label),
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(max = 250.dp)
@@ -672,7 +676,7 @@ private fun CompressionResultCard(
                     Text(stringResource(R.string.share))
                 }
                 FilledTonalButton(
-                    onClick = { saveToDownloads(context, result.outputPath) },
+                    onClick = { saveToDownloads(result.outputPath, mimeForFile(File(result.outputPath))) },
                     modifier = Modifier.weight(1f),
                 ) {
                     Icon(Icons.Outlined.Save, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -709,26 +713,7 @@ private fun shareFile(context: Context, path: String) {
         putExtra(Intent.EXTRA_STREAM, uri)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
-    context.startActivity(Intent.createChooser(intent, "Share image"))
-}
-
-private fun saveToDownloads(context: Context, path: String) {
-    val file = File(path)
-    val mimeType = mimeForFile(file)
-    val contentValues = android.content.ContentValues().apply {
-        put(android.provider.MediaStore.Downloads.DISPLAY_NAME, file.name)
-        put(android.provider.MediaStore.Downloads.MIME_TYPE, mimeType)
-        put(android.provider.MediaStore.Downloads.IS_PENDING, 1)
-    }
-    val resolver = context.contentResolver
-    val uri = resolver.insert(
-        android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-        contentValues,
-    ) ?: return
-    resolver.openOutputStream(uri)?.use { output ->
-        file.inputStream().use { input -> input.copyTo(output) }
-    }
-    contentValues.clear()
-    contentValues.put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
-    resolver.update(uri, contentValues, null, null)
+    context.startActivity(
+        Intent.createChooser(intent, context.getString(R.string.share_image)),
+    )
 }

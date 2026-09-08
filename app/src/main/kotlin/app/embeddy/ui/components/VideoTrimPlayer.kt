@@ -44,6 +44,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -56,6 +57,8 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import kotlinx.coroutines.delay
 
 /**
@@ -88,6 +91,12 @@ fun VideoTrimPlayer(
     segments: List<TrimSegment> = emptyList(),
     /** Callback when segments change (stitch mode). */
     onSegmentsChanged: (List<TrimSegment>) -> Unit = {},
+    /**
+     * True for GIF/animated-WebP inputs, which Media3's default renderers cannot
+     * decode (the surface stays black). Renders a Coil animated preview instead
+     * of an ExoPlayer surface; the trim/stitch sliders keep working.
+     */
+    animatedImagePreview: Boolean = false,
 ) {
     val context = LocalContext.current
     val effectiveDuration = if (durationMs > 0) durationMs else 1L
@@ -95,22 +104,28 @@ fun VideoTrimPlayer(
     // Stitch mode toggle
     var stitchMode by remember { mutableStateOf(segments.isNotEmpty()) }
 
-    // ExoPlayer instance — create once per URI
-    val exoPlayer = remember(uri) {
-        ExoPlayer.Builder(context).build().apply {
-            setMediaItem(MediaItem.fromUri(uri))
-            prepare()
-            playWhenReady = false
-            repeatMode = Player.REPEAT_MODE_ONE
+    // ExoPlayer instance — one per URI; null when a Coil preview is shown instead
+    val exoPlayer: ExoPlayer? = remember(uri, animatedImagePreview) {
+        if (animatedImagePreview) {
+            null
+        } else {
+            ExoPlayer.Builder(context).build().apply {
+                setMediaItem(MediaItem.fromUri(uri))
+                prepare()
+                playWhenReady = false
+                repeatMode = Player.REPEAT_MODE_ONE
+            }
         }
     }
 
-    DisposableEffect(uri) {
-        onDispose { exoPlayer.release() }
+    DisposableEffect(exoPlayer) {
+        onDispose { exoPlayer?.release() }
     }
 
-    var isPlaying by remember { mutableStateOf(false) }
-    var currentPositionMs by remember { mutableLongStateOf(0L) }
+    // Keyed on uri: playback state must not leak from the previous file (the old
+    // Pause icon / position survived a file swap otherwise).
+    var isPlaying by remember(uri) { mutableStateOf(false) }
+    var currentPositionMs by remember(uri) { mutableLongStateOf(0L) }
 
     // Keep fresh references for the playback loop (avoids stale captures)
     val currentSegments by rememberUpdatedState(segments)
@@ -118,8 +133,11 @@ fun VideoTrimPlayer(
     val currentTrimEnd by rememberUpdatedState(trimEndMs)
     val currentStitchMode by rememberUpdatedState(stitchMode)
 
-    // Poll position while playing — skips gaps between segments in stitch mode
-    LaunchedEffect(isPlaying) {
+    // Poll position while playing — skips gaps between segments in stitch mode.
+    // Keyed on the player too: when the uri swaps players mid-playback, the old
+    // loop must die with its (released) player instead of polling it forever.
+    LaunchedEffect(isPlaying, exoPlayer) {
+        if (exoPlayer == null) return@LaunchedEffect
         while (isPlaying) {
             currentPositionMs = exoPlayer.currentPosition
 
@@ -174,7 +192,7 @@ fun VideoTrimPlayer(
         shape = RoundedCornerShape(16.dp),
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
-            // Video player surface
+            // Preview surface: ExoPlayer for video, Coil animated image for GIF/WebP
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -183,52 +201,67 @@ fun VideoTrimPlayer(
                     .background(MaterialTheme.colorScheme.surfaceVariant),
                 contentAlignment = Alignment.Center,
             ) {
-                AndroidView(
-                    factory = { ctx ->
-                        PlayerView(ctx).apply {
-                            player = exoPlayer
-                            useController = false
-                            setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize(),
-                )
-
-                // Play/pause overlay
-                IconButton(
-                    onClick = {
-                        if (exoPlayer.isPlaying) {
-                            exoPlayer.pause()
-                            isPlaying = false
-                        } else {
-                            val end = if (stitchMode && segments.isNotEmpty()) {
-                                segments.last().endMs
-                            } else {
-                                if (trimEndMs > 0) trimEndMs else effectiveDuration
-                            }
-                            if (exoPlayer.currentPosition >= end) {
-                                val start = if (stitchMode && segments.isNotEmpty()) {
-                                    segments.first().startMs
-                                } else trimStartMs
-                                exoPlayer.seekTo(start)
-                            }
-                            exoPlayer.play()
-                            isPlaying = true
-                        }
-                    },
-                    modifier = Modifier
-                        .size(56.dp)
-                        .background(
-                            MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
-                            CircleShape,
-                        ),
-                ) {
-                    Icon(
-                        imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = stringResource(if (isPlaying) R.string.pause else R.string.play),
-                        tint = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.size(32.dp),
+                if (exoPlayer == null) {
+                    // GIF/animated WebP: Coil animates it via the app-wide loader;
+                    // no play/pause control (the image loops on its own).
+                    AsyncImage(
+                        model = ImageRequest.Builder(context)
+                            .data(uri)
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = stringResource(R.string.animated_preview_desc),
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Fit,
                     )
+                } else {
+                    AndroidView(
+                        factory = { ctx ->
+                            PlayerView(ctx).apply {
+                                player = exoPlayer
+                                useController = false
+                                setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+                            }
+                        },
+                        update = { view -> view.player = exoPlayer },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+
+                    // Play/pause overlay
+                    IconButton(
+                        onClick = {
+                            if (exoPlayer.isPlaying) {
+                                exoPlayer.pause()
+                                isPlaying = false
+                            } else {
+                                val end = if (stitchMode && segments.isNotEmpty()) {
+                                    segments.last().endMs
+                                } else {
+                                    if (trimEndMs > 0) trimEndMs else effectiveDuration
+                                }
+                                if (exoPlayer.currentPosition >= end) {
+                                    val start = if (stitchMode && segments.isNotEmpty()) {
+                                        segments.first().startMs
+                                    } else trimStartMs
+                                    exoPlayer.seekTo(start)
+                                }
+                                exoPlayer.play()
+                                isPlaying = true
+                            }
+                        },
+                        modifier = Modifier
+                            .size(56.dp)
+                            .background(
+                                MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
+                                CircleShape,
+                            ),
+                    ) {
+                        Icon(
+                            imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = stringResource(if (isPlaying) R.string.pause else R.string.play),
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(32.dp),
+                        )
+                    }
                 }
             }
 
@@ -295,8 +328,8 @@ fun VideoTrimPlayer(
                         val newStart = range.start.toLong()
                         val newEnd = range.endInclusive.toLong()
                         // Seek to whichever handle the user is dragging
-                        if (newStart != trimStart.toLong()) exoPlayer.seekTo(newStart)
-                        else if (newEnd != trimEnd.toLong()) exoPlayer.seekTo(newEnd)
+                        if (newStart != trimStart.toLong()) exoPlayer?.seekTo(newStart)
+                        else if (newEnd != trimEnd.toLong()) exoPlayer?.seekTo(newEnd)
                         onTrimChanged(newStart, newEnd)
                     },
                     valueRange = sliderRange,
@@ -360,7 +393,8 @@ fun VideoTrimPlayer(
 private fun StitchSegments(
     segments: List<TrimSegment>,
     durationMs: Long,
-    exoPlayer: ExoPlayer,
+    /** Null for animated-image inputs (no player to seek). */
+    exoPlayer: ExoPlayer?,
     onSegmentsChanged: (List<TrimSegment>) -> Unit,
 ) {
     val sliderRange = 0f..durationMs.toFloat()
@@ -405,8 +439,8 @@ private fun StitchSegments(
                     val newStart = range.start.toLong()
                     val newEnd = range.endInclusive.toLong()
                     // Seek to whichever handle the user is dragging
-                    if (newStart != segment.startMs) exoPlayer.seekTo(newStart)
-                    else if (newEnd != segment.endMs) exoPlayer.seekTo(newEnd)
+                    if (newStart != segment.startMs) exoPlayer?.seekTo(newStart)
+                    else if (newEnd != segment.endMs) exoPlayer?.seekTo(newEnd)
                     val updated = segments.toMutableList().apply {
                         set(index, TrimSegment(newStart, newEnd))
                     }
@@ -469,7 +503,12 @@ private fun StitchSegments(
         val removed = durationMs - totalKept
         if (removed > 0) {
             Text(
-                text = "Keeping ${formatTime(totalKept)} of ${formatTime(durationMs)} (removing ${formatTime(removed)})",
+                text = stringResource(
+                    R.string.keeping_summary,
+                    formatTime(totalKept),
+                    formatTime(durationMs),
+                    formatTime(removed),
+                ),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.fillMaxWidth(),

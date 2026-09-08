@@ -41,9 +41,14 @@ fun AppScaffold(mainViewModel: MainViewModel = viewModel()) {
     var currentTab by rememberSaveable { mutableStateOf(EmbeddyTab.CONVERT) }
 
     // A share/view intent loads the file into MainViewModel — surface the Convert tab
-    // so the user actually sees it, even if they were on another tab.
+    // so the user actually sees it, even if they were on another tab. The signal
+    // replays if it fired before this collector existed (process death + share);
+    // marking it handled prevents a stale replay on re-subscription.
     LaunchedEffect(mainViewModel) {
-        mainViewModel.navigateToConvert.collect { currentTab = EmbeddyTab.CONVERT }
+        mainViewModel.navigateToConvert.collect {
+            currentTab = EmbeddyTab.CONVERT
+            mainViewModel.onNavigateToConvertHandled()
+        }
     }
 
     Scaffold(

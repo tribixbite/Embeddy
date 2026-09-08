@@ -80,7 +80,9 @@ fun SettingsPanel(
                 )
                 Icon(
                     imageVector = if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
-                    contentDescription = if (expanded) "Collapse settings" else "Expand settings",
+                    contentDescription = stringResource(
+                        if (expanded) R.string.collapse_settings else R.string.expand_settings,
+                    ),
                 )
             }
 
@@ -190,7 +192,9 @@ fun SettingsPanel(
                         value = sizeMb,
                         valueRange = 0f..25f,
                         steps = 0,
-                        valueLabel = if (config.targetSizeBytes == 0L) "Off" else String.format("%.1f MB", sizeMb),
+                        valueLabel = if (config.targetSizeBytes == 0L) {
+                            stringResource(R.string.off_label)
+                        } else String.format("%.1f MB", sizeMb),
                         onValueChange = { mb ->
                             // Snap values below 0.2 MB to 0 (disabled)
                             val bytes = if (mb < 0.2f) 0L else (mb * 1_000_000).toLong()
@@ -254,7 +258,9 @@ fun SettingsPanel(
                                 value = config.denoiseStrength.toFloat(),
                                 valueRange = 0f..10f,
                                 steps = 9,
-                                valueLabel = if (config.denoiseStrength == 0) "Off" else "${config.denoiseStrength}",
+                                valueLabel = if (config.denoiseStrength == 0) {
+                                    stringResource(R.string.off_label)
+                                } else "${config.denoiseStrength}",
                                 onValueChange = { v ->
                                     onConfigChanged { copy(denoiseStrength = v.roundToInt()) }
                                 },
@@ -298,15 +304,20 @@ fun SettingsPanel(
 
                             Spacer(Modifier.height(12.dp))
 
-                            // 4. Keyframe interval
+                            // 4. Loop count — 0 lets the engine match the source's loop
+                            // count (or loop forever for video inputs). The engine cannot
+                            // currently force infinite on a finite-loop source (loop=0 is
+                            // overloaded as "auto"); see resolveLoopCount in ConversionEngine.
                             SettingSlider(
-                                label = stringResource(R.string.keyframe_interval),
-                                value = config.keyframeInterval.toFloat(),
-                                valueRange = 0f..120f,
-                                steps = 0,
-                                valueLabel = if (config.keyframeInterval == 0) "Auto" else "${config.keyframeInterval} frames",
+                                label = stringResource(R.string.loop_count),
+                                value = config.loop.toFloat(),
+                                valueRange = 0f..10f,
+                                steps = 9,
+                                valueLabel = if (config.loop == 0) {
+                                    stringResource(R.string.loop_auto)
+                                } else stringResource(R.string.loop_times, config.loop),
                                 onValueChange = { v ->
-                                    onConfigChanged { copy(keyframeInterval = v.roundToInt()) }
+                                    onConfigChanged { copy(loop = v.roundToInt()) }
                                 },
                             )
 
