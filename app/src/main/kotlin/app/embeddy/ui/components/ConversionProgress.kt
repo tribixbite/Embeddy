@@ -52,15 +52,27 @@ fun ConversionProgressCard(
     // exists for) used to leave elapsedMs at 0 forever — a frozen "0% · 0s" bar
     // — and previews hardcode elapsedMs = 0. The displayed elapsed time is the
     // max of the engine's report and time since this card appeared.
-    val startedAtMs = remember { SystemClock.elapsedRealtime() }
-    var wallElapsedMs by remember { mutableLongStateOf(0L) }
-    LaunchedEffect(Unit) {
+    //
+    // Both clocks re-baseline on state.attempt: the adaptive target-size loop
+    // restarts encoding from 0% at each lower quality, but the engine reports
+    // elapsedMs cumulatively since the FIRST attempt. Feeding cumulative
+    // elapsed into the ETA at a fresh attempt's tiny fraction would project an
+    // absurd remaining time, so elapsed (and the ETA built on it) is
+    // per-attempt. The engine baseline is captured on the Attempt transition,
+    // where state.elapsedMs still holds the previous attempt's final value.
+    val startedAtMs = remember(state.attempt) { SystemClock.elapsedRealtime() }
+    val engineElapsedBaseMs = remember(state.attempt) { state.elapsedMs }
+    var wallElapsedMs by remember(state.attempt) { mutableLongStateOf(0L) }
+    LaunchedEffect(state.attempt) {
         while (true) {
             wallElapsedMs = SystemClock.elapsedRealtime() - startedAtMs
             delay(1_000)
         }
     }
-    val elapsedMs = effectiveElapsedMs(state.elapsedMs, wallElapsedMs)
+    val elapsedMs = effectiveElapsedMs(
+        (state.elapsedMs - engineElapsedBaseMs).coerceAtLeast(0L),
+        wallElapsedMs,
+    )
 
     // Use indeterminate bar when progress hasn't moved (duration unknown / stats not arriving)
     val indeterminate = isProgressIndeterminate(state.progress, elapsedMs)
@@ -125,10 +137,18 @@ fun ConversionProgressCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 val elapsed = formatElapsed(elapsedMs)
-                val statusText = if (indeterminate) {
-                    stringResource(R.string.encoding_status, elapsed)
-                } else {
-                    stringResource(R.string.progress_status, (animatedProgress * 100).toInt(), elapsed)
+                // ETA projects from the real (per-attempt) fraction, not the
+                // animated one — the tween lag would skew the estimate.
+                val remainingMs = if (indeterminate) null else estimateRemainingMs(state.progress, elapsedMs)
+                val statusText = when {
+                    indeterminate -> stringResource(R.string.encoding_status, elapsed)
+                    remainingMs != null -> stringResource(
+                        R.string.progress_status_eta,
+                        (animatedProgress * 100).toInt(),
+                        elapsed,
+                        formatRemainingShort(remainingMs),
+                    )
+                    else -> stringResource(R.string.progress_status, (animatedProgress * 100).toInt(), elapsed)
                 }
                 Text(
                     text = statusText,
