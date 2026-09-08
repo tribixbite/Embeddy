@@ -1,0 +1,7 @@
+- crash fixes, cancellation semantics, and UI-layer correctness
+- crop math, input handling, and conversion lifecycle
+- engine correctness — probe OOM, HEIC strip, segments, estimation
+- honest upload limits, working ABI downloads, accurate copy
+- real AVIF lossless mapping and WebP/EXIF parser gaps
+- correct GIF timing, crop math, loop counts, and encoder output
+- close SSRF bypasses and harden the inspect/upload relay
