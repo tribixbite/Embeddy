@@ -266,3 +266,11 @@ MASTER-TODO. Ordered by severity: M1-M10 high, M11-M40 med, M41-M79 low.
 - [x] **M77** low — Dead plumbing: InspectScreen.initialFileUri and ConversionState.Picking have zero producers (InspectScreen.kt:74, ConversionConfig.kt:93)
 - [x] **M78** low — Six unused strings.xml entries (res/values/strings.xml:12-13,19,62,65,69)
 - [x] **M79** low — UploadViewModel lacks SavedStateHandle/persistence its sibling tabs have (UploadViewModel.kt:18-51)
+
+## Phase 8: 2026-09-08 Feature Round
+
+- [x] **8.1** site: AbortSignal through decodeVideo/probeVideo/streamDecodeVideo; ConvertTool aborts orphaned decodes on reset (was TODO from phase 7)
+- [x] **8.2** app: stitching reliability — zero-length segments dropped, segments sorted; edge cases pinned by tests
+- [x] **8.3** app: video output formats MP4 + Original (openh264/aac, libvpx/opus; quality→bitrate mapping; WebP command pinned unchanged)
+- [x] **8.4** app: per-segment volume control (TrimSegment.volume, atrim+volume+concat graph, audio-less handling, 0-200% slider)
+- [ ] **8.5** on-device: verify MP4/Original encodes (A/V sync, volume steps), no-audio inputs, container mapping, share/save mime — see feat-app-stitch report checklist
