@@ -20,20 +20,48 @@ export function availableFrameCount(durationSeconds: number, targetFps: number):
 }
 
 /**
+ * The error thrown/rejected when an AbortSignal cancels a decode: the signal's
+ * own reason when one was set (matching `AbortSignal.throwIfAborted` semantics),
+ * otherwise a DOMException named "AbortError".
+ */
+function abortError(signal: AbortSignal): unknown {
+  return signal.reason ?? new DOMException("The operation was aborted", "AbortError");
+}
+
+/**
+ * Throw the signal's abort reason if it has already been aborted; no-op
+ * otherwise (or when no signal was supplied). Exported for testing.
+ */
+export function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw abortError(signal);
+}
+
+/**
+ * True when a caught value is an abort-triggered rejection (a DOMException or
+ * Error named "AbortError"). Callers use this to swallow deliberate
+ * cancellations instead of surfacing them as failures. Exported for testing.
+ */
+export function isAbortError(e: unknown): boolean {
+  return typeof e === "object" && e !== null && (e as { name?: unknown }).name === "AbortError";
+}
+
+/**
  * Decode a video file into RGBA frames by stepping through with seek.
  * @param file - Video file (MP4, WebM, etc.)
  * @param targetFps - Frames per second to extract (default 10)
  * @param maxFrames - Safety cap to prevent memory issues (default 1500, auto-reduced for high-res)
+ * @param onProgress - Progress callback
+ * @param signal - Optional AbortSignal; aborting rejects promptly (even mid-seek)
+ *   with an AbortError and releases the video element + object URL
  */
-// TODO: accept an AbortSignal so callers can stop an in-flight decode; the UI's
-// generation guard makes orphaned decodes state-inert, but they still burn CPU
-// until completion.
 export async function decodeVideo(
   file: File,
   targetFps = 10,
   maxFrames = 1500,
   onProgress?: (p: ConvertProgress) => void,
+  signal?: AbortSignal,
 ): Promise<{ frames: DecodedFrame[]; info: SourceInfo }> {
+  throwIfAborted(signal);
   const url = URL.createObjectURL(file);
   const video = document.createElement("video");
 
@@ -44,10 +72,7 @@ export async function decodeVideo(
     video.src = url;
 
     // Wait for metadata (duration, dimensions)
-    await new Promise<void>((resolve, reject) => {
-      video.onloadedmetadata = () => resolve();
-      video.onerror = () => reject(new Error("Failed to load video"));
-    });
+    await waitForMetadata(video, signal);
 
     const { videoWidth: width, videoHeight: height, duration } = video;
     if (!width || !height) throw new Error("Could not determine video dimensions");
@@ -75,11 +100,14 @@ export async function decodeVideo(
     if (!ctx) throw new Error("Could not create canvas context");
 
     // Frame 0 seeks to t=0, which never fires 'seeked' — make sure pixels exist first
-    await waitForFrameData(video);
+    await waitForFrameData(video, signal);
 
     const frames: DecodedFrame[] = [];
 
     for (let i = 0; i < totalFrames; i++) {
+      // Abort between frames too — the synchronous draw/getImageData stretch
+      // below never observes the signal on its own
+      throwIfAborted(signal);
       const seekTime = i * frameInterval;
 
       onProgress?.({
@@ -90,7 +118,7 @@ export async function decodeVideo(
       });
 
       // Seek to target time and wait for frame
-      await seekTo(video, seekTime);
+      await seekTo(video, seekTime, signal);
 
       // Draw video frame to canvas and extract RGBA
       ctx.drawImage(video, 0, 0, width, height);
@@ -123,14 +151,43 @@ export async function decodeVideo(
 }
 
 /**
+ * Wait for the video's metadata (duration, dimensions) to load.
+ * Racing against the signal means an abort rejects immediately instead of
+ * waiting on a load that may never finish.
+ */
+function waitForMetadata(video: HTMLVideoElement, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(abortError(signal));
+      return;
+    }
+    const onAbort = () => reject(abortError(signal!));
+    const settle = () => signal?.removeEventListener("abort", onAbort);
+    video.onloadedmetadata = () => {
+      settle();
+      resolve();
+    };
+    video.onerror = () => {
+      settle();
+      reject(new Error("Failed to load video"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/**
  * Wait until the video has decoded pixel data available for the current position.
  *
  * `loadedmetadata` only guarantees readyState >= HAVE_METADATA (1). Calling
  * drawImage() at that point is a silent no-op, which produced a blank first frame
  * because seekTo(0) short-circuits (currentTime is already 0, so no 'seeked' fires).
  */
-function waitForFrameData(video: HTMLVideoElement): Promise<void> {
+function waitForFrameData(video: HTMLVideoElement, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(abortError(signal));
+      return;
+    }
     if (video.readyState >= 2 /* HAVE_CURRENT_DATA */) {
       resolve();
       return;
@@ -138,6 +195,7 @@ function waitForFrameData(video: HTMLVideoElement): Promise<void> {
     const cleanup = () => {
       video.removeEventListener("loadeddata", onLoaded);
       video.removeEventListener("error", onError);
+      signal?.removeEventListener("abort", onAbort);
     };
     const onLoaded = () => {
       cleanup();
@@ -147,8 +205,13 @@ function waitForFrameData(video: HTMLVideoElement): Promise<void> {
       cleanup();
       reject(new Error("Failed to decode video data"));
     };
+    const onAbort = () => {
+      cleanup();
+      reject(abortError(signal!));
+    };
     video.addEventListener("loadeddata", onLoaded);
     video.addEventListener("error", onError);
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
 
@@ -156,27 +219,40 @@ function waitForFrameData(video: HTMLVideoElement): Promise<void> {
  * Seek the video to a specific time and wait for the frame to be available.
  * Short-circuits if the video is already at the target time (HTML5 spec
  * won't fire 'seeked' event if currentTime matches the requested time).
+ * An abort rejects immediately — it does not wait for the next 'seeked' event.
  */
-function seekTo(video: HTMLVideoElement, time: number): Promise<void> {
+function seekTo(video: HTMLVideoElement, time: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(abortError(signal));
+      return;
+    }
     // If already at target time, browser won't fire 'seeked' — resolve immediately
     if (Math.abs(video.currentTime - time) < 0.001) {
       resolve();
       return;
     }
 
-    const onSeeked = () => {
+    const cleanup = () => {
       video.removeEventListener("seeked", onSeeked);
       video.removeEventListener("error", onError);
+      signal?.removeEventListener("abort", onAbort);
+    };
+    const onSeeked = () => {
+      cleanup();
       resolve();
     };
     const onError = () => {
-      video.removeEventListener("seeked", onSeeked);
-      video.removeEventListener("error", onError);
+      cleanup();
       reject(new Error(`Seek to ${time}s failed`));
+    };
+    const onAbort = () => {
+      cleanup();
+      reject(abortError(signal!));
     };
     video.addEventListener("seeked", onSeeked);
     video.addEventListener("error", onError);
+    signal?.addEventListener("abort", onAbort, { once: true });
     video.currentTime = time;
   });
 }
@@ -202,25 +278,36 @@ function createFallbackCanvas(w: number, h: number): HTMLCanvasElement {
 export async function probeVideo(
   file: File,
   targetFps = 10,
+  signal?: AbortSignal,
 ): Promise<{ info: SourceInfo; videoUrl: string }> {
+  throwIfAborted(signal);
   const url = URL.createObjectURL(file);
 
   const video = document.createElement("video");
-  video.muted = true;
-  video.playsInline = true;
-  video.preload = "metadata";
-  video.src = url;
+  let frameCount: number;
+  let width: number;
+  let height: number;
+  let duration: number;
+  try {
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "metadata";
+    video.src = url;
 
-  await new Promise<void>((resolve, reject) => {
-    video.onloadedmetadata = () => resolve();
-    video.onerror = () => reject(new Error("Failed to load video"));
-  });
+    await waitForMetadata(video, signal);
 
-  const { videoWidth: width, videoHeight: height, duration } = video;
-  if (!width || !height) throw new Error("Could not determine video dimensions");
-  if (!duration || !isFinite(duration)) throw new Error("Could not determine video duration");
+    ({ videoWidth: width, videoHeight: height, duration } = video);
+    if (!width || !height) throw new Error("Could not determine video dimensions");
+    if (!duration || !isFinite(duration)) throw new Error("Could not determine video duration");
 
-  const frameCount = availableFrameCount(duration, targetFps);
+    frameCount = availableFrameCount(duration, targetFps);
+  } catch (e) {
+    // On abort (or any probe failure) nothing is handed to the caller, so the
+    // object URL and decoder must be released here
+    detachVideo(video);
+    URL.revokeObjectURL(url);
+    throw e;
+  }
 
   // Release the decoder now that metadata is read. The object URL stays valid —
   // the caller reuses it for the crop preview and owns revoking it.
@@ -258,18 +345,23 @@ export interface StreamDecodeOptions {
  * @param file - Video file
  * @param options - Decode/process options
  * @param onProgress - Progress callback
+ * @param signal - Optional AbortSignal, honored between yielded frames and
+ *   inside seek/metadata waits; aborting throws an AbortError out of the
+ *   generator, whose finally block releases the video element + object URL
  * @yields Processed RGBA frames with dimensions and delay
  */
 export async function* streamDecodeVideo(
   file: File,
   options: StreamDecodeOptions,
   onProgress?: (p: ConvertProgress) => void,
+  signal?: AbortSignal,
 ): AsyncGenerator<{
   rgba: Uint8Array;
   width: number;
   height: number;
   delay: number;
 }> {
+  throwIfAborted(signal);
   const url = URL.createObjectURL(file);
   const video = document.createElement("video");
 
@@ -279,10 +371,7 @@ export async function* streamDecodeVideo(
     video.preload = "auto";
     video.src = url;
 
-    await new Promise<void>((resolve, reject) => {
-      video.onloadedmetadata = () => resolve();
-      video.onerror = () => reject(new Error("Failed to load video"));
-    });
+    await waitForMetadata(video, signal);
 
     const { videoWidth: srcW, videoHeight: srcH, duration } = video;
     if (!srcW || !srcH) throw new Error("Could not determine video dimensions");
@@ -319,9 +408,12 @@ export async function* streamDecodeVideo(
     }
 
     // Frame 0 seeks to t=0, which never fires 'seeked' — make sure pixels exist first
-    await waitForFrameData(video);
+    await waitForFrameData(video, signal);
 
     for (let i = 0; i < totalFrames; i++) {
+      // Checked on every resume from yield — an abort while the consumer was
+      // encoding stops the decode before the next seek
+      throwIfAborted(signal);
       const seekTime = i * frameInterval;
 
       onProgress?.({
@@ -331,7 +423,7 @@ export async function* streamDecodeVideo(
         total: totalFrames,
       });
 
-      await seekTo(video, seekTime);
+      await seekTo(video, seekTime, signal);
 
       // Capture raw RGBA from video frame
       ctx.drawImage(video, 0, 0, srcW, srcH);

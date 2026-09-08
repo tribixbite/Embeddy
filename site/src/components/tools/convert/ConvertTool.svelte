@@ -13,7 +13,12 @@
   import ConvertResult from "./ConvertResult.svelte";
   import ConvertProgressBar from "./ConvertProgress.svelte";
   import { decodeGif } from "../../../lib/convert/gif-decoder";
-  import { decodeVideo, probeVideo, streamDecodeVideo } from "../../../lib/convert/video-decoder";
+  import {
+    decodeVideo,
+    isAbortError,
+    probeVideo,
+    streamDecodeVideo,
+  } from "../../../lib/convert/video-decoder";
   import { decodeWebP } from "../../../lib/convert/webp-decoder";
   import {
     YIELD_EVERY,
@@ -74,6 +79,22 @@
    * clobbering a newly loaded file's state or dead-ending the UI (M18).
    */
   const guard = createGenerationGuard();
+
+  /**
+   * Companion to the generation guard: the guard makes orphaned async work
+   * state-inert, this actually STOPS it. Video decodes hold a signal from the
+   * controller armed when their work started; reset()/new file/new convert
+   * abort the previous controller so a superseded decode quits burning CPU
+   * instead of seeking through frames nobody will use.
+   */
+  let abortController: AbortController | null = null;
+
+  /** Abort any in-flight decode and arm a fresh signal for the work starting now */
+  function nextAbortSignal(): AbortSignal {
+    abortController?.abort();
+    abortController = new AbortController();
+    return abortController.signal;
+  }
 
   /** Per-file defaults — reset() restores these so file B never inherits file A's crop/fps/etc (M6) */
   function defaultOptions(): ConvertOptions {
@@ -167,8 +188,10 @@
     const file = files[0];
     if (!file) return;
 
-    // A new file supersedes any in-flight decode/convert work
+    // A new file supersedes any in-flight decode/convert work: invalidate the
+    // generation (state-inert) AND abort the old signal (stop the CPU burn)
     const gen = guard.invalidate();
+    const signal = nextAbortSignal();
 
     sourceFile = file;
     state = "decoding";
@@ -204,7 +227,7 @@
         }
       } else if (file.type.startsWith("video/")) {
         // Probe first to decide batch vs streaming
-        const { info, videoUrl } = await probeVideo(file, options.targetFps);
+        const { info, videoUrl } = await probeVideo(file, options.targetFps, signal);
         if (!guard.isCurrent(gen)) {
           URL.revokeObjectURL(videoUrl);
           return;
@@ -224,7 +247,7 @@
         } else {
           // Batch mode: decode all frames into memory
           URL.revokeObjectURL(videoUrl); // probeVideo's URL not needed
-          const decoded = await decodeVideo(file, options.targetFps, 1500, (p) => { if (guard.isCurrent(gen)) progress = p; });
+          const decoded = await decodeVideo(file, options.targetFps, 1500, (p) => { if (guard.isCurrent(gen)) progress = p; }, signal);
           if (!guard.isCurrent(gen)) return;
           frames = decoded.frames;
           sourceInfo = decoded.info;
@@ -242,7 +265,7 @@
     } catch (e) {
       // A superseded decode's failure (including deliberate aborts) must not
       // paint the error screen over whatever the user is doing now
-      if (!guard.isCurrent(gen)) return;
+      if (!guard.isCurrent(gen) || isAbortError(e)) return;
       error = e instanceof Error ? e.message : "Failed to decode file";
       state = "error";
     }
@@ -361,7 +384,7 @@
    * Streaming encode: lazily decode video frames and push to Worker encoder.
    * Memory usage: O(1 frame + compressed output) instead of O(N frames).
    */
-  async function streamingConvert(opts: ConvertOptions): Promise<Blob> {
+  async function streamingConvert(opts: ConvertOptions, signal: AbortSignal): Promise<Blob> {
     if (!sourceFile || !sourceInfo) throw new Error("No source file");
 
     const encoder = new StreamingWebPEncoder();
@@ -397,7 +420,7 @@
           frame: p.frame,
           total: p.total,
         };
-      })) {
+      }, signal)) {
         await encoder.pushFrame(
           frame.rgba,
           frame.width,
@@ -426,8 +449,11 @@
     error = "";
 
     // Capture the live generation — reset()/"Change file" invalidates it,
-    // after which this conversion must neither touch state nor surface errors
+    // after which this conversion must neither touch state nor surface errors.
+    // The previous controller has nothing pending by now (converts only start
+    // from settings/done), so arming a fresh signal aborts nothing live.
     const gen = guard.token();
+    const signal = nextAbortSignal();
 
     try {
       let blob: Blob;
@@ -446,7 +472,7 @@
           streamingMode = true;
           frames = [];
         } else {
-          const decoded = await decodeVideo(sourceFile, options.targetFps, 1500, (p) => { if (guard.isCurrent(gen)) progress = p; });
+          const decoded = await decodeVideo(sourceFile, options.targetFps, 1500, (p) => { if (guard.isCurrent(gen)) progress = p; }, signal);
           if (!guard.isCurrent(gen)) return;
           frames = decoded.frames;
           sourceInfo = decoded.info;
@@ -455,13 +481,13 @@
 
       if (streamingMode && options.outputFormat === "webp") {
         // Large video: lazy decode + encode one frame at a time
-        blob = await streamingConvert(options);
+        blob = await streamingConvert(options, signal);
       } else if (streamingMode && options.outputFormat === "gif") {
         // GIF from large video: decode capped frames then GIF-encode.
         // The frames come back already sampled at options.targetFps, so pass that
         // as the source FPS — sourceInfo.fps is the value probed before the user
         // touched the slider and would make encodeAnimatedGif subsample a second time.
-        const decoded = await decodeVideo(sourceFile!, options.targetFps, 300, (p) => { if (guard.isCurrent(gen)) progress = p; });
+        const decoded = await decodeVideo(sourceFile!, options.targetFps, 300, (p) => { if (guard.isCurrent(gen)) progress = p; }, signal);
         if (!guard.isCurrent(gen)) return; // don't clobber a newly loaded file (M18)
         frames = decoded.frames;
         sourceInfo = decoded.info;
@@ -507,10 +533,11 @@
       resultUrl = URL.createObjectURL(blob);
       state = "done";
     } catch (e) {
-      // reset() aborts the encoder, whose pending promise then rejects with
-      // "Encoder aborted" on a later microtask — swallowing stale-generation
+      // reset() aborts the encoder (whose pending promise then rejects with
+      // "Encoder aborted" on a later microtask) and the decode signal (whose
+      // rejection is an AbortError) — swallowing stale-generation and abort
       // failures keeps "Change file" from landing on the error screen (M17)
-      if (!guard.isCurrent(gen)) return;
+      if (!guard.isCurrent(gen) || isAbortError(e)) return;
       error = e instanceof Error ? e.message : "Encoding failed";
       state = "error";
     }
@@ -520,6 +547,10 @@
     // Orphan all in-flight async work first — their late rejections and
     // results must not touch state after this point (M17/M18)
     guard.invalidate();
+    // Stop any in-flight video decode — orphaned decodes are state-inert but
+    // would otherwise keep seeking/extracting frames until completion
+    abortController?.abort();
+    abortController = null;
     // Abort any active streaming encode
     if (activeEncoder) {
       activeEncoder.abort();
