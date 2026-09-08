@@ -17,8 +17,7 @@
     "piexifjs": "^1.0.6",
     "svelte": "^5.0.0",
     "tailwindcss": "^4.0.0",
-    "typescript": "^5.7.0",
-    "wasm-webp": "^0.1.0"
+    "typescript": "^5.7.0"
   },
   "scripts": {
     "dev": "astro dev",

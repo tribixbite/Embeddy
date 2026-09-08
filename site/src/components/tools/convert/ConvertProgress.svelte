@@ -1,13 +1,17 @@
 <script lang="ts">
   /**
-   * Progress indicator showing phase, frame count, and percentage bar.
-   * Uses an indeterminate shimmer for the encoding phase since
-   * wasm-webp encodeAnimation() is a single blocking call with no
-   * per-frame callbacks.
+   * Progress indicator showing phase, frame count, percentage bar, and a
+   * time-remaining estimate extrapolated from the caller's per-phase elapsed
+   * clock. Every pipeline phase (decode, crop, resize, encode) now reports
+   * real per-frame percent — the batch WebP path streams frames through the
+   * Worker encoder — so the indeterminate shimmer remains only for the brief
+   * callback-less window before the first frame is pushed (Worker spawn +
+   * WASM module init).
    */
   import type { ConvertProgress } from "../../../lib/convert/types";
+  import { estimateRemainingMs, formatEta } from "../../../lib/convert/eta";
 
-  let { progress }: { progress: ConvertProgress } = $props();
+  let { progress, elapsedMs = 0 }: { progress: ConvertProgress; elapsedMs?: number } = $props();
 
   const phaseLabels: Record<ConvertProgress["phase"], string> = {
     decoding: "Decoding frames",
@@ -16,11 +20,14 @@
     encoding: "Encoding",
   };
 
-  /** Show indeterminate shimmer only when encoding with no real frame progress
-   *  (batch mode). Streaming mode reports actual percent via the decode loop. */
+  /** Shimmer only while encoding has produced no frame progress yet
+   *  (Worker/WASM startup) — all steady-state phases report real percent. */
   let indeterminate = $derived(
     progress.phase === "encoding" && progress.percent === 0 && progress.frame === 0,
   );
+
+  /** Remaining-time estimate; null until enough progress/time has accumulated */
+  let etaMs = $derived(estimateRemainingMs(progress.percent / 100, elapsedMs));
 </script>
 
 <div class="rounded-2xl border border-white/8 bg-white/[0.03] p-6">
@@ -47,7 +54,9 @@
 
   {#if !indeterminate}
     <p class="mt-2 text-center text-xs text-white/30">
-      {progress.percent}%
+      {progress.percent}%{#if etaMs !== null}
+        <span class="ml-2 text-white/40">{formatEta(etaMs)}</span>
+      {/if}
     </p>
   {:else}
     <p class="mt-2 text-center text-xs text-white/30">

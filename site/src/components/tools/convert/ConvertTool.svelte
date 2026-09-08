@@ -30,6 +30,10 @@
   } from "../../../lib/convert/encoder";
   import { encodeAnimatedGif } from "../../../lib/convert/gif-encoder";
   import { StreamingWebPEncoder } from "../../../lib/convert/streaming-encoder";
+  import {
+    getWebPFrameOptions,
+    getWebPInitOptions,
+  } from "../../../lib/convert/webp-frame-options";
   import { createGenerationGuard } from "./conversion-guard";
   import type {
     ConvertOptions,
@@ -135,32 +139,32 @@
 
   let options: ConvertOptions = $state(defaultOptions());
 
-  /** Map camelCase ConvertOptions to snake_case FrameOptions for the WASM encoder */
-  function getWebPFrameOptions(opts: ConvertOptions, duration: number) {
-    return {
-      duration,
-      lossless: opts.lossless,
-      quality: opts.quality,
-      method: opts.method,
-      exact: opts.exact,
-      sns_strength: opts.snsStrength,
-      filter_strength: opts.filterStrength,
-      filter_sharpness: opts.filterSharpness,
-      filter_type: opts.filterType,
-      autofilter: opts.autofilter,
-      alpha_quality: opts.alphaQuality,
-      alpha_compression: opts.alphaCompression,
-      alpha_filtering: opts.alphaFiltering,
-      pass: opts.passes,
-      preprocessing: opts.preprocessing,
-      near_lossless: opts.nearLossless,
-      sharp_yuv: opts.sharpYuv,
-      target_size: opts.targetSize,
-      segments: opts.segments,
-      partition_limit: opts.partitionLimit,
-      low_memory: opts.lowMemory,
-      emulate_jpeg_size: opts.emulateJpegSize,
-    };
+  /**
+   * Wall-clock elapsed within the CURRENT progress phase, for the ETA display.
+   * reportProgress() restarts the clock whenever the phase changes, and
+   * resetProgressClock() forces a restart at conversion boundaries (new
+   * decode, new convert, each attempt of the adaptive target-size loop) so
+   * an ETA never extrapolates from a previous phase's or attempt's elapsed.
+   */
+  let progressElapsedMs = $state(0);
+  let phaseStartedAt = 0;
+  let lastPhase: ConvertProgress["phase"] | null = null;
+
+  /** Force the next reportProgress() to restart the phase clock */
+  function resetProgressClock() {
+    lastPhase = null;
+    progressElapsedMs = 0;
+  }
+
+  /** Update progress state and keep the per-phase elapsed clock in sync */
+  function reportProgress(p: ConvertProgress) {
+    const now = performance.now();
+    if (p.phase !== lastPhase) {
+      lastPhase = p.phase;
+      phaseStartedAt = now;
+    }
+    progressElapsedMs = now - phaseStartedAt;
+    progress = p;
   }
 
   /** Accepted file types: GIF, WebP, and common video formats */
@@ -195,6 +199,7 @@
 
     sourceFile = file;
     state = "decoding";
+    resetProgressClock();
     error = "";
     streamingMode = false;
     streamingFrameCount = 0;
@@ -206,7 +211,7 @@
     try {
       if (isGif(file)) {
         const buffer = await file.arrayBuffer();
-        const decoded = await decodeGif(buffer, (p) => { if (guard.isCurrent(gen)) progress = p; });
+        const decoded = await decodeGif(buffer, (p) => { if (guard.isCurrent(gen)) reportProgress(p); });
         if (!guard.isCurrent(gen)) return;
         frames = decoded.frames;
         sourceInfo = decoded.info;
@@ -215,7 +220,7 @@
           options.targetFps = Math.round(decoded.info.fps);
         }
       } else if (isWebP(file)) {
-        const decoded = await decodeWebP(file, 1500, (p) => { if (guard.isCurrent(gen)) progress = p; });
+        const decoded = await decodeWebP(file, 1500, (p) => { if (guard.isCurrent(gen)) reportProgress(p); });
         if (!guard.isCurrent(gen)) return;
         frames = decoded.frames;
         sourceInfo = decoded.info;
@@ -247,7 +252,7 @@
         } else {
           // Batch mode: decode all frames into memory
           URL.revokeObjectURL(videoUrl); // probeVideo's URL not needed
-          const decoded = await decodeVideo(file, options.targetFps, 1500, (p) => { if (guard.isCurrent(gen)) progress = p; }, signal);
+          const decoded = await decodeVideo(file, options.targetFps, 1500, (p) => { if (guard.isCurrent(gen)) reportProgress(p); }, signal);
           if (!guard.isCurrent(gen)) return;
           frames = decoded.frames;
           sourceInfo = decoded.info;
@@ -306,12 +311,12 @@
         for (let i = 0; i < workFrames.length; i++) {
           if (i % YIELD_EVERY === 0) await yieldToEventLoop();
           const frame = workFrames[i]!;
-          progress = {
+          reportProgress({
             phase: "cropping",
             percent: Math.round((i / workFrames.length) * 100),
             frame: i + 1,
             total: workFrames.length,
-          };
+          });
           const cropped = cropFrame(frame.rgba, width, height, cropRect);
           croppedFrames.push({ rgba: cropped.data, delay: frame.delay });
         }
@@ -328,12 +333,12 @@
         for (let i = 0; i < workFrames.length; i++) {
           if (i % YIELD_EVERY === 0) await yieldToEventLoop();
           const frame = workFrames[i]!;
-          progress = {
+          reportProgress({
             phase: "resizing",
             percent: Math.round((i / workFrames.length) * 100),
             frame: i + 1,
             total: workFrames.length,
-          };
+          });
           const resized = resizeFrame(frame.rgba, outW, outH, opts.maxDimension);
           resizedFrames.push({ rgba: resized.data, delay: frame.delay });
         }
@@ -343,24 +348,18 @@
       }
 
       const totalFrames = workFrames.length;
-      await encoder.init({
-        minimize: opts.minimizeSize,
-        loop: opts.loops,
-        mixed: opts.mixed,
-        kmin: opts.kmin,
-        kmax: opts.kmax,
-      });
+      await encoder.init(getWebPInitOptions(opts));
       encoder.setTotalFrames(totalFrames);
 
       // Push each frame through the Worker encoder
       for (let i = 0; i < workFrames.length; i++) {
         const frame = workFrames[i];
-        progress = {
+        reportProgress({
           phase: "encoding",
           percent: Math.round((i / totalFrames) * 95),
           frame: i + 1,
           total: totalFrames,
-        };
+        });
         await encoder.pushFrame(
           frame.rgba,
           outW,
@@ -369,7 +368,7 @@
         );
       }
 
-      progress = { phase: "encoding", percent: 97, frame: totalFrames, total: totalFrames };
+      reportProgress({ phase: "encoding", percent: 97, frame: totalFrames, total: totalFrames });
       const blob = await encoder.finalize();
       activeEncoder = null;
       return blob;
@@ -396,13 +395,7 @@
         10000,
       );
 
-      await encoder.init({
-        minimize: opts.minimizeSize,
-        loop: opts.loops,
-        mixed: opts.mixed,
-        kmin: opts.kmin,
-        kmax: opts.kmax,
-      });
+      await encoder.init(getWebPInitOptions(opts));
       encoder.setTotalFrames(totalFrames);
 
       const delayMs = Math.round(1000 / opts.targetFps);
@@ -414,12 +407,12 @@
         crop: opts.crop,
         maxDimension: opts.maxDimension,
       }, (p) => {
-        progress = {
+        reportProgress({
           phase: "decoding",
           percent: Math.round(p.percent * 0.95),
           frame: p.frame,
           total: p.total,
-        };
+        });
       }, signal)) {
         await encoder.pushFrame(
           frame.rgba,
@@ -432,7 +425,7 @@
 
       streamingFrameCount = pushed;
 
-      progress = { phase: "encoding", percent: 97, frame: pushed, total: totalFrames };
+      reportProgress({ phase: "encoding", percent: 97, frame: pushed, total: totalFrames });
       const blob = await encoder.finalize();
       activeEncoder = null;
       return blob;
@@ -446,6 +439,7 @@
   async function handleConvert() {
     if (!sourceInfo || (!frames.length && !streamingMode)) return;
     state = "converting";
+    resetProgressClock();
     error = "";
 
     // Capture the live generation — reset()/"Change file" invalidates it,
@@ -472,7 +466,7 @@
           streamingMode = true;
           frames = [];
         } else {
-          const decoded = await decodeVideo(sourceFile, options.targetFps, 1500, (p) => { if (guard.isCurrent(gen)) progress = p; }, signal);
+          const decoded = await decodeVideo(sourceFile, options.targetFps, 1500, (p) => { if (guard.isCurrent(gen)) reportProgress(p); }, signal);
           if (!guard.isCurrent(gen)) return;
           frames = decoded.frames;
           sourceInfo = decoded.info;
@@ -487,19 +481,19 @@
         // The frames come back already sampled at options.targetFps, so pass that
         // as the source FPS — sourceInfo.fps is the value probed before the user
         // touched the slider and would make encodeAnimatedGif subsample a second time.
-        const decoded = await decodeVideo(sourceFile!, options.targetFps, 300, (p) => { if (guard.isCurrent(gen)) progress = p; }, signal);
+        const decoded = await decodeVideo(sourceFile!, options.targetFps, 300, (p) => { if (guard.isCurrent(gen)) reportProgress(p); }, signal);
         if (!guard.isCurrent(gen)) return; // don't clobber a newly loaded file (M18)
         frames = decoded.frames;
         sourceInfo = decoded.info;
         blob = await encodeAnimatedGif(
           frames, decoded.info.width, decoded.info.height,
-          options, decoded.info.fps, (p) => { if (guard.isCurrent(gen)) progress = p; },
+          options, decoded.info.fps, (p) => { if (guard.isCurrent(gen)) reportProgress(p); },
         );
       } else if (options.outputFormat === "gif") {
         // GIF output from pre-decoded frames
         blob = await encodeAnimatedGif(
           frames, sourceInfo.width, sourceInfo.height,
-          options, sourceInfo.fps, (p) => { if (guard.isCurrent(gen)) progress = p; },
+          options, sourceInfo.fps, (p) => { if (guard.isCurrent(gen)) reportProgress(p); },
         );
       } else {
         // WebP output from pre-decoded frames — all settings applied
@@ -513,6 +507,9 @@
           let quality = options.quality;
           let attempt: Blob;
           do {
+            // Each attempt restarts the phase clock — an ETA extrapolated
+            // from a previous attempt's elapsed time would be nonsense
+            resetProgressClock();
             attempt = await encode({ ...options, quality });
             if (attempt.size <= options.targetSizeBytes) break;
             quality -= ADAPTIVE_QUALITY_STEP;
@@ -591,7 +588,7 @@
     </p>
 
   {:else if state === "decoding"}
-    <ConvertProgressBar {progress} />
+    <ConvertProgressBar {progress} elapsedMs={progressElapsedMs} />
 
   {:else if (state === "settings" || state === "converting") && sourceInfo}
     <!-- Source file info -->
@@ -624,7 +621,7 @@
     />
 
     {#if state === "converting"}
-      <ConvertProgressBar {progress} />
+      <ConvertProgressBar {progress} elapsedMs={progressElapsedMs} />
     {/if}
 
   {:else if state === "done" && resultBlob && sourceFile}
