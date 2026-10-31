@@ -339,11 +339,15 @@ private fun SocialPreviewCard(result: MetadataResult) {
 
             // OG image preview
             result.imageUrl?.let { imageUrl ->
-                AsyncImage(
+                // Collapse the slot if the image can't be loaded (404, 429, not an
+                // image) instead of leaving an empty block in the card.
+                var imageFailed by remember(imageUrl) { mutableStateOf(false) }
+                if (!imageFailed) AsyncImage(
                     model = ImageRequest.Builder(LocalContext.current)
                         .data(imageUrl)
                         .crossfade(true)
                         .build(),
+                    onError = { imageFailed = true },
                     contentDescription = stringResource(R.string.social_preview_desc),
                     modifier = Modifier
                         .fillMaxWidth()
