@@ -54,7 +54,9 @@ jobs:
           echo "minor=${VERSION_MINOR}" >> "$GITHUB_OUTPUT"
           echo "patch=${BUILD_NUM}" >> "$GITHUB_OUTPUT"
           echo "version_name=${VERSION_MAJOR}.${VERSION_MINOR}.${BUILD_NUM}" >> "$GITHUB_OUTPUT"
-          echo "version_code=$((VERSION_MAJOR * 10000 + VERSION_MINOR * 100 + BUILD_NUM))" >> "$GITHUB_OUTPUT"
+          # Must match baseVersionCode in app/build.gradle.kts exactly — the
+          # changelog file is named after it and F-Droid looks it up by code.
+          echo "version_code=$((VERSION_MAJOR * 1000000 + VERSION_MINOR * 10000 + BUILD_NUM))" >> "$GITHUB_OUTPUT"
 
       # Run the unit tests before producing artifacts — a failing suite should
       # block the release rather than be discovered after the tag exists.
@@ -150,6 +152,24 @@ jobs:
           echo "::endgroup::"
 
           ls -1 final_apks/
+
+          # Android App Bundle for Google Play. Play generates per-device APKs
+          # from it, so ABI splits do not apply; it carries the base versionCode.
+          # Kept out of final_apks/: an .aab is not installable and does not
+          # belong on the public releases page.
+          echo "::group::Building Play bundle"
+          ./gradlew clean bundleRelease --no-daemon --no-build-cache --stacktrace
+          mkdir -p play_bundle
+          cp app/build/outputs/bundle/release/*.aab \
+            "play_bundle/Embeddy-v${{ steps.version.outputs.version_name }}.aab"
+          echo "::endgroup::"
+
+      - name: Upload Play bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: embeddy-v${{ steps.version.outputs.version_name }}-play-bundle
+          path: play_bundle/*.aab
+          retention-days: 90
 
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4

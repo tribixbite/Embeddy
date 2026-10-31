@@ -32,7 +32,7 @@ the published version:
 
 ```sh
 git checkout v0.1.40
-./gradlew assembleRelease -PsingleApk    # -> versionName 0.1.40, versionCode 140
+./gradlew assembleRelease -PsingleApk    # -> versionName 0.1.40, versionCode 140 (pre-0.1.53 scheme)
 ```
 
 ## Reproducible builds — how this app is published
@@ -61,11 +61,16 @@ which is exactly what the recipe does. If you change one side, change the other.
 
 ### versionCodes
 
-Base is `MAJOR*10000 + MINOR*100 + PATCH`; each split APK gets `base*10 + N`
+Base is `MAJOR*1000000 + MINOR*10000 + PATCH`; each split APK gets `base*10 + N`
 where N is 1 (armeabi-v7a), 2 (arm64-v8a), 3 (x86_64). `VercodeOperation` in the
 recipe reproduces that arithmetic, so the two must stay in sync. The build fails
-if MINOR or PATCH reaches 100, because that would collide with the next place
-value and could emit a versionCode below one already published.
+if MINOR reaches 100 or PATCH reaches 10000, because that would collide with the
+next place value and could emit a versionCode below one already published.
+
+Releases up to 0.1.52 used `MAJOR*10000 + MINOR*100 + PATCH`. PATCH is the CI
+run number, so that scheme would have failed every build from run 100 on; the
+widened scheme was chosen because every code it emits (0.1.53 = 10053, per-ABI
+100531..100533) sorts above every code published under the old one.
 
 ### Update detection
 

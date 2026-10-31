@@ -76,10 +76,12 @@ MaintainerNotes: |
     Versioning. The release workflow writes the resolved version into
     version.properties and tags that commit, so a build from the tag reproduces
     the published versionName/versionCode with no environment variables set.
-    Base versionCode is MAJOR*10000 + MINOR*100 + PATCH; split APKs use
-    base*10 + {armeabi-v7a:1, arm64-v8a:2, x86_64:3}, which is what
-    VercodeOperation reproduces. The build fails if MINOR or PATCH reaches 100,
-    since that would collide with the next place value.
+    Base versionCode is MAJOR*1000000 + MINOR*10000 + PATCH (widened after
+    0.1.52 from MAJOR*10000 + MINOR*100 + PATCH, which capped the CI run
+    number at 99; every new code still sorts above the old ones). Split APKs
+    use base*10 + {armeabi-v7a:1, arm64-v8a:2, x86_64:3}, which is what
+    VercodeOperation reproduces. The build fails if MINOR reaches 100 or
+    PATCH reaches 10000, since that would collide with the next place value.
 
     Native code. FFmpeg is a prebuilt AAR from Maven Central
     (com.moizhassan.ffmpeg:ffmpeg-kit-16kb), a community rebuild of
