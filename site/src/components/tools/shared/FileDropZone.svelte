@@ -18,9 +18,15 @@
 
   let dragging = $state(false);
   let inputRef: HTMLInputElement | undefined = $state();
+  /**
+   * dragenter/dragleave fire for every child element the pointer crosses,
+   * so a boolean flickered off over the icon/label; count depth instead (A4).
+   */
+  let dragDepth = 0;
 
   function handleDrop(e: DragEvent) {
     e.preventDefault();
+    dragDepth = 0;
     dragging = false;
     const files = e.dataTransfer?.files;
     if (files?.length) {
@@ -28,13 +34,28 @@
     }
   }
 
-  function handleDragOver(e: DragEvent) {
+  function handleDragEnter(e: DragEvent) {
     e.preventDefault();
+    dragDepth++;
     dragging = true;
   }
 
+  function handleDragOver(e: DragEvent) {
+    // Required for the element to be a drop target at all
+    e.preventDefault();
+  }
+
   function handleDragLeave() {
-    dragging = false;
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) dragging = false;
+  }
+
+  function handleKeydown(e: KeyboardEvent) {
+    if (e.key === "Enter" || e.key === " ") {
+      // Space would otherwise also scroll the page (A4)
+      e.preventDefault();
+      handleClick();
+    }
   }
 
   function handleClick() {
@@ -60,11 +81,13 @@
     {dragging
       ? 'border-brand-400 bg-brand-500/10'
       : 'border-white/10 bg-white/[0.02] hover:border-white/20 hover:bg-white/[0.04]'}"
+  aria-label={label}
   ondrop={handleDrop}
+  ondragenter={handleDragEnter}
   ondragover={handleDragOver}
   ondragleave={handleDragLeave}
   onclick={handleClick}
-  onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleClick(); }}
+  onkeydown={handleKeydown}
 >
   <svg
     xmlns="http://www.w3.org/2000/svg"
@@ -73,6 +96,7 @@
     stroke-width="1.5"
     stroke="currentColor"
     class="h-10 w-10 text-white/30"
+    aria-hidden="true"
   >
     <path
       stroke-linecap="round"
@@ -91,6 +115,8 @@
     {accept}
     {multiple}
     class="hidden"
+    tabindex="-1"
+    aria-hidden="true"
     oninput={handleInput}
   />
 </div>

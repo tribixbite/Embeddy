@@ -4,6 +4,9 @@
    * States: idle → ready → uploading → done / error
    */
   import FileDropZone from "../shared/FileDropZone.svelte";
+  import Spinner from "../shared/Spinner.svelte";
+  import ErrorCard from "../shared/ErrorCard.svelte";
+  import { SECONDARY_BUTTON, TEXT_BUTTON } from "../shared/buttons";
   import HostSelector from "./HostSelector.svelte";
   import UploadProgressBar from "./UploadProgress.svelte";
   import UploadResultCard from "./UploadResult.svelte";
@@ -144,7 +147,7 @@
         </div>
         <button
           onclick={reset}
-          class="text-xs text-white/40 hover:text-white/60 transition-colors"
+          class={TEXT_BUTTON}
         >
           Change file
         </button>
@@ -185,10 +188,7 @@
       Upload to {host}
     </button>
   {:else if state === "stripping"}
-    <div class="flex items-center justify-center py-12">
-      <div class="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-brand-400"></div>
-      <span class="ml-3 text-sm text-white/50">Removing metadata…</span>
-    </div>
+    <Spinner label="Removing metadata…" padding="py-12" />
   {:else if state === "uploading"}
     <UploadProgressBar {progress} />
     {#if retryNotice}
@@ -196,7 +196,7 @@
     {/if}
     <button
       onclick={cancelUpload}
-      class="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-medium text-white/60 transition-colors hover:bg-white/10"
+      class="w-full {SECONDARY_BUTTON}"
     >
       Cancel upload
     </button>
@@ -204,27 +204,14 @@
     <UploadResultCard {result} />
     <button
       onclick={reset}
-      class="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-medium text-white/60 transition-colors hover:bg-white/10"
+      class="w-full {SECONDARY_BUTTON}"
     >
       Upload another file
     </button>
   {:else if state === "error"}
-    <div class="rounded-2xl border border-red-500/20 bg-red-500/5 p-6 text-center">
-      <p class="text-sm text-red-400">{error}</p>
-      <div class="mt-4 flex gap-3 justify-center">
-        <button
-          onclick={handleUpload}
-          class="rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/60 transition-colors hover:bg-white/10"
-        >
-          Retry
-        </button>
-        <button
-          onclick={reset}
-          class="rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/60 transition-colors hover:bg-white/10"
-        >
-          Start over
-        </button>
-      </div>
-    </div>
+    <ErrorCard message={error}>
+      <button onclick={handleUpload} class={SECONDARY_BUTTON}>Retry</button>
+      <button onclick={reset} class={SECONDARY_BUTTON}>Start over</button>
+    </ErrorCard>
   {/if}
 </div>

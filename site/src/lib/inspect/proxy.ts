@@ -4,9 +4,7 @@
  */
 
 import type { MetadataResult } from "./types";
-
-/** Base URL for the Cloudflare Worker API */
-const API_BASE = "https://api.embeddy.link";
+import { API_BASE, apiErrorMessage } from "../api";
 
 /**
  * Fetch metadata for a URL via the CF Worker proxy.
@@ -18,17 +16,7 @@ export async function fetchMetadata(url: string): Promise<MetadataResult> {
   const response = await fetch(`${API_BASE}/api/inspect?url=${encoded}`);
 
   if (!response.ok) {
-    const text = await response.text();
-    // The worker reports failures as {"error":"..."} — surface the message,
-    // not the raw JSON blob (mirrors lib/upload/proxy.ts).
-    let message = text || `HTTP ${response.status}`;
-    try {
-      const payload = JSON.parse(text) as { error?: string };
-      if (payload?.error) message = payload.error;
-    } catch {
-      // Non-JSON body (e.g. a plain-text gateway error) — keep the raw text
-    }
-    throw new Error(message);
+    throw new Error(apiErrorMessage(await response.text(), response.status));
   }
 
   return response.json();

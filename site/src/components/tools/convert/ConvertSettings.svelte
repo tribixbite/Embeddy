@@ -13,6 +13,7 @@
   import RangeField from "../shared/RangeField.svelte";
   import NumberField from "../shared/NumberField.svelte";
   import ToggleGroup from "../shared/ToggleGroup.svelte";
+  import { BYTES_PER_MB } from "../shared/format-size";
 
   let {
     options = $bindable(),
@@ -72,12 +73,12 @@
     }
   }
 
-  /** Target size is edited in MB but stored in bytes */
+  /** Target size is edited in MB (the same binary MB every size label uses, D5) but stored in bytes */
   let targetSizeMb = $derived(
-    options.targetSizeBytes > 0 ? +(options.targetSizeBytes / 1_000_000).toFixed(1) : 0,
+    options.targetSizeBytes > 0 ? +(options.targetSizeBytes / BYTES_PER_MB).toFixed(1) : 0,
   );
   function setTargetSizeMb(mb: number) {
-    options.targetSizeBytes = mb > 0 ? Math.round(mb * 1_000_000) : 0;
+    options.targetSizeBytes = mb > 0 ? Math.round(mb * BYTES_PER_MB) : 0;
   }
 
   /** libwebp int-as-bool fields render as checkboxes but store 0/1 */

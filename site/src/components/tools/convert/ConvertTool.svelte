@@ -9,6 +9,8 @@
    * from memory. For large videos, frames are decoded lazily via streamDecodeVideo().
    */
   import FileDropZone from "../shared/FileDropZone.svelte";
+  import ErrorCard from "../shared/ErrorCard.svelte";
+  import { SECONDARY_BUTTON, TEXT_BUTTON } from "../shared/buttons";
   import ConvertSettings from "./ConvertSettings.svelte";
   import ConvertResult from "./ConvertResult.svelte";
   import ConvertProgressBar from "./ConvertProgress.svelte";
@@ -556,7 +558,7 @@
         </div>
         <button
           onclick={reset}
-          class="text-xs text-white/40 hover:text-white/60 transition-colors"
+          class={TEXT_BUTTON}
         >
           Change file
         </button>
@@ -590,27 +592,21 @@
     <div class="flex gap-3">
       <button
         onclick={() => { state = "settings"; }}
-        class="flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-medium text-white/60 transition-colors hover:bg-white/10"
+        class="flex-1 {SECONDARY_BUTTON}"
       >
         Adjust settings
       </button>
       <button
         onclick={reset}
-        class="flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-medium text-white/60 transition-colors hover:bg-white/10"
+        class="flex-1 {SECONDARY_BUTTON}"
       >
         New file
       </button>
     </div>
 
   {:else if state === "error"}
-    <div class="rounded-2xl border border-red-500/20 bg-red-500/5 p-6 text-center">
-      <p class="text-sm text-red-400">{error}</p>
-      <button
-        onclick={reset}
-        class="mt-4 rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/60 transition-colors hover:bg-white/10"
-      >
-        Try again
-      </button>
-    </div>
+    <ErrorCard message={error}>
+      <button onclick={reset} class={SECONDARY_BUTTON}>Try again</button>
+    </ErrorCard>
   {/if}
 </div>

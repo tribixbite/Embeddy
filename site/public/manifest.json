@@ -1,13 +1,16 @@
 {
   "name": "Embeddy",
   "short_name": "Embeddy",
-  "description": "Convert, compress, inspect, and upload media — right in your browser.",
+  "description": "Convert, compress, inspect, and upload media \u2014 right in your browser.",
   "start_url": "/tools/convert/",
   "display": "standalone",
   "background_color": "#1a1025",
   "theme_color": "#1a1025",
   "orientation": "any",
-  "categories": ["utilities", "photo"],
+  "categories": [
+    "utilities",
+    "photo"
+  ],
   "icons": [
     {
       "src": "/favicon.svg",
@@ -16,10 +19,28 @@
       "purpose": "any"
     },
     {
-      "src": "/apple-touch-icon.png",
-      "sizes": "180x180",
+      "src": "/icon-192.png",
+      "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }

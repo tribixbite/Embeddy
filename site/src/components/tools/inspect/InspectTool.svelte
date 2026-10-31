@@ -5,6 +5,9 @@
    * States: idle → fetching → done / error
    */
   import FileDropZone from "../shared/FileDropZone.svelte";
+  import Spinner from "../shared/Spinner.svelte";
+  import ErrorCard from "../shared/ErrorCard.svelte";
+  import { SECONDARY_BUTTON } from "../shared/buttons";
   import UrlInput from "./UrlInput.svelte";
   import EmbedPreview from "./EmbedPreview.svelte";
   import MetadataTable from "./MetadataTable.svelte";
@@ -148,18 +151,13 @@
   {/if}
 
   {#if state === "fetching"}
-    <div class="flex items-center justify-center py-12">
-      <div class="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-brand-400"></div>
-      <span class="ml-3 text-sm text-white/50">
-        {mode === "url" ? "Fetching metadata..." : "Reading EXIF data..."}
-      </span>
-    </div>
+    <Spinner label={mode === "url" ? "Fetching metadata..." : "Reading EXIF data..."} padding="py-12" />
   {:else if state === "done" && metadata}
     <EmbedPreview data={metadata} />
     <MetadataTable tags={metadata.tags} />
     <button
       onclick={reset}
-      class="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-medium text-white/60 transition-colors hover:bg-white/10"
+      class="w-full {SECONDARY_BUTTON}"
     >
       Inspect another URL
     </button>
@@ -179,19 +177,13 @@
     </div>
     <button
       onclick={reset}
-      class="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-medium text-white/60 transition-colors hover:bg-white/10"
+      class="w-full {SECONDARY_BUTTON}"
     >
       Inspect another file
     </button>
   {:else if state === "error"}
-    <div class="rounded-2xl border border-red-500/20 bg-red-500/5 p-6 text-center">
-      <p class="text-sm text-red-400">{error}</p>
-      <button
-        onclick={reset}
-        class="mt-4 rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/60 transition-colors hover:bg-white/10"
-      >
-        Try again
-      </button>
-    </div>
+    <ErrorCard message={error}>
+      <button onclick={reset} class={SECONDARY_BUTTON}>Try again</button>
+    </ErrorCard>
   {/if}
 </div>

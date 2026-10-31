@@ -4,6 +4,9 @@
    * States: idle → loading → settings → compressing → done
    */
   import FileDropZone from "../shared/FileDropZone.svelte";
+  import Spinner from "../shared/Spinner.svelte";
+  import ErrorCard from "../shared/ErrorCard.svelte";
+  import { SECONDARY_BUTTON, TEXT_BUTTON } from "../shared/buttons";
   import SquooshSettings from "./SquooshSettings.svelte";
   import SquooshResult from "./SquooshResult.svelte";
   import BeforeAfter from "./BeforeAfter.svelte";
@@ -129,10 +132,7 @@
       onfile={handleFile}
     />
   {:else if state === "loading"}
-    <div class="flex items-center justify-center py-16">
-      <div class="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-brand-400"></div>
-      <span class="ml-3 text-sm text-white/50">Loading image...</span>
-    </div>
+    <Spinner label="Loading image..." padding="py-16" />
   {:else if state === "settings" || state === "compressing"}
     <!-- Source preview + settings -->
     <div class="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
@@ -143,7 +143,7 @@
         </div>
         <button
           onclick={reset}
-          class="text-xs text-white/40 hover:text-white/60 transition-colors"
+          class={TEXT_BUTTON}
         >
           Change file
         </button>
@@ -162,10 +162,7 @@
     />
 
     {#if state === "compressing"}
-      <div class="flex items-center justify-center py-8">
-        <div class="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-brand-400"></div>
-        <span class="ml-3 text-sm text-white/50">Compressing...</span>
-      </div>
+      <Spinner label="Compressing..." padding="py-8" />
     {/if}
   {:else if state === "done" && resultBlob && sourceFile}
     <BeforeAfter
@@ -186,26 +183,20 @@
     <div class="flex gap-3">
       <button
         onclick={() => { state = "settings"; }}
-        class="flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-medium text-white/60 transition-colors hover:bg-white/10"
+        class="flex-1 {SECONDARY_BUTTON}"
       >
         Adjust settings
       </button>
       <button
         onclick={reset}
-        class="flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-medium text-white/60 transition-colors hover:bg-white/10"
+        class="flex-1 {SECONDARY_BUTTON}"
       >
         New image
       </button>
     </div>
   {:else if state === "error"}
-    <div class="rounded-2xl border border-red-500/20 bg-red-500/5 p-6 text-center">
-      <p class="text-sm text-red-400">{error}</p>
-      <button
-        onclick={reset}
-        class="mt-4 rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/60 transition-colors hover:bg-white/10"
-      >
-        Try again
-      </button>
-    </div>
+    <ErrorCard message={error}>
+      <button onclick={reset} class={SECONDARY_BUTTON}>Try again</button>
+    </ErrorCard>
   {/if}
 </div>

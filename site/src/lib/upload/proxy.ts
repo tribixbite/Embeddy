@@ -9,9 +9,7 @@
  */
 
 import type { UploadHost, UploadResult, UploadProgress } from "./types";
-
-/** Base URL for the Cloudflare Worker API */
-const API_BASE = "https://api.embeddy.link";
+import { API_BASE, parseApiError } from "../api";
 
 /** Attempts per upload, including the first. */
 const MAX_ATTEMPTS = 3;
@@ -90,7 +88,8 @@ function attemptUpload(
       }
 
       // The relay returns { error } — surface that rather than raw JSON
-      const message = payload?.error || `Upload failed (HTTP ${xhr.status})`;
+      // (a host's HTML error page is not a useful message — use the status)
+      const message = parseApiError(xhr.responseText) ?? `Upload failed (HTTP ${xhr.status})`;
       // 4xx means the request itself is wrong (too large, bad host); retrying
       // would just burn the user's bandwidth. 5xx and 0 are worth another go.
       if (xhr.status >= 400 && xhr.status < 500) {

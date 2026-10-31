@@ -36,12 +36,16 @@
   let { currentPath = "" }: { currentPath?: string } = $props();
 </script>
 
-<nav class="mb-8 flex gap-1 rounded-xl border border-white/8 bg-white/[0.03] p-1">
+<nav aria-label="Tools" class="mb-8 flex gap-1 rounded-xl border border-white/8 bg-white/[0.03] p-1">
   {#each tools as tool}
     {@const active = currentPath.startsWith(tool.href)}
+    <!-- The label is visually hidden below sm, so the link carries its own
+         accessible name; aria-current marks the active tool (A1) -->
     <a
       href={tool.href}
-      class="flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors
+      aria-label={tool.label}
+      aria-current={active ? "page" : undefined}
+      class="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors
         {active
           ? 'bg-brand-500/20 text-brand-300 shadow-sm'
           : 'text-white/50 hover:bg-white/5 hover:text-white/70'}"
@@ -53,6 +57,7 @@
         stroke-width="1.5"
         stroke="currentColor"
         class="h-4 w-4"
+        aria-hidden="true"
       >
         <path stroke-linecap="round" stroke-linejoin="round" d={tool.icon} />
       </svg>
