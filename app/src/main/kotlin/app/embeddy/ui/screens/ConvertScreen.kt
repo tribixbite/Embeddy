@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.RocketLaunch
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.VideoFile
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -73,6 +74,7 @@ import app.embeddy.util.FileInfoUtils
 import app.embeddy.util.SizeEstimation
 import app.embeddy.util.formatMediaDuration
 import app.embeddy.viewmodel.availableOutputFormats
+import app.embeddy.viewmodel.canAddClips
 import java.util.Locale
 import app.embeddy.viewmodel.InspectViewModel
 import app.embeddy.viewmodel.MainViewModel
@@ -188,6 +190,12 @@ fun ConvertScreen(
                                 cropEditing = false
                                 filePicker.launch(CONVERT_MIME_TYPES)
                             },
+                            onAddClips = if (canAddClips(source)) {
+                                {
+                                    cropEditing = false
+                                    addPicker.launch(JOIN_MIME_TYPES)
+                                }
+                            } else null,
                             onInspect = {
                                 inspectViewModel.inspectFile(Uri.parse(s.inputUri))
                                 onNavigateToInspect?.invoke()
@@ -414,6 +422,8 @@ private fun ReadyCard(
     state: ConversionState.Ready,
     onChangePick: () -> Unit,
     onInspect: () -> Unit,
+    /** Join more clips onto this one; null when the input cannot be joined. */
+    onAddClips: (() -> Unit)? = null,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -424,8 +434,10 @@ private fun ReadyCard(
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                // Decorative file-type glyph; distinct from the Inspect (i) button
+                // beside the name, which used to share this icon.
                 Icon(
-                    Icons.Outlined.Info,
+                    Icons.Outlined.VideoFile,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(20.dp),
@@ -441,7 +453,7 @@ private fun ReadyCard(
                 // Info icon to inspect media metadata
                 IconButton(
                     onClick = onInspect,
-                    modifier = Modifier.size(36.dp),
+                    modifier = Modifier.size(48.dp),
                 ) {
                     Icon(
                         Icons.Outlined.Info,
@@ -493,8 +505,17 @@ private fun ReadyCard(
 
             Spacer(Modifier.height(8.dp))
 
-            TextButton(onClick = onChangePick) {
-                Text(stringResource(R.string.change_file))
+            Row {
+                TextButton(onClick = onChangePick, modifier = Modifier.heightIn(min = 48.dp)) {
+                    Text(stringResource(R.string.change_file))
+                }
+                onAddClips?.let { addClips ->
+                    TextButton(onClick = addClips, modifier = Modifier.heightIn(min = 48.dp)) {
+                        Icon(Icons.Default.VideoLibrary, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(stringResource(R.string.join_add_clips))
+                    }
+                }
             }
         }
     }

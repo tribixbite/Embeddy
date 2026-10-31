@@ -173,8 +173,15 @@ class ConvertController(
     /** Add more clips/images to the current multi-file source. */
     fun addFiles(uris: List<String>) {
         val ready = _state.value as? ConversionState.Ready ?: return
-        val kind = ready.source.kind
-        if (uris.isEmpty() || kind == SourceKind.SINGLE) return
+        if (uris.isEmpty() || !canAddClips(ready.source)) return
+        // A single video grows into a join: its current edit becomes the first
+        // clip(s) so adding a clip never discards a trim the user already made.
+        val (base, baseEdit) = if (ready.source.kind == SourceKind.SINGLE) {
+            promoteToJoin(ready.source.clips.single(), _edit.value)
+        } else {
+            ready.source to _edit.value
+        }
+        val kind = base.kind
         loadJob?.cancel()
         loadJob = scope.launch {
             val added = try {
@@ -184,13 +191,28 @@ class ConvertController(
                 _state.value = ready.copy(notice = e.message)
                 return@launch
             }
-            val clips = ready.source.clips + added
+            val clips = base.clips + added
             // New clips start untrimmed: pad the range list so indices stay aligned.
-            val ranges = _edit.value.clipRanges.let { r ->
+            val ranges = baseEdit.clipRanges.let { r ->
                 if (r.isEmpty()) r else r + added.map { TrimSegment(0, it.durationMs) }
             }
-            replaceSource(ready, SourceMedia(kind, clips), _edit.value.copy(clipRanges = ranges))
+            replaceSource(ready, SourceMedia(kind, clips), baseEdit.copy(clipRanges = ranges))
         }
+    }
+
+    /**
+     * Turn a single video and its edit into the equivalent join: each kept
+     * range (one for a trim, several for stitch segments) becomes a clip of the
+     * same file, so the joined output starts exactly as the single edit would
+     * have. The single-input trim/segment fields are cleared because ranges now
+     * live per clip.
+     */
+    private fun promoteToJoin(clip: SourceClip, edit: EditSpec): Pair<SourceMedia, EditSpec> {
+        val ranges = edit.keptRanges(clip.durationMs)
+            .map { if (it.endMs == 0L) TrimSegment(it.startMs, clip.durationMs) else it }
+            .ifEmpty { listOf(TrimSegment(0, clip.durationMs)) }
+        return SourceMedia(SourceKind.JOIN, ranges.map { clip }) to
+            edit.copy(trimStartMs = 0, trimEndMs = 0, segments = emptyList(), clipRanges = ranges)
     }
 
     private suspend fun describeAll(uris: List<String>, kind: SourceKind): List<SourceClip> =
@@ -509,6 +531,17 @@ class ConvertController(
             return if (config.outputFormat in allowed) config else config.copy(outputFormat = allowed.first())
         }
     }
+}
+
+/**
+ * Whether "Add clips" applies to [source]. Joins and image sequences grow in
+ * place; a single video or GIF is promoted to a join. Animated WebP is the one
+ * exception: this FFmpeg build cannot demux it, so it is pre-split into frames
+ * and cannot sit in a concat graph next to real video (see JOIN_MIME_TYPES).
+ */
+fun canAddClips(source: SourceMedia): Boolean = when (source.kind) {
+    SourceKind.JOIN, SourceKind.IMAGE_SEQUENCE -> true
+    SourceKind.SINGLE -> !source.clips.single().fileName.endsWith(".webp", ignoreCase = true)
 }
 
 /**

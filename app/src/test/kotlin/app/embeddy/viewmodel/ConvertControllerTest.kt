@@ -382,6 +382,56 @@ class ConvertControllerTest {
     }
 
     @Test
+    fun `adding clips to a single trimmed video promotes it to a join keeping the trim`() = runTest {
+        val c = multiController()
+        pick(c, video)
+        c.setTrim(2_000, 5_000)
+        c.addFiles(listOf(other.uri))
+        runCurrent()
+        val ready = c.state.value as ConversionState.Ready
+        assertEquals(SourceKind.JOIN, ready.source.kind)
+        assertEquals(listOf(video, other), ready.source.clips)
+        assertEquals(TrimSegment(2_000, 5_000), c.edit.value.clipRange(0, video.durationMs))
+        assertEquals(TrimSegment(0, other.durationMs), c.edit.value.clipRange(1, other.durationMs))
+        // The single-input trim no longer applies once the ranges live per clip.
+        assertEquals(0L, c.edit.value.trimStartMs)
+        assertEquals(0L, c.edit.value.trimEndMs)
+        assertTrue(c.edit.value.segments.isEmpty())
+    }
+
+    @Test
+    fun `adding clips to a stitched video turns each kept segment into its own clip`() = runTest {
+        val c = multiController()
+        pick(c, video)
+        c.setSegments(listOf(TrimSegment(6_000, 8_000), TrimSegment(1_000, 2_000)))
+        c.addFiles(listOf(other.uri))
+        runCurrent()
+        val ready = c.state.value as ConversionState.Ready
+        assertEquals(listOf(video, video, other), ready.source.clips)
+        // Segments are merged/sorted the same way the stitch would have played them.
+        assertEquals(TrimSegment(1_000, 2_000), c.edit.value.clipRange(0, video.durationMs))
+        assertEquals(TrimSegment(6_000, 8_000), c.edit.value.clipRange(1, video.durationMs))
+        assertEquals(TrimSegment(0, other.durationMs), c.edit.value.clipRange(2, other.durationMs))
+    }
+
+    @Test
+    fun `animated WebP cannot be joined but videos and GIFs can`() {
+        val webp = SourceClip("content://w/1", "anim.webp", 100, durationMs = 1_000)
+        assertTrue(!canAddClips(SourceMedia.single(webp)))
+        assertTrue(canAddClips(SourceMedia.single(video)))
+        assertTrue(canAddClips(SourceMedia.single(gif)))
+    }
+
+    @Test
+    fun `an untrimmed single video joins with full-length ranges`() = runTest {
+        val c = multiController()
+        pick(c, video)
+        c.addFiles(listOf(other.uri))
+        runCurrent()
+        assertEquals(TrimSegment(0, video.durationMs), c.edit.value.clipRange(0, video.durationMs))
+    }
+
+    @Test
     fun `image sequences are described as images and offer animated and MP4 outputs`() = runTest {
         val c = multiController()
         c.onFilesPicked(listOf(img1.uri, img2.uri), SourceKind.IMAGE_SEQUENCE)
