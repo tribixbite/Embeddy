@@ -47,6 +47,14 @@ export interface SourceInfo {
   frameCapped: boolean;
 }
 
+/** Every format Convert can produce */
+export type OutputFormat = "webp" | "gif" | "mp4" | "webm";
+
+/** True for the real-video output formats */
+export function isVideoFormat(format: OutputFormat): format is "mp4" | "webm" {
+  return format === "mp4" || format === "webm";
+}
+
 /** Encoding options for the output */
 export interface ConvertOptions {
   /** Quality 1-100 (lossy mode for WebP; palette quality for GIF) */
@@ -59,8 +67,11 @@ export interface ConvertOptions {
   loops: number;
   /** Target FPS for video/WebP sources (0 = preserve original) */
   targetFps: number;
-  /** Output format */
-  outputFormat: "webp" | "gif";
+  /**
+   * Output format. mp4/webm are real video (WebCodecs + Mediabunny) and are
+   * only offered for video sources in browsers that can encode them.
+   */
+  outputFormat: OutputFormat;
   /** Crop region or null for no crop */
   crop: CropRect | null;
   /** Clockwise rotation in degrees, applied after crop + resize */
@@ -69,6 +80,14 @@ export interface ConvertOptions {
   flipH: boolean;
   /** Mirror vertically */
   flipV: boolean;
+  /** Trim window start in source milliseconds */
+  trimStartMs: number;
+  /** Trim window end in source milliseconds (0 = to the end) */
+  trimEndMs: number;
+  /** Playback speed multiplier (0.25-4, 1 = unchanged) */
+  speed: number;
+  /** Drop the audio track (video output only) */
+  muted: boolean;
   /** Target file size in bytes (0 = disabled, encode at fixed quality) */
   targetSizeBytes: number;
   /** Compression effort 0-6. Higher = slower but smaller output.
@@ -144,7 +163,7 @@ export interface ConvertOptions {
 /** Progress callback for long-running operations */
 export interface ConvertProgress {
   /** Current phase description */
-  phase: "decoding" | "cropping" | "resizing" | "encoding";
+  phase: "decoding" | "cropping" | "resizing" | "encoding" | "exporting";
   /** 0-100 percentage within current phase */
   percent: number;
   /** Current frame being processed */

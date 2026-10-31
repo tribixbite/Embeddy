@@ -27,6 +27,7 @@
     cropping: "Cropping frames",
     resizing: "Resizing frames",
     encoding: "Encoding",
+    exporting: "Encoding video",
   };
 
   /** Shimmer only while encoding has produced no frame progress yet
@@ -42,7 +43,7 @@
 <div class="rounded-2xl border border-white/8 bg-white/[0.03] p-6">
   <div class="mb-3 flex items-center justify-between text-sm">
     <span class="text-white/60">{phaseLabels[progress.phase] ?? progress.phase}</span>
-    {#if !indeterminate}
+    {#if !indeterminate && progress.total > 0}
       <span class="font-mono text-white/40">
         {progress.frame} / {progress.total}
       </span>

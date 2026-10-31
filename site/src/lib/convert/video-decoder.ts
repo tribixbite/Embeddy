@@ -31,6 +31,9 @@ export function availableFrameCount(durationSeconds: number, targetFps: number):
  * @param onProgress - Progress callback
  * @param signal - Optional AbortSignal; aborting rejects promptly (even mid-seek)
  *   with an AbortError and releases the video element + object URL
+ * @param times - Explicit source timestamps (seconds) to sample instead of
+ *   every 1/targetFps from 0 — used for trim + speed (see timeline.ts). Each
+ *   frame still gets a 1000/targetFps delay.
  */
 export async function decodeVideo(
   file: File,
@@ -38,6 +41,7 @@ export async function decodeVideo(
   maxFrames = 1500,
   onProgress?: (p: ConvertProgress) => void,
   signal?: AbortSignal,
+  times?: number[],
 ): Promise<{ frames: DecodedFrame[]; info: SourceInfo }> {
   throwIfAborted(signal);
   const url = URL.createObjectURL(file);
@@ -63,7 +67,7 @@ export async function decodeVideo(
     const memoryMaxFrames = Math.max(30, Math.floor(memoryBudget / bytesPerFrame));
 
     const frameInterval = 1 / targetFps;
-    const availableFrames = availableFrameCount(duration, targetFps);
+    const availableFrames = times ? times.length : availableFrameCount(duration, targetFps);
     const totalFrames = Math.min(availableFrames, maxFrames, memoryMaxFrames);
     const delayMs = Math.round(1000 / targetFps);
 
@@ -79,7 +83,7 @@ export async function decodeVideo(
       // Abort between frames too — the synchronous draw/getImageData stretch
       // below never observes the signal on its own
       throwIfAborted(signal);
-      const seekTime = i * frameInterval;
+      const seekTime = times ? Math.min(times[i]!, duration) : i * frameInterval;
 
       onProgress?.({
         phase: "decoding",
@@ -299,6 +303,11 @@ export interface StreamDecodeOptions {
   maxFrames: number;
   /** Crop/resize/rotate/flip applied to every frame in one drawImage */
   transform: FrameTransform;
+  /**
+   * Explicit source timestamps (seconds) to sample — trim + speed (see
+   * timeline.ts). Defaults to every 1/targetFps from 0.
+   */
+  times?: number[];
 }
 
 /**
@@ -345,7 +354,7 @@ export async function* streamDecodeVideo(
 
     const frameInterval = 1 / options.targetFps;
     const totalFrames = Math.min(
-      availableFrameCount(duration, options.targetFps),
+      options.times ? options.times.length : availableFrameCount(duration, options.targetFps),
       options.maxFrames,
     );
     const delayMs = Math.round(1000 / options.targetFps);
@@ -367,7 +376,8 @@ export async function* streamDecodeVideo(
         total: totalFrames,
       });
 
-      await seekTo(video, i * frameInterval, signal);
+      const seekTime = options.times ? Math.min(options.times[i]!, duration) : i * frameInterval;
+      await seekTo(video, seekTime, signal);
 
       const { rgba, width, height } = preparer.fromImage(video);
       yield { rgba, width, height, delay: delayMs };

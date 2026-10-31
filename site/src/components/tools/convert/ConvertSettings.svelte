@@ -8,8 +8,10 @@
    * carries a real label association and the segmented groups expose radiogroup
    * semantics.
    */
-  import type { ConvertOptions, SourceInfo } from "../../../lib/convert/types";
+  import type { ConvertOptions, OutputFormat, SourceInfo } from "../../../lib/convert/types";
+  import { isVideoFormat } from "../../../lib/convert/types";
   import CropOverlay from "./CropOverlay.svelte";
+  import EditControls from "./EditControls.svelte";
   import RangeField from "../shared/RangeField.svelte";
   import NumberField from "../shared/NumberField.svelte";
   import ToggleGroup from "../shared/ToggleGroup.svelte";
@@ -22,6 +24,9 @@
     sourcePreviewUrl = "",
     streamingMode = false,
     onconvert,
+    videoFormats = [],
+    joinClips = $bindable([]),
+    sourceName = "",
   }: {
     options: ConvertOptions;
     info: SourceInfo;
@@ -30,7 +35,14 @@
     /** True when frames are decoded lazily — the adaptive re-encode loop can't run */
     streamingMode?: boolean;
     onconvert: () => void;
+    /** Video containers this browser can encode — offered for video sources only */
+    videoFormats?: Array<"mp4" | "webm">;
+    /** Extra clips to append (video output) */
+    joinClips?: File[];
+    sourceName?: string;
   } = $props();
+
+  let videoOutput = $derived(isVideoFormat(options.outputFormat));
 
   /**
    * Show quality slider for GIF always, and for WebP whenever lossy frames can
@@ -38,7 +50,7 @@
    * this quality even though the Lossless box could look authoritative) (M33).
    */
   let showQuality = $derived(
-    options.outputFormat === "gif" || !options.lossless || options.mixed,
+    videoOutput || options.outputFormat === "gif" || !options.lossless || options.mixed,
   );
 
   /**
@@ -50,8 +62,11 @@
     options.outputFormat === "webp" && !options.lossless && !streamingMode,
   );
 
-  /** Show target FPS control for video and WebP sources (GIFs have intrinsic timing) */
-  let showFps = $derived(info.format === "video" || info.format === "webp");
+  /**
+   * Show target FPS control for video and WebP sources (GIFs have intrinsic
+   * timing). Video output keeps the source frame rate.
+   */
+  let showFps = $derived(!videoOutput && (info.format === "video" || info.format === "webp"));
 
   /**
    * Crop toggle state — initialized from the bound options so a remount
@@ -101,10 +116,14 @@
     if (options.mixed) options.lossless = false;
   }
 
-  const FORMAT_OPTIONS = [
-    { value: "webp" as const, label: "WebP" },
-    { value: "gif" as const, label: "GIF" },
-  ];
+  const VIDEO_FORMAT_LABELS = { mp4: "MP4", webm: "WebM" } as const;
+
+  /** Animated formats always; MP4/WebM only for video sources this browser can encode */
+  let formatOptions = $derived<Array<{ value: OutputFormat; label: string }>>([
+    { value: "webp", label: "WebP" },
+    { value: "gif", label: "GIF" },
+    ...(info.format === "video" ? videoFormats.map((f) => ({ value: f, label: VIDEO_FORMAT_LABELS[f] })) : []),
+  ]);
   const FILTER_TYPE_OPTIONS = [
     { value: 0, label: "Simple" },
     { value: 1, label: "Strong" },
@@ -125,14 +144,14 @@
   <ToggleGroup
     label="Output format"
     bind:value={options.outputFormat}
-    options={FORMAT_OPTIONS}
+    options={formatOptions}
     {disabled}
   />
 
   {#if showQuality}
     <RangeField
       id="cv-quality"
-      label={options.outputFormat === "gif" ? "Color quality" : "Quality"}
+      label={options.outputFormat === "gif" ? "Color quality" : videoOutput ? "Video quality" : "Quality"}
       bind:value={options.quality}
       min={1}
       max={100}
@@ -160,6 +179,15 @@
         : undefined}
     />
   {/if}
+
+  <EditControls
+    bind:options
+    bind:joinClips
+    {info}
+    {sourcePreviewUrl}
+    {sourceName}
+    {disabled}
+  />
 
   <!-- Crop section -->
   <div>
@@ -232,15 +260,17 @@
     />
   {/if}
 
-  <NumberField
-    id="cv-loops"
-    label="Loop count"
-    hint=" (0 = infinite)"
-    bind:value={options.loops}
-    min={0}
-    max={65535}
-    {disabled}
-  />
+  {#if !videoOutput}
+    <NumberField
+      id="cv-loops"
+      label="Loop count"
+      hint=" (0 = infinite)"
+      bind:value={options.loops}
+      min={0}
+      max={65535}
+      {disabled}
+    />
+  {/if}
 
   <!-- WebP-only settings -->
   {#if options.outputFormat === "webp"}
@@ -575,7 +605,7 @@
     {#if disabled}
       Converting...
     {:else}
-      Convert to {options.outputFormat.toUpperCase()}
+      Convert to {options.outputFormat === "webm" ? "WebM" : options.outputFormat.toUpperCase()}
     {/if}
   </button>
 </div>

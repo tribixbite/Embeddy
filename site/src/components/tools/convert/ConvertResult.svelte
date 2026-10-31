@@ -4,6 +4,8 @@
    * Supports WebP and GIF output formats.
    */
   import { formatFileSize, formatSavings } from "../shared/format-size";
+  import ShareActions from "../shared/ShareActions.svelte";
+  import { isVideoFormat, type OutputFormat } from "../../../lib/convert/types";
 
   let {
     originalSize,
@@ -13,16 +15,21 @@
     frameCount,
     outputFormat = "webp",
     notice = "",
+    blob = null,
   }: {
     originalSize: number;
     resultSize: number;
     resultUrl: string;
     filename: string;
     frameCount: number;
-    outputFormat?: "webp" | "gif";
+    outputFormat?: OutputFormat;
     /** Caveat about the result (e.g. adaptive target size not reached) */
     notice?: string;
+    /** The result itself, for share / send-to-Upload */
+    blob?: Blob | null;
   } = $props();
+
+  let isVideo = $derived(isVideoFormat(outputFormat));
 
   /** Generate output filename with correct extension */
   let outputName = $derived(`${filename.replace(/\.[^.]+$/, "")}.${outputFormat}`);
@@ -36,11 +43,22 @@
 <div class="space-y-4">
   <!-- Animated preview -->
   <div class="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
-    <img
-      src={resultUrl}
-      alt="Animated {formatLabel} preview"
-      class="mx-auto max-h-80 rounded-lg object-contain"
-    />
+    {#if isVideo}
+      <!-- svelte-ignore a11y_media_has_caption -->
+      <video
+        src={resultUrl}
+        controls
+        playsinline
+        class="mx-auto max-h-80 rounded-lg bg-black"
+        aria-label="{formatLabel} result"
+      ></video>
+    {:else}
+      <img
+        src={resultUrl}
+        alt="Animated {formatLabel} preview"
+        class="mx-auto max-h-80 rounded-lg object-contain"
+      />
+    {/if}
   </div>
 
   {#if notice}
@@ -69,7 +87,7 @@
     </div>
 
     <div class="mb-4 flex justify-center gap-4 text-xs text-white/40">
-      <span>{frameCount} frames</span>
+      {#if !isVideo}<span>{frameCount} frames</span>{/if}
       {#if isSmaller}
         <span>Saved {formatFileSize(savedBytes)}</span>
       {/if}
@@ -86,5 +104,11 @@
       </svg>
       Download {outputName}
     </a>
+
+    {#if blob}
+      <div class="mt-3">
+        <ShareActions {blob} filename={outputName} />
+      </div>
+    {/if}
   </div>
 </div>

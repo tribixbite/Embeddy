@@ -8,6 +8,7 @@ import type { DecodedFrame, ConvertOptions, ConvertProgress } from "./types";
 import { subsampleFrames, YIELD_EVERY, yieldToEventLoop } from "./encoder";
 import { FramePreparer, transformFromOptions } from "./prepare-frame";
 import { throwIfAborted } from "./abort";
+import { outputDelay } from "./timeline";
 import {
   createGifWriter,
   qualityToMaxColors,
@@ -153,7 +154,7 @@ export async function encodeAnimatedGif(
         total: workFrames.length,
       });
       const prepared = preparer.fromRgba(source.rgba);
-      await sink.write(prepared.rgba, outW, outH, source.delay, prepared.fresh);
+      await sink.write(prepared.rgba, outW, outH, outputDelay(source.delay), prepared.fresh);
     }
     throwIfAborted(signal);
     const bytes = await sink.finish();

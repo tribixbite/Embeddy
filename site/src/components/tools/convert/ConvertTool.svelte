@@ -37,10 +37,14 @@
     needsFpsRedecode,
   } from "../../../lib/convert/pipeline";
   import { sniffFile } from "../../../lib/media/sniff";
+  import { applyTimeline, clampTrim, outputDelay, sampleTimes } from "../../../lib/convert/timeline";
+  import { canExportVideo, exportVideo, joinVideos } from "../../../lib/convert/video-export";
+  import GlobalFileIntake from "../shared/GlobalFileIntake.svelte";
   import { formatFileSize } from "../shared/format-size";
   import { createGenerationGuard } from "./conversion-guard";
   import { recoverFromChunkError } from "../../../lib/pwa/chunk-reload";
   import { BUILD_ID } from "../../../lib/build";
+  import { isVideoFormat } from "../../../lib/convert/types";
   import type {
     ConvertOptions,
     ConvertProgress,
@@ -69,6 +73,11 @@
     frame: 0,
     total: 0,
   });
+
+  /** Video containers this browser can encode (probed per video file) */
+  let videoFormats: Array<"mp4" | "webm"> = $state([]);
+  /** Extra clips appended after the source when exporting video */
+  let joinClips: File[] = $state.raw([]);
 
   /** True when video is too large for batch decode — uses streaming pipeline */
   let streamingMode = $state(false);
@@ -125,6 +134,10 @@
       rotate: 0,
       flipH: false,
       flipV: false,
+      trimStartMs: 0,
+      trimEndMs: 0,
+      speed: 1,
+      muted: false,
       targetSizeBytes: 0,
       method: 4,
       minimizeSize: true,
@@ -182,12 +195,20 @@
     progress = p;
   }
 
+  /** Frames decoded for GIF output from a streaming (long) video */
+  const GIF_STREAM_FRAME_CAP = 300;
+
   /** Accepted file types: GIF, WebP, and common video formats */
   const acceptTypes = "image/gif,image/webp,video/mp4,video/webm,video/quicktime,video/x-matroska";
 
   async function handleFile(files: File[]) {
     const file = files[0];
     if (!file) return;
+
+    // Files can now arrive in any state (page-wide drop, paste, share
+    // target): start from a clean slate so file B never inherits file A's
+    // options, result or join list (M6)
+    if (state !== "idle") reset();
 
     // A new file supersedes any in-flight decode/convert work: invalidate the
     // generation (state-inert) AND abort the old signal (stop the CPU burn)
@@ -261,6 +282,15 @@
           sourceInfo = decoded.info;
         }
         options.outputFormat = "webp";
+        // Offer MP4/WebM only where WebCodecs can actually encode them —
+        // probed in the background so it never delays the settings screen
+        const { width, height } = info;
+        void Promise.all([canExportVideo("mp4", width, height), canExportVideo("webm", width, height)]).then(
+          ([mp4, webm]) => {
+            if (!guard.isCurrent(gen)) return;
+            videoFormats = [...(mp4 ? (["mp4"] as const) : []), ...(webm ? (["webm"] as const) : [])];
+          },
+        );
       } else {
         throw new Error(`Unsupported format: ${type || file.name}`);
       }
@@ -319,7 +349,7 @@
           prepared.rgba,
           prepared.width,
           prepared.height,
-          getWebPFrameOptions(opts, frame.delay),
+          getWebPFrameOptions(opts, outputDelay(frame.delay)),
           prepared.fresh,
         );
       }
@@ -346,10 +376,10 @@
     activeEncoder = encoder;
 
     try {
-      const totalFrames = Math.min(
-        Math.floor((sourceInfo.totalDuration / 1000) * opts.targetFps),
-        10000,
-      );
+      // Trim + speed decide which source instants become output frames
+      const trim = clampTrim(sourceInfo.totalDuration, opts.trimStartMs, opts.trimEndMs);
+      const times = sampleTimes(trim, opts.targetFps, opts.speed, 10000);
+      const totalFrames = times.length;
 
       await encoder.init(getWebPInitOptions(opts));
       encoder.setTotalFrames(totalFrames);
@@ -361,6 +391,7 @@
         targetFps: opts.targetFps,
         maxFrames: totalFrames,
         transform: transformFromOptions(opts),
+        times,
       }, (p) => {
         reportProgress({
           phase: "decoding",
@@ -427,15 +458,43 @@
         }
       }
 
-      if (streamingMode && options.outputFormat === "webp") {
+      if (isVideoFormat(options.outputFormat)) {
+        // Real video out: WebCodecs + Mediabunny re-encode, no frame buffering
+        const format = options.outputFormat;
+        const onFraction = (f: number) =>
+          onEncodeProgress({ phase: "exporting", percent: Math.round(f * 100), frame: 0, total: 0 });
+        const result =
+          joinClips.length > 0
+            ? await joinVideos(
+                [
+                  { file: sourceFile!, trimStartMs: options.trimStartMs, trimEndMs: options.trimEndMs },
+                  ...joinClips.map((file) => ({ file, trimStartMs: 0, trimEndMs: 0 })),
+                ],
+                options,
+                format,
+                onFraction,
+                signal,
+              )
+            : await exportVideo(
+                sourceFile!, sourceInfo.width, sourceInfo.height, sourceInfo.totalDuration,
+                options, format, onFraction, signal,
+              );
+        if (!guard.isCurrent(gen)) return;
+        blob = result.blob;
+        resultNotice = result.notices.join(" ");
+      } else if (streamingMode && options.outputFormat === "webp") {
         // Large video: lazy decode + encode one frame at a time
         blob = await streamingConvert(options, signal);
       } else if (streamingMode && options.outputFormat === "gif") {
-        // GIF from large video: decode capped frames then GIF-encode.
-        // The frames come back already sampled at options.targetFps, so pass that
-        // as the source FPS. They are kept in a local, not in `frames`, so the
-        // streaming state isn't left holding up to 300 frames (L2).
-        const decoded = await decodeVideo(sourceFile!, options.targetFps, 300, onEncodeProgress, signal);
+        // GIF from large video: decode a capped set of frames (trim + speed
+        // decide which instants) then GIF-encode. The frames are already at
+        // options.targetFps, so that is their source FPS. They stay in a
+        // local, not `frames`, so streaming state never holds them (L2).
+        const trim = clampTrim(sourceInfo.totalDuration, options.trimStartMs, options.trimEndMs);
+        const times = sampleTimes(trim, options.targetFps, options.speed, GIF_STREAM_FRAME_CAP + 1);
+        const decoded = await decodeVideo(
+          sourceFile!, options.targetFps, GIF_STREAM_FRAME_CAP, onEncodeProgress, signal, times,
+        );
         if (!guard.isCurrent(gen)) return; // don't clobber a newly loaded file (M18)
         streamingFrameCount = decoded.frames.length;
         if (decoded.info.frameCapped) {
@@ -443,34 +502,38 @@
         }
         blob = await encodeAnimatedGif(
           decoded.frames, decoded.info.width, decoded.info.height,
-          options, decoded.info.fps, onEncodeProgress, signal,
-        );
-      } else if (options.outputFormat === "gif") {
-        // GIF output from pre-decoded frames
-        blob = await encodeAnimatedGif(
-          frames, sourceInfo.width, sourceInfo.height,
-          options, sourceInfo.fps, onEncodeProgress, signal,
+          options, options.targetFps, onEncodeProgress, signal,
         );
       } else {
-        // WebP output from pre-decoded frames — all settings applied. The
-        // adaptive loop only runs with a target size and lossy output.
+        // Buffered frames: apply trim + speed once, then encode
         const info = sourceInfo;
-        const targetBytes = options.lossless ? 0 : options.targetSizeBytes;
-        const result = await encodeToTarget(
-          (quality) => encodeFramesWebP(frames, info.width, info.height, { ...options, quality }, info.fps),
-          {
-            startQuality: options.quality,
-            targetBytes,
-            // Each attempt restarts the phase clock — an ETA extrapolated
-            // from a previous attempt's elapsed time would be nonsense
-            onAttempt: () => resetProgressClock(),
-          },
-        );
-        blob = result.blob;
-        if (!result.fits) {
-          resultNotice =
-            `Couldn't reach ${formatFileSize(targetBytes)} — smallest result at quality ` +
-            `${result.quality} is ${formatFileSize(blob.size)}. Try a smaller max dimension or lower FPS.`;
+        const timeline = applyTimeline(frames, info.fps, info.totalDuration, options);
+        if (options.outputFormat === "gif") {
+          blob = await encodeAnimatedGif(
+            timeline.frames, info.width, info.height,
+            options, timeline.sourceFps, onEncodeProgress, signal,
+          );
+        } else {
+          // WebP — all settings applied. The adaptive loop only runs with a
+          // target size and lossy output.
+          const targetBytes = options.lossless ? 0 : options.targetSizeBytes;
+          const result = await encodeToTarget(
+            (quality) =>
+              encodeFramesWebP(timeline.frames, info.width, info.height, { ...options, quality }, timeline.sourceFps),
+            {
+              startQuality: options.quality,
+              targetBytes,
+              // Each attempt restarts the phase clock — an ETA extrapolated
+              // from a previous attempt's elapsed time would be nonsense
+              onAttempt: () => resetProgressClock(),
+            },
+          );
+          blob = result.blob;
+          if (!result.fits) {
+            resultNotice =
+              `Couldn't reach ${formatFileSize(targetBytes)} — smallest result at quality ` +
+              `${result.quality} is ${formatFileSize(blob.size)}. Try a smaller max dimension or lower FPS.`;
+          }
         }
       }
 
@@ -516,6 +579,8 @@
     sourcePreviewUrl = "";
     streamingMode = false;
     streamingFrameCount = 0;
+    videoFormats = [];
+    joinClips = [];
     // Restore per-file defaults — otherwise file B silently inherits file A's
     // crop rect, targetFps, loop seed, etc (M6)
     options = defaultOptions();
@@ -528,6 +593,12 @@
     frames.length > 0 ? frames.length : streamingFrameCount,
   );
 </script>
+
+<GlobalFileIntake
+  accept={acceptTypes}
+  onfiles={handleFile}
+  enabled={state !== "decoding" && state !== "converting"}
+/>
 
 <div class="space-y-6">
   {#if state === "idle"}
@@ -571,6 +642,9 @@
       disabled={state === "converting"}
       {sourcePreviewUrl}
       {streamingMode}
+      {videoFormats}
+      bind:joinClips
+      sourceName={sourceFile?.name ?? ""}
       onconvert={handleConvert}
     />
 
@@ -587,6 +661,7 @@
       frameCount={displayFrameCount}
       outputFormat={options.outputFormat}
       notice={resultNotice}
+      blob={resultBlob}
     />
 
     <div class="flex gap-3">
