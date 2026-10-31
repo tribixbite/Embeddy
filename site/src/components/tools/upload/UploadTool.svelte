@@ -4,6 +4,7 @@
    * States: idle → ready → uploading → done / error
    */
   import FileDropZone from "../shared/FileDropZone.svelte";
+  import GlobalFileIntake from "../shared/GlobalFileIntake.svelte";
   import Spinner from "../shared/Spinner.svelte";
   import ErrorCard from "../shared/ErrorCard.svelte";
   import { SECONDARY_BUTTON, TEXT_BUTTON } from "../shared/buttons";
@@ -129,6 +130,9 @@
     progress = { loaded: 0, total: 0, percent: 0 };
   }
 </script>
+
+<!-- Also receives results handed over by Convert/Squoosh ("Send to Upload") -->
+<GlobalFileIntake accept="*/*" onfiles={handleFile} enabled={state !== "uploading" && state !== "stripping"} />
 
 <div class="space-y-6">
   {#if state === "idle"}

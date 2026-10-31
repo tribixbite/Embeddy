@@ -4,16 +4,21 @@
    */
   import { formatFileSize, formatSavings } from "../shared/format-size";
 
+  import ShareActions from "../shared/ShareActions.svelte";
+
   let {
     originalSize,
     compressedSize,
     resultUrl,
+    blob = null,
     format,
     filename,
   }: {
     originalSize: number;
     compressedSize: number;
     resultUrl: string;
+    /** The compressed image, for share / send-to-Upload */
+    blob?: Blob | null;
     format: string;
     filename: string;
   } = $props();
@@ -66,4 +71,10 @@
     </svg>
     Download {outputName}
   </a>
+
+  {#if blob}
+    <div class="mt-3">
+      <ShareActions {blob} filename={outputName} />
+    </div>
+  {/if}
 </div>

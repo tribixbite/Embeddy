@@ -4,6 +4,7 @@
    * States: idle → loading → settings → compressing → done
    */
   import FileDropZone from "../shared/FileDropZone.svelte";
+  import GlobalFileIntake from "../shared/GlobalFileIntake.svelte";
   import Spinner from "../shared/Spinner.svelte";
   import ErrorCard from "../shared/ErrorCard.svelte";
   import { SECONDARY_BUTTON, TEXT_BUTTON } from "../shared/buttons";
@@ -41,9 +42,14 @@
    */
   const guard = createGenerationGuard();
 
+  /** Inputs the codecs handle (also filters page-wide drops and pastes) */
+  const ACCEPT = "image/jpeg,image/png,image/webp,image/avif";
+
   function handleFile(files: File[]) {
     const file = files[0];
     if (!file) return;
+    // Page-wide drop/paste can arrive with a file already loaded
+    if (state !== "idle") reset();
 
     // Validate image type
     if (!file.type.startsWith("image/")) {
@@ -124,10 +130,12 @@
   }
 </script>
 
+<GlobalFileIntake accept={ACCEPT} onfiles={handleFile} enabled={state !== "compressing" && state !== "loading"} />
+
 <div class="space-y-6">
   {#if state === "idle"}
     <FileDropZone
-      accept="image/jpeg,image/png,image/webp,image/avif"
+      accept={ACCEPT}
       label="Drop a JPEG, PNG, WebP, or AVIF here or click to browse"
       onfile={handleFile}
     />
@@ -178,6 +186,7 @@
       {resultUrl}
       format={options.format}
       filename={sourceFile.name}
+      blob={resultBlob}
     />
 
     <div class="flex gap-3">

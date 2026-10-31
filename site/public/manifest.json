@@ -42,5 +42,65 @@
       "type": "image/png",
       "purpose": "maskable"
     }
+  ],
+  "share_target": {
+    "action": "/share-target/",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url",
+      "files": [
+        {
+          "name": "media",
+          "accept": [
+            "image/*",
+            "video/*"
+          ]
+        }
+      ]
+    }
+  },
+  "file_handlers": [
+    {
+      "action": "/tools/convert/",
+      "accept": {
+        "image/gif": [
+          ".gif"
+        ],
+        "image/webp": [
+          ".webp"
+        ],
+        "video/mp4": [
+          ".mp4",
+          ".m4v"
+        ],
+        "video/webm": [
+          ".webm"
+        ],
+        "video/quicktime": [
+          ".mov"
+        ],
+        "video/x-matroska": [
+          ".mkv"
+        ]
+      }
+    },
+    {
+      "action": "/tools/squoosh/",
+      "accept": {
+        "image/jpeg": [
+          ".jpg",
+          ".jpeg"
+        ],
+        "image/png": [
+          ".png"
+        ],
+        "image/avif": [
+          ".avif"
+        ]
+      }
+    }
   ]
 }

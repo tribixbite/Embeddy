@@ -5,6 +5,7 @@
    * States: idle → fetching → done / error
    */
   import FileDropZone from "../shared/FileDropZone.svelte";
+  import GlobalFileIntake from "../shared/GlobalFileIntake.svelte";
   import Spinner from "../shared/Spinner.svelte";
   import ErrorCard from "../shared/ErrorCard.svelte";
   import { SECONDARY_BUTTON } from "../shared/buttons";
@@ -117,6 +118,12 @@
     exifData = null;
   }
 </script>
+
+<GlobalFileIntake
+  accept="image/*"
+  onfiles={(files) => { mode = "file"; handleFile(files); }}
+  enabled={state !== "fetching"}
+/>
 
 <div class="space-y-6">
   <!-- Mode switcher -->
