@@ -29,16 +29,25 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.embeddy.R
+import app.embeddy.ui.about.AboutSheet
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material3.IconButton
 import app.embeddy.ui.screens.ConvertScreen
 import app.embeddy.ui.screens.InspectScreen
 import app.embeddy.ui.screens.SquooshScreen
 import app.embeddy.ui.screens.UploadScreen
 import app.embeddy.viewmodel.MainViewModel
+import app.embeddy.viewmodel.SquooshViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AppScaffold(mainViewModel: MainViewModel = viewModel()) {
+fun AppScaffold(
+    mainViewModel: MainViewModel = viewModel(),
+    squooshViewModel: SquooshViewModel = viewModel(),
+) {
     var currentTab by rememberSaveable { mutableStateOf(EmbeddyTab.CONVERT) }
+    var showAbout by rememberSaveable { mutableStateOf(false) }
 
     // A share/view intent loads the file into MainViewModel — surface the Convert tab
     // so the user actually sees it, even if they were on another tab. The signal
@@ -60,6 +69,11 @@ fun AppScaffold(mainViewModel: MainViewModel = viewModel()) {
                         style = MaterialTheme.typography.headlineMedium,
                     )
                 },
+                actions = {
+                    IconButton(onClick = { showAbout = true }) {
+                        Icon(Icons.Outlined.Info, contentDescription = stringResource(R.string.about))
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background,
                 ),
@@ -74,6 +88,7 @@ fun AppScaffold(mainViewModel: MainViewModel = viewModel()) {
         containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets.systemBars,
     ) { padding ->
+        if (showAbout) AboutSheet(onDismiss = { showAbout = false })
         AnimatedContent(
             targetState = currentTab,
             modifier = Modifier
@@ -85,6 +100,11 @@ fun AppScaffold(mainViewModel: MainViewModel = viewModel()) {
             when (tab) {
                 EmbeddyTab.CONVERT -> ConvertScreen(
                     onNavigateToInspect = { currentTab = EmbeddyTab.INSPECT },
+                    // A grabbed frame continues in Squoosh (same activity-scoped ViewModel).
+                    onOpenInSquoosh = { uri ->
+                        squooshViewModel.onFilePicked(uri)
+                        currentTab = EmbeddyTab.SQUOOSH
+                    },
                 )
                 EmbeddyTab.INSPECT -> InspectScreen()
                 EmbeddyTab.UPLOAD -> UploadScreen()
