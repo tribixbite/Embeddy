@@ -49,6 +49,23 @@ export default defineConfig({
     worker: {
       format: "es",
     },
+    resolve: {
+      alias: [
+        {
+          // P7: @jsquash/avif only picks its multi-threaded encoder when
+          // WebAssembly threads are usable, which requires cross-origin
+          // isolation (COOP/COEP headers). GitHub Pages can't send those, so
+          // the MT build never runs here — yet Vite emitted its 2.6 MB WASM
+          // twice. Point the MT import at the single-threaded build (the
+          // same one the runtime check selects on this host anyway).
+          // TODO: drop this alias if the site moves to a host with COOP/COEP.
+          find: /^\.\/codec\/enc\/avif_enc_mt\.js$/,
+          replacement: fileURLToPath(
+            new URL("./node_modules/@jsquash/avif/codec/enc/avif_enc.js", import.meta.url),
+          ),
+        },
+      ],
+    },
     optimizeDeps: {
       exclude: [
         "@jsquash/avif",

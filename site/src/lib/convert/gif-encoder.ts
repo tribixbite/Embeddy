@@ -1,15 +1,21 @@
 /**
  * Encode RGBA frames into animated GIF using gifenc.
- * Handles color quantization (256 palette), frame optimization,
- * and shared crop/resize pipeline from encoder.ts.
+ * Frame geometry comes from prepare-frame.ts; palette quantisation and
+ * writing live in gif-writer.ts and run in a Worker when available.
  */
 
 import type { DecodedFrame, ConvertOptions, ConvertProgress } from "./types";
 import { subsampleFrames, YIELD_EVERY, yieldToEventLoop } from "./encoder";
 import { FramePreparer, transformFromOptions } from "./prepare-frame";
 import { throwIfAborted } from "./abort";
+import {
+  createGifWriter,
+  qualityToMaxColors,
+  type GifWriterOptions,
+} from "./gif-writer";
+import type { FromGifWorker, ToGifWorker } from "./gif-encoder.worker";
 
-/** Lazy-loaded gifenc module */
+/** Lazy-loaded gifenc module (in-thread path only) */
 let gifencModule: typeof import("gifenc") | null = null;
 
 async function getGifenc() {
@@ -19,23 +25,92 @@ async function getGifenc() {
   return gifencModule;
 }
 
-/** Alpha values at or below this are treated as transparent (matches gifenc's
- *  oneBitAlpha default threshold of 127). */
-const ALPHA_THRESHOLD = 127;
+/** Frames the main thread may queue ahead of the Worker (bounds memory) */
+const MAX_FRAMES_IN_FLIGHT = 2;
 
-/** True when any pixel in the RGBA buffer is transparent under the 1-bit model. */
-function frameHasTransparency(rgba: Uint8Array): boolean {
-  for (let i = 3; i < rgba.length; i += 4) {
-    if (rgba[i] <= ALPHA_THRESHOLD) return true;
-  }
-  return false;
+/** Where prepared frames go: a Worker, or gifenc in-thread */
+interface GifSink {
+  write(rgba: Uint8Array, width: number, height: number, delay: number, transfer: boolean): Promise<void>;
+  finish(): Promise<Uint8Array>;
+  /** Release resources after an error/abort */
+  dispose(): void;
+}
+
+/** In-thread sink — used where Workers don't exist (tests, SSR) */
+async function createInlineSink(opts: GifWriterOptions): Promise<GifSink> {
+  const writer = createGifWriter(await getGifenc(), opts);
+  let written = 0;
+  return {
+    async write(rgba, width, height, delay) {
+      writer.write(rgba, width, height, delay);
+      // Quantization is pure CPU work — yield so the progress bar can paint
+      if (++written % YIELD_EVERY === 0) await yieldToEventLoop();
+    },
+    async finish() {
+      return writer.finish();
+    },
+    dispose() {},
+  };
+}
+
+/**
+ * Worker sink: quantisation runs off the main thread (P5). Up to
+ * {@link MAX_FRAMES_IN_FLIGHT} frames are queued so the main thread prepares
+ * the next frame while the Worker quantises the current one.
+ */
+async function createWorkerSink(opts: GifWriterOptions): Promise<GifSink> {
+  const worker = new Worker(new URL("./gif-encoder.worker.ts", import.meta.url), { type: "module" });
+  /** Resolvers for outstanding replies, in message order */
+  const waiting: Array<{ resolve: (msg: FromGifWorker) => void; reject: (e: Error) => void }> = [];
+  let failure: Error | null = null;
+
+  const fail = (err: Error) => {
+    failure ??= err;
+    while (waiting.length) waiting.shift()!.reject(err);
+  };
+  worker.onmessage = (e: MessageEvent<FromGifWorker>) => {
+    if (e.data.type === "error") fail(new Error(e.data.message));
+    else waiting.shift()?.resolve(e.data);
+  };
+  worker.onerror = (e) => fail(new Error(e.message ? `GIF worker error: ${e.message}` : "Encoder worker failed to load"));
+
+  const request = (msg: ToGifWorker, transfer: Transferable[] = []) =>
+    new Promise<FromGifWorker>((resolve, reject) => {
+      if (failure) return reject(failure);
+      waiting.push({ resolve, reject });
+      worker.postMessage(msg, transfer);
+    });
+
+  const pending: Array<Promise<FromGifWorker>> = [];
+  await request({ type: "init", maxColors: opts.maxColors, loops: opts.loops });
+
+  return {
+    async write(rgba, width, height, delay, transfer) {
+      const owned = transfer && rgba.byteOffset === 0 && rgba.byteLength === rgba.buffer.byteLength;
+      const buffer = (owned ? rgba : rgba.slice()).buffer as ArrayBuffer;
+      pending.push(request({ type: "frame", rgba: buffer, width, height, delay }, [buffer]));
+      if (pending.length >= MAX_FRAMES_IN_FLIGHT) await pending.shift();
+    },
+    async finish() {
+      await Promise.all(pending.splice(0));
+      const reply = await request({ type: "finish" });
+      worker.terminate();
+      if (reply.type !== "done") throw new Error("GIF worker returned no data");
+      return new Uint8Array(reply.bytes);
+    },
+    dispose() {
+      worker.terminate();
+      // Unblock anything still awaiting a reply
+      fail(new DOMException("The operation was aborted", "AbortError") as unknown as Error);
+    },
+  };
 }
 
 /**
  * Encode decoded frames into an animated GIF blob.
- * Pipeline per frame: subsample → crop/resize/rotate (one drawImage) →
- * quantize → write. Frames are transformed one at a time inside the write
- * loop, so no transformed copy of the whole animation is ever held (H2).
+ * Pipeline per frame: subsample → crop/resize/rotate (one drawImage on the
+ * main thread) → quantize + write (in a Worker). Frames are transformed one
+ * at a time, so no transformed copy of the whole animation is held (H2).
  * @param frames - RGBA frames with per-frame delays
  * @param width - Source canvas width
  * @param height - Source canvas height
@@ -54,78 +129,44 @@ export async function encodeAnimatedGif(
   signal?: AbortSignal,
 ): Promise<Blob> {
   throwIfAborted(signal);
-  const { GIFEncoder, quantize, applyPalette } = await getGifenc();
 
   // Subsample if target FPS is lower than source (keeps references, no copy)
   const workFrames = subsampleFrames(frames, sourceFps, options.targetFps);
   const preparer = new FramePreparer(width, height, transformFromOptions(options));
   const { outW, outH } = preparer.plan;
+  const writerOptions: GifWriterOptions = {
+    maxColors: qualityToMaxColors(options.quality),
+    loops: options.loops,
+  };
 
-  // Encode to GIF frame by frame
-  const gif = GIFEncoder();
+  const useWorker = typeof Worker !== "undefined" && typeof window !== "undefined";
+  const sink = useWorker ? await createWorkerSink(writerOptions) : await createInlineSink(writerOptions);
 
-  // Map quality 1-100 to max palette colors 16-256
-  // Higher quality = more colors = larger file but better fidelity
-  const maxColors = Math.max(16, Math.round((options.quality / 100) * 256));
-
-  for (let i = 0; i < workFrames.length; i++) {
+  try {
+    for (let i = 0; i < workFrames.length; i++) {
+      throwIfAborted(signal);
+      const source = workFrames[i]!;
+      onProgress?.({
+        phase: "encoding",
+        percent: Math.round((i / workFrames.length) * 100),
+        frame: i + 1,
+        total: workFrames.length,
+      });
+      const prepared = preparer.fromRgba(source.rgba);
+      await sink.write(prepared.rgba, outW, outH, source.delay, prepared.fresh);
+    }
     throwIfAborted(signal);
-    const source = workFrames[i]!;
-    const frame = { rgba: preparer.fromRgba(source.rgba).rgba, delay: source.delay };
+    const bytes = await sink.finish();
 
     onProgress?.({
       phase: "encoding",
-      percent: Math.round((i / workFrames.length) * 100),
-      frame: i + 1,
+      percent: 100,
+      frame: workFrames.length,
       total: workFrames.length,
     });
-
-    // gifenc repeat semantics: -1 = play once (no Netscape ext),
-    // 0 = loop forever, N = Netscape loop count. Our loops field uses
-    // 0 = forever / N = play N times, so 1 maps to the play-once form.
-    const repeat = i === 0 ? (options.loops === 1 ? -1 : options.loops) : undefined;
-
-    if (frameHasTransparency(frame.rgba)) {
-      // Transparent frame: quantize with alpha so fully transparent pixels
-      // get a dedicated palette entry instead of collapsing to opaque black.
-      const palette = quantize(frame.rgba, maxColors, {
-        format: "rgba4444",
-        oneBitAlpha: true,
-      });
-      const index = applyPalette(frame.rgba, palette, "rgba4444");
-      const transparentIndex = palette.findIndex((color) => color[3] === 0);
-
-      gif.writeFrame(index, outW, outH, {
-        palette,
-        delay: frame.delay,
-        repeat,
-        transparent: true,
-        transparentIndex: Math.max(0, transparentIndex),
-        // Restore-to-background so transparent regions don't smear across frames
-        dispose: 2,
-      });
-    } else {
-      // Opaque frame: rgb444 gives better color matching than rgba4444
-      const palette = quantize(frame.rgba, maxColors, { format: "rgb444" });
-      const index = applyPalette(frame.rgba, palette, "rgb444");
-
-      gif.writeFrame(index, outW, outH, { palette, delay: frame.delay, repeat });
-    }
-
-    // Quantization is pure CPU work — yield so the progress bar can paint
-    if (i % YIELD_EVERY === YIELD_EVERY - 1) await yieldToEventLoop();
+    return new Blob([bytes as BlobPart], { type: "image/gif" });
+  } catch (e) {
+    sink.dispose();
+    throw e;
   }
-
-  gif.finish();
-
-  onProgress?.({
-    phase: "encoding",
-    percent: 100,
-    frame: workFrames.length,
-    total: workFrames.length,
-  });
-
-  // bytesView() is a subarray of gifenc's capacity-doubling buffer; Blob
-  // honors the view's byteOffset/byteLength, so no trailing junk is shipped.
-  return new Blob([gif.bytesView()], { type: "image/gif" });
 }

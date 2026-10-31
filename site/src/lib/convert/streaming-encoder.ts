@@ -17,8 +17,57 @@
 import type { FromWorker, InitOptions, FrameOptions } from "./streaming-encoder.worker";
 import type { ConvertProgress } from "./types";
 
+/**
+ * One idle encoder Worker kept warm between conversions (P3). Spawning a
+ * Worker re-parses the ~660 KB bundle and recompiles the embedded WASM; the
+ * Worker already caches its WASM module across init() calls, so reusing it
+ * makes every encode after the first (including each adaptive target-size
+ * attempt) skip that cost. Workers that errored or were aborted are
+ * terminated instead of returned — their state is unknown.
+ */
+let idleWorker: Worker | null = null;
+let idleTimer: ReturnType<typeof setTimeout> | undefined;
+
+/**
+ * An Emscripten heap never shrinks, so a Worker that just encoded a large
+ * animation keeps that memory while idle. Drop it after this long unused.
+ */
+const IDLE_WORKER_TTL_MS = 60_000;
+
+function acquireWorker(): Worker {
+  clearTimeout(idleTimer);
+  const reused = idleWorker;
+  idleWorker = null;
+  // Vite resolves this to the Worker bundle at build time
+  return (
+    reused ??
+    new Worker(new URL("./streaming-encoder.worker.ts", import.meta.url), { type: "module" })
+  );
+}
+
+function releaseWorker(worker: Worker) {
+  if (idleWorker) {
+    worker.terminate();
+    return;
+  }
+  idleWorker = worker;
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => {
+    idleWorker?.terminate();
+    idleWorker = null;
+  }, IDLE_WORKER_TTL_MS);
+}
+
 export class StreamingWebPEncoder {
   private worker: Worker | null = null;
+  private onWorkerError = (e: ErrorEvent) => {
+    this.failPending(
+      new Error(e.message ? `Encoder worker error: ${e.message}` : "Encoder worker failed to load"),
+    );
+  };
+  private onMessageError = () => {
+    this.failPending(new Error("Encoder worker message could not be deserialized"));
+  };
   private totalFrames = 0;
   private pushedFrames = 0;
   private onProgress?: (p: ConvertProgress) => void;
@@ -30,23 +79,14 @@ export class StreamingWebPEncoder {
     this.onProgress = onProgress;
     this.pushedFrames = 0;
 
-    // Vite resolves this to the Worker bundle at build time
-    this.worker = new Worker(
-      new URL("./streaming-encoder.worker.ts", import.meta.url),
-      { type: "module" },
-    );
+    this.worker = acquireWorker();
 
     // A Worker whose script (or vendored WASM import) fails to fetch fires
     // "error" and never posts a message — without these listeners init(),
-    // pushFrame() and finalize() would hang the conversion forever.
-    this.worker.addEventListener("error", (e) => {
-      this.failPending(
-        new Error(e.message ? `Encoder worker error: ${e.message}` : "Encoder worker failed to load"),
-      );
-    });
-    this.worker.addEventListener("messageerror", () => {
-      this.failPending(new Error("Encoder worker message could not be deserialized"));
-    });
+    // pushFrame() and finalize() would hang the conversion forever. They are
+    // removed again when the Worker goes back to the pool.
+    this.worker.addEventListener("error", this.onWorkerError);
+    this.worker.addEventListener("messageerror", this.onMessageError);
 
     return new Promise<void>((resolve, reject) => {
       this.rejectActive = reject;
@@ -150,7 +190,8 @@ export class StreamingWebPEncoder {
           });
 
           const blob = new Blob([e.data.data], { type: "image/webp" });
-          this.terminate();
+          // Clean finish: the Worker released its encoder — keep it warm
+          this.release();
           resolve(blob);
         } else if (e.data.type === "error") {
           this.worker!.removeEventListener("message", handler);
@@ -184,10 +225,25 @@ export class StreamingWebPEncoder {
     reject?.(err);
   }
 
-  private terminate() {
-    if (this.worker) {
-      this.worker.terminate();
+  /** Detach from the Worker, removing this encoder's listeners */
+  private detach(): Worker | null {
+    const worker = this.worker;
+    if (worker) {
+      worker.removeEventListener("error", this.onWorkerError);
+      worker.removeEventListener("messageerror", this.onMessageError);
       this.worker = null;
     }
+    return worker;
+  }
+
+  /** Return a cleanly finished Worker to the pool */
+  private release() {
+    const worker = this.detach();
+    if (worker) releaseWorker(worker);
+  }
+
+  /** Kill a Worker whose state is unknown (error/abort) */
+  private terminate() {
+    this.detach()?.terminate();
   }
 }

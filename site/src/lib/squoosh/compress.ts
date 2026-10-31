@@ -103,6 +103,37 @@ export function buildEncodeOptions(
 }
 
 /**
+ * Decode to ImageData, preferring the browser's native decoder (P5): it is
+ * hardware-accelerated where available, needs no WASM download, honours
+ * EXIF orientation, and covers formats @jsquash can't (HEIC on Safari).
+ * Falls back to the @jsquash WASM decoder when native decoding is missing
+ * or fails (e.g. AVIF on older browsers). GIF is rejected by the caller.
+ */
+async function decodeImage(buffer: ArrayBuffer, mimeType: string): Promise<ImageData> {
+  if (typeof createImageBitmap === "function" && typeof OffscreenCanvas !== "undefined") {
+    try {
+      const bitmap = await createImageBitmap(new Blob([buffer], { type: mimeType }), {
+        // Keep straight alpha so translucent pixels round-trip exactly
+        premultiplyAlpha: "none",
+      });
+      try {
+        const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        if (!ctx) throw new Error("Could not create canvas context");
+        ctx.drawImage(bitmap, 0, 0);
+        return ctx.getImageData(0, 0, bitmap.width, bitmap.height);
+      } finally {
+        bitmap.close();
+      }
+    } catch {
+      // Native decoder can't handle it — fall through to WASM
+    }
+  }
+  const decoder = await getDecoder(mimeType);
+  return decoder.decode(buffer);
+}
+
+/**
  * Compress a source image File to the target format with given options.
  * Returns a Blob of the compressed image.
  */
@@ -111,8 +142,7 @@ export async function compress(file: File, opts: CompressOptions): Promise<Blob>
   const mimeType = detectMimeType(buffer, file.type);
 
   // Decode
-  const decoder = await getDecoder(mimeType);
-  let imageData = await decoder.decode(buffer);
+  let imageData = await decodeImage(buffer, mimeType);
 
   // Resize if needed
   if (opts.maxDimension > 0) {
