@@ -276,3 +276,62 @@ MASTER-TODO. Ordered by severity: M1-M10 high, M11-M40 med, M41-M79 low.
 - [ ] **8.5** on-device: verify MP4/Original encodes (A/V sync, volume steps), no-audio inputs, container mapping, share/save mime — see feat-app-stitch report checklist
 - [x] **8.6** site: percent + ETA on convert progress (per-phase clock, per-attempt reset); dead wasm-webp dep removed
 - [x] **8.7** app: ETA on conversion card; per-attempt elapsed baseline fix
+
+## Phase 9: 2026-10-31 Audit, Video-Editor Scope, Play Store Readiness
+
+Scope widened: Embeddy is both an embed-media optimizer and a quick personal
+video editor (trim, splice/join, convert). Two fresh audits (site/worker: 3 high,
+16 med, 6 low; app: 4 high, 10 med, 6 low), all implemented with tests.
+Suites: site 143 → 249, worker 53 → 67, app 194 → 301. Lint 0 errors.
+
+### Play Store readiness
+- [x] **9.1** targetSdk/compileSdk 36 (required since 2026-08-31), AGP 8.9.3 → 8.13.1
+- [x] **9.2** Removed READ_MEDIA_IMAGES/VIDEO + READ_EXTERNAL_STORAGE (unused; Play photo/video policy); WRITE_EXTERNAL_STORAGE maxSdk 28
+- [x] **9.3** Backup rules (prefs only), predictive back, themed-icon monochrome layer
+- [x] **9.4** versionCode scheme widened (old one failed every release from CI run 100)
+- [x] **9.5** AAB built in CI as a separate artifact; ABI splits auto-disabled for bundle tasks (AGP 8.13 bug 402800800)
+- [x] **9.6** Privacy policy at /privacy/, linked from site footer and in-app About sheet
+- [x] **9.7** Store graphics (512 icon, 1024x500 feature graphic) + generator script; short description no longer claims "fully offline"
+- [x] **9.8** docs/play-store.md: Data safety answers, content rating, signing options, closed-test rule
+- [x] **9.9** All 18 native libs verified 16 KB-aligned
+- [x] **9.10** Phone screenshots retaken at 900x1800 (2:1); old set was 540x1200 (2.22:1, over Play's 2:1 max)
+- [ ] **9.11** Play Console steps only the account owner can do (see docs/play-store.md)
+
+### Web (site + worker)
+- [x] **9.20** Upload metadata strip rewritten (JPEG/PNG/WebP walker), fails closed — previously uploaded GPS on any error
+- [x] **9.21** Convert: cancellable decode/encode, single-pass frame transform (no triple frame copies), routed pipeline in lib with tests
+- [x] **9.22** Squoosh "Change file" mid-compress blank screen; native image decode
+- [x] **9.23** SW update prompt instead of mid-session takeover; workers/WASM cached offline; chunk-load reload
+- [x] **9.24** Worker upstream timeouts + response caps; /api/inspect tests
+- [x] **9.25** A11y: named nav links, progressbar roles, 44px targets, drop-zone keyboard
+- [x] **9.26** Self-hosted fonts; shared Layout (no duplicated head)
+- [x] **9.27** Features: paste, page-wide drop, PWA share target/file handlers, share sheet, send-to-Upload, trim, speed, rotate/flip, frame grab, MP4/WebM export (Mediabunny, MPL-2.0), multi-clip join
+
+### Android
+- [x] **9.40** Copy/probe failure no longer crashes (H1); cancelled upload actually stops (H2)
+- [x] **9.41** Per-file EditSpec: trim/segments reset per input, survive preset change and process death
+- [x] **9.42** Squoosh decode memory budget; OOM → error state
+- [x] **9.43** Even video dimensions, per-frame palettes, SAF input for FFmpeg, debounced settings, "keep original" res/fps, direct MP4 bitrate for target size, -map_metadata -1
+- [x] **9.44** Features: GIF output, mute, extract audio (m4a), speed 0.25-4x, rotate/flip, free crop, frame grab → Squoosh, join videos, reverse (≤10 s), image sequence → WebP/GIF/MP4, SEND_MULTIPLE
+- [x] **9.45** About sheet with licences (FFmpeg GPL-3.0 build) + privacy/source links
+- [x] **9.46** Found on device: "Add clips" from a loaded video (join was only reachable from the empty screen) — single → join promotion keeps trim/segments
+- [x] **9.47** Found on device: .m4a saved/shared as application/octet-stream; portrait output preview cropped; blank box for audio; meaningless "quality" on video/audio
+- [x] **9.49** Found on device: Inspect embed card left an empty block when the og:image failed (429)
+- [x] **9.48** Found on device: sheets under status bar; Inspect keyboard covering results; rotate gave no visible/announced state; duplicate (i) icon; 36dp inspect button
+
+### On-device verification (Saga, Android 13, arm64) — 2026-10-31
+Verified: SDK-36 install requests no storage/media permissions; edge-to-edge
+insets; SAF pick → probe; MP4 2x speed (720x406 even, 3.02 s, AAC kept, source
+GPS tag stripped); GIF rotate 90 (405x720, 36 frames); M4A extraction (AAC
+3.0 s); Save → MediaStore Downloads; Edit again keeps file + edit; unreadable
+input → error card, no crash; About sheet; Inspect http:// → https; frame grab →
+Squoosh hand-off → 80% smaller WebP.
+
+Also verified: Add clips on a trimmed video → join (trim carried as clip range),
+landscape+audio joined with silent rotated portrait → 7.37 s MP4 (portrait
+upright, letterboxed) and 7.37 s M4A (silence padded); process-death restore of
+file + edit after reinstall; About sheet; edge-to-edge sheets.
+
+Not yet verified on device: image sequence, reverse, crop overlay, Upload cancel (would publish to a
+public host if cancel failed), API 26-28 save path, real share-sheet intents
+from Photos/Files (adb-issued grants do not work without READ_MEDIA_*).
