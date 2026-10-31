@@ -44,6 +44,11 @@ val abiVersionCodes = mapOf(
     "x86_64" to 3,
 )
 
+/** True when any requested task builds an Android App Bundle (bundleRelease etc.). */
+val buildingBundle = gradle.startParameter.taskNames.any {
+    it.substringAfterLast(':').startsWith("bundle", ignoreCase = true)
+}
+
 /** ABIs shipped in a normal release build. */
 val RELEASE_ABIS = arrayOf("arm64-v8a", "armeabi-v7a", "x86_64")
 
@@ -127,7 +132,16 @@ android {
     splits {
         abi {
             // -PsingleApk collapses everything into one all-ABI APK.
-            isEnable = !project.hasProperty("singleApk")
+            //
+            // Splits are also off whenever an App Bundle is requested: Play cuts
+            // per-device APKs from the bundle itself, and AGP 8.13 fails
+            // bundleRelease with "Multiple shrunk-resources files found" when ABI
+            // splits and resource shrinking are both on
+            // (https://issuetracker.google.com/402800800). The check is per Gradle
+            // invocation, so `assembleX bundleY` in ONE command yields only a
+            // universal APK; build split APKs and the bundle in separate runs
+            // (release.yml does).
+            isEnable = !project.hasProperty("singleApk") && !buildingBundle
             // reset() is required — include() ADDS to the default set (every known
             // ABI), so without it AGP also emits empty mips/mips64/riscv64/armeabi/x86
             // APKs that contain no FFmpeg .so files and crash on first use.
