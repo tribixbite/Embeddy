@@ -53,6 +53,9 @@ jobs:
         with:
           path: ./site
           node-version: 22
+          # Pin the manager: auto-detection guessed npm from a stale
+          # package-lock.json while CI tests ran against bun.lock.
+          package-manager: bun@latest
 
   deploy:
     needs: build

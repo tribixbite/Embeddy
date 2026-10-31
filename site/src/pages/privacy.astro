@@ -1,0 +1,129 @@
+---
+/**
+ * Privacy policy for the Embeddy Android app and the embeddy.link browser
+ * tools. Linked from the Play Store listing, the app's About sheet and the
+ * site footer. Every statement here must match the code: if a network call
+ * is added to the app or the site, update the relevant section.
+ */
+import ToolLayout from "../layouts/ToolLayout.astro";
+
+const updated = "2026-10-31";
+---
+
+<ToolLayout
+  title="Privacy"
+  description="What Embeddy does with your files and data: no accounts, no analytics, no ads. Processing happens on your device unless you choose to upload or inspect a URL."
+>
+  <article class="prose-embeddy mx-auto max-w-2xl space-y-6 text-sm leading-relaxed text-white/75">
+    <header>
+      <h1 class="text-2xl font-bold text-white">Privacy policy</h1>
+      <p class="mt-1 text-white/50">Last updated {updated}. Applies to the Embeddy Android app and the tools at embeddy.link.</p>
+    </header>
+
+    <section>
+      <h2>Summary</h2>
+      <ul>
+        <li>No accounts, no advertising, no analytics, no crash-reporting SDKs, no tracking.</li>
+        <li>Converting, trimming, joining, compressing and reading metadata from a file happens entirely on your device.</li>
+        <li>Data leaves your device only when you explicitly use <strong>Upload</strong> or <strong>Inspect a URL</strong>, as described below.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Android app</h2>
+      <h3>Files you open</h3>
+      <p>
+        The app reads only the files you pick with the system file picker or share to it. It does not request
+        access to your photo or video library. Intermediate and output files are written to the app's private
+        cache and are deleted automatically within 24 hours; files you save go to your Downloads folder.
+      </p>
+      <h3>Settings</h3>
+      <p>
+        Your encoder and compression preferences are stored on the device. If Android backup is enabled on your
+        device, these preferences may be included in your Google account backup; cached media is excluded.
+      </p>
+      <h3>Upload</h3>
+      <p>
+        When you tap Upload, the file you chose is sent directly from your device to the host you selected —
+        <a href="https://0x0.st" rel="noopener noreferrer" target="_blank">0x0.st</a> or
+        <a href="https://catbox.moe" rel="noopener noreferrer" target="_blank">catbox.moe</a>. Uploads are
+        <strong>public</strong>: anyone with the link can download the file. The host receives your IP address and
+        the file, and its own terms and retention rules apply. Embeddy's operator does not receive a copy. For JPEG,
+        PNG and WebP files the app can strip EXIF metadata (including GPS location) before upload; it warns you when a
+        format cannot be stripped.
+      </p>
+      <h3>Inspect a URL</h3>
+      <p>
+        When you inspect a web address, the app requests that page directly from your device to read its
+        Open Graph and Twitter tags. The website you inspect sees an ordinary request from your IP address.
+      </p>
+    </section>
+
+    <section>
+      <h2>Browser tools (embeddy.link)</h2>
+      <p>
+        The site is static and served by GitHub Pages, which, like any web host, processes your IP address to
+        deliver the pages. Fonts and code are self-hosted; no third-party scripts, cookies or analytics are
+        loaded. A service worker caches the site for offline use, in your browser only.
+      </p>
+      <p>
+        Convert, trim/join and Squoosh run locally in your browser; files are never uploaded. Inspecting a local
+        file also runs locally.
+      </p>
+      <p>
+        <strong>Inspect a URL</strong> and <strong>Upload</strong> cannot be done directly from a browser because of
+        cross-origin restrictions, so they go through Embeddy's relay at <code>api.embeddy.link</code>, a Cloudflare
+        Worker. The relay fetches the page you asked about, or forwards your file to the host you chose, and returns
+        the result. It does not store files or page contents. Cloudflare keeps short-lived request logs (time, path,
+        status and similar request metadata) for operating and debugging the relay; these are not used for any other
+        purpose.
+      </p>
+    </section>
+
+    <section>
+      <h2>Children</h2>
+      <p>Embeddy is a general-purpose tool and is not directed at children.</p>
+    </section>
+
+    <section>
+      <h2>Changes and contact</h2>
+      <p>
+        Changes to this policy are published on this page and in the
+        <a href="https://github.com/tribixbite/Embeddy" rel="noopener noreferrer" target="_blank">source repository</a>.
+        Questions: open an issue on <a href="https://github.com/tribixbite/Embeddy/issues" rel="noopener noreferrer" target="_blank">GitHub</a>.
+      </p>
+    </section>
+  </article>
+</ToolLayout>
+
+<style>
+  /* Minimal prose styling scoped to this article (no typography plugin). */
+  .prose-embeddy :global(h2) {
+    margin-bottom: 0.5rem;
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: white;
+  }
+  .prose-embeddy :global(h3) {
+    margin-top: 0.75rem;
+    margin-bottom: 0.25rem;
+    font-weight: 600;
+    color: rgb(255 255 255 / 0.9);
+  }
+  .prose-embeddy :global(ul) {
+    list-style: disc;
+    padding-left: 1.25rem;
+  }
+  .prose-embeddy :global(li + li) {
+    margin-top: 0.25rem;
+  }
+  .prose-embeddy :global(a) {
+    color: var(--color-brand-300);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .prose-embeddy :global(code) {
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+  }
+</style>

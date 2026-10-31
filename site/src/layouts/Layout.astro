@@ -1,26 +1,41 @@
 ---
+/**
+ * Base document for every page: <head> metadata (OG/Twitter/structured
+ * data), self-hosted fonts, PWA manifest, icons, the site footer and the
+ * service-worker registration. ToolLayout wraps this rather than copying it,
+ * so a head/footer change lands on every page at once.
+ */
+import "@fontsource-variable/inter";
+import "@fontsource/jetbrains-mono/400.css";
+import "@fontsource/jetbrains-mono/500.css";
 import "../styles/global.css";
+import SiteFooter from "../components/SiteFooter.astro";
 import { APP_VERSION } from "../lib/build";
 
 interface Props {
+  /** Full document title (used verbatim). */
   title?: string;
   description?: string;
+  /** Emit SoftwareApplication JSON-LD (the landing page only). */
+  structuredData?: boolean;
 }
 
 const {
-  title = "Embeddy — Swiss-army knife for embeddable media on Android",
-  description = "Animated WebP converter, image compressor, OG metadata inspector, and anonymous file uploader. Built with Kotlin 2, Jetpack Compose, and Material 3.",
+  title = "Embeddy — Convert, trim and share video & animated media",
+  description = "Animated WebP/GIF converter, quick video trimmer and joiner, image compressor, OG metadata inspector, and anonymous file uploader — on Android and in your browser.",
+  structuredData = false,
 } = Astro.props;
 
 const canonicalURL = new URL(Astro.url.pathname, Astro.site);
 const ogImage = new URL(`${import.meta.env.BASE_URL}og-preview.webp`, Astro.site);
+const ogAlt = `${title} — ${description}`;
 ---
 
 <!doctype html>
 <html lang="en" class="dark">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="generator" content={Astro.generator} />
     <meta name="theme-color" content="#1a1025" />
     <meta name="color-scheme" content="dark" />
@@ -41,82 +56,61 @@ const ogImage = new URL(`${import.meta.env.BASE_URL}og-preview.webp`, Astro.site
     <meta property="og:image:type" content="image/webp" />
     <meta property="og:image:width" content="800" />
     <meta property="og:image:height" content="420" />
-    <meta property="og:image:alt" content="Embeddy — Convert, Inspect, Upload, Squoosh. Four tools for embeddable media on Android." />
+    <meta property="og:image:alt" content={ogAlt} />
 
     <!-- Twitter Card -->
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={ogImage} />
-    <meta name="twitter:image:alt" content="Embeddy — Convert, Inspect, Upload, Squoosh. Four tools for embeddable media on Android." />
+    <meta name="twitter:image:alt" content={ogAlt} />
 
-    <!-- Structured Data: SoftwareApplication -->
-    <script
-      is:inline
-      type="application/ld+json"
-      set:html={JSON.stringify({
-        "@context": "https://schema.org",
-        "@type": "SoftwareApplication",
-        name: "Embeddy",
-        operatingSystem: "Android",
-        applicationCategory: "MultimediaApplication",
-        description: description,
-        url: canonicalURL.toString(),
-        downloadUrl:
-          "https://github.com/tribixbite/Embeddy/releases/latest",
-        softwareVersion: APP_VERSION,
-        license: "https://www.gnu.org/licenses/gpl-3.0.html",
-        datePublished: "2025-01-01",
-        author: {
-          "@type": "Person",
-          name: "tribixbite",
-          url: "https://github.com/tribixbite",
-        },
-        screenshot: ogImage.toString(),
-        offers: {
-          "@type": "Offer",
-          price: "0",
-          priceCurrency: "USD",
-        },
-      })}
-    />
-
-    <!-- Preconnect to Google Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
-      rel="stylesheet"
-    />
+    {structuredData && (
+      <script
+        is:inline
+        type="application/ld+json"
+        set:html={JSON.stringify({
+          "@context": "https://schema.org",
+          "@type": "SoftwareApplication",
+          name: "Embeddy",
+          operatingSystem: "Android",
+          applicationCategory: "MultimediaApplication",
+          description,
+          url: canonicalURL.toString(),
+          downloadUrl: "https://github.com/tribixbite/Embeddy/releases/latest",
+          softwareVersion: APP_VERSION,
+          license: "https://www.gnu.org/licenses/gpl-3.0.html",
+          datePublished: "2025-01-01",
+          author: {
+            "@type": "Person",
+            name: "tribixbite",
+            url: "https://github.com/tribixbite",
+          },
+          screenshot: ogImage.toString(),
+          offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+        })}
+      />
+    )}
 
     <!-- PWA -->
     <link rel="manifest" href={`${import.meta.env.BASE_URL}manifest.json`} />
 
     <!-- Icons -->
-    <link
-      rel="icon"
-      type="image/svg+xml"
-      href={`${import.meta.env.BASE_URL}favicon.svg`}
-    />
-    <link
-      rel="icon"
-      type="image/x-icon"
-      href={`${import.meta.env.BASE_URL}favicon.ico`}
-    />
+    <link rel="icon" type="image/svg+xml" href={`${import.meta.env.BASE_URL}favicon.svg`} />
+    <link rel="icon" type="image/x-icon" href={`${import.meta.env.BASE_URL}favicon.ico`} />
     <link
       rel="apple-touch-icon"
       sizes="180x180"
       href={`${import.meta.env.BASE_URL}apple-touch-icon.png`}
     />
   </head>
-  <body
-    class="min-h-screen bg-dark-950 text-white font-body antialiased"
-  >
+  <body class="min-h-screen bg-dark-950 text-white font-body antialiased">
     <slot />
+    <SiteFooter />
     <script is:inline>
       if ("serviceWorker" in navigator) {
         navigator.serviceWorker.register("/sw.js").then((reg) => {
-          // Check for updates every 60s and on visibility change
+          // Check for updates every 60s and whenever the tab becomes visible
           setInterval(() => reg.update(), 60_000);
           document.addEventListener("visibilitychange", () => {
             if (!document.hidden) reg.update();
