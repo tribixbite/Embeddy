@@ -1,17 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Upload and URL inspection only. -->
     <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
-        android:maxSdkVersion="32" />
+    <!--
+      No READ_MEDIA_* / READ_EXTERNAL_STORAGE: every file is opened through the
+      Storage Access Framework (OpenDocument) or arrives via a share intent with
+      a URI grant, neither of which needs a storage permission. Google Play only
+      allows READ_MEDIA_IMAGES/VIDEO for gallery-type apps with broad access.
+
+      WRITE_EXTERNAL_STORAGE is requested at runtime only on API 26-28, where
+      MediaStore.Downloads does not exist (see ui/components/SaveMedia.kt).
+    -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-        android:maxSdkVersion="29" />
+        android:maxSdkVersion="28" />
 
     <application
         android:name=".EmbeddyApp"
         android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:enableOnBackInvokedCallback="true"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
@@ -39,6 +48,17 @@
                 <data android:mimeType="video/*" />
                 <data android:mimeType="image/gif" />
                 <data android:mimeType="image/webp" />
+            </intent-filter>
+
+            <!--
+              Share several files at once: videos are joined back to back,
+              photos become an image sequence (see MainViewModel.onSharedIntent).
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="video/*" />
+                <data android:mimeType="image/*" />
             </intent-filter>
 
             <!-- Open media files directly -->

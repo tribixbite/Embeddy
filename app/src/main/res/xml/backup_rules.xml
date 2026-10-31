@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Auto Backup rules for API 23-30 (android:fullBackupContent).
+  Back up only user preferences (DataStore). Media lives in the cache dir,
+  which is never backed up, but everything else is excluded explicitly so a
+  future files-dir artifact is not silently uploaded to the user's Drive.
+-->
+<full-backup-content>
+    <include domain="file" path="datastore/" />
+</full-backup-content>

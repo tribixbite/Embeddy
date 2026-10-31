@@ -17,18 +17,24 @@ val versionMinor = System.getenv("VERSION_MINOR")?.toIntOrNull()
 val versionPatch = buildNumber
     ?: (versionProps["VERSION_PATCH"] as String).toInt()
 
-// Base versionCode = MAJOR*10000 + MINOR*100 + PATCH.
+// Base versionCode = MAJOR*1_000_000 + MINOR*10_000 + PATCH.
 // Per-ABI split APKs get base*10 + abiCode, which is what F-Droid's
 // `VercodeOperation: 10 * %c + N` reproduces. The two must agree exactly or
 // F-Droid will look for a versionCode our APKs do not carry.
-val baseVersionCode = versionMajor * 10000 + versionMinor * 100 + versionPatch
+//
+// PATCH is the CI run number, so it gets four digits. The previous scheme
+// (MAJOR*10000 + MINOR*100 + PATCH) capped PATCH at 99 and would have failed
+// every release build from run 100 on; the widened scheme still sorts above
+// every code published under the old one (0.1.52 = 152 -> 0.1.53 = 10053).
+val baseVersionCode = versionMajor * 1_000_000 + versionMinor * 10_000 + versionPatch
 
-// Guard the scheme: MINOR or PATCH reaching 100 would collide with the next
-// place value and could emit a versionCode lower than an already-published one,
-// which Android refuses to install over.
-require(versionMinor < 100 && versionPatch < 100) {
-    "versionCode scheme collision: MINOR ($versionMinor) and PATCH ($versionPatch) " +
-        "must stay below 100 — see the versionCode formula in app/build.gradle.kts"
+// Guard the scheme: a field overflowing its place value would collide with the
+// next one and could emit a versionCode lower than an already-published one,
+// which Android and Google Play both refuse. Per-ABI codes are base*10 + n, so
+// MAJOR must also keep base*10 under Int.MAX_VALUE (2_147_483_647).
+require(versionMinor < 100 && versionPatch < 10_000 && versionMajor < 200) {
+    "versionCode scheme overflow: MAJOR ($versionMajor) < 200, MINOR ($versionMinor) < 100 " +
+        "and PATCH ($versionPatch) < 10000 — see the versionCode formula in app/build.gradle.kts"
 }
 
 /** ABI -> versionCode suffix. Must match VercodeOperation in the F-Droid recipe. */
