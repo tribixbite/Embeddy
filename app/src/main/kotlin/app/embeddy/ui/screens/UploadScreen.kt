@@ -66,6 +66,7 @@ import app.embeddy.R
 import app.embeddy.upload.UploadHost
 import app.embeddy.upload.UploadResult
 import app.embeddy.upload.UploadState
+import app.embeddy.util.FileInfoUtils
 import app.embeddy.viewmodel.UploadViewModel
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -143,6 +144,7 @@ fun UploadScreen(viewModel: UploadViewModel = viewModel()) {
                 UploadProgressCard(
                     fileName = s.fileName,
                     progress = s.progress,
+                    onCancel = viewModel::cancelUpload,
                 )
             }
 
@@ -262,7 +264,7 @@ private fun FileReadyCard(
             }
             Spacer(Modifier.height(4.dp))
             Text(
-                text = formatSize(fileSize),
+                text = FileInfoUtils.formatFileSize(fileSize),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -473,7 +475,7 @@ private fun shareUrl(context: Context, url: String) {
 }
 
 @Composable
-private fun UploadProgressCard(fileName: String, progress: Float) {
+private fun UploadProgressCard(fileName: String, progress: Float, onCancel: () -> Unit) {
     val animatedProgress by animateFloatAsState(
         targetValue = progress,
         animationSpec = tween(300),
@@ -518,14 +520,12 @@ private fun UploadProgressCard(fileName: String, progress: Float) {
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary,
             )
+            Spacer(Modifier.height(8.dp))
+            // Cancelling aborts the transfer itself (UploadEngine disconnects),
+            // so nothing is published after the user backs out.
+            TextButton(onClick = onCancel) {
+                Text(stringResource(R.string.cancel))
+            }
         }
-    }
-}
-
-private fun formatSize(bytes: Long): String {
-    return when {
-        bytes >= 1_000_000 -> String.format("%.1f MB", bytes / 1_000_000.0)
-        bytes >= 1_000 -> String.format("%.1f KB", bytes / 1_000.0)
-        else -> "$bytes B"
     }
 }

@@ -7,6 +7,9 @@ import android.net.Uri
 import android.os.Build
 import androidx.exifinterface.media.ExifInterface
 import app.embeddy.util.FileInfoUtils
+import app.embeddy.util.UriStaging
+import app.embeddy.viewmodel.rethrowIfCancellation
+import com.arthenica.ffmpegkit.FFmpegKitConfig
 import com.arthenica.ffmpegkit.FFprobeKit
 import com.arthenica.ffmpegkit.ReturnCode
 import kotlinx.coroutines.Dispatchers
@@ -25,9 +28,16 @@ import java.util.Locale
  */
 class MetadataEngine {
 
-    /** Fetch and parse metadata from the given URL. */
+    /**
+     * Fetch and parse metadata from the given URL.
+     *
+     * The URL is always fetched over HTTPS ([normalizeInspectUrl]): cleartext
+     * HTTP is blocked for apps targeting API 28+, so a typed `http://` link
+     * used to fail with a raw "Cleartext HTTP traffic … not permitted"
+     * exception. Failures map to a [FetchError] the screen localizes.
+     */
     suspend fun fetchMetadata(urlString: String): MetadataResult = withContext(Dispatchers.IO) {
-        val normalizedUrl = if (!urlString.startsWith("http")) "https://$urlString" else urlString
+        val normalizedUrl = normalizeInspectUrl(urlString)
 
         try {
             val doc: Document = Jsoup.connect(normalizedUrl)
@@ -39,7 +49,9 @@ class MetadataEngine {
 
             parseDocument(normalizedUrl, doc)
         } catch (e: Exception) {
-            MetadataResult(url = normalizedUrl, error = e.message ?: "Failed to fetch URL")
+            e.rethrowIfCancellation()
+            Timber.w(e, "Fetch failed for %s", normalizedUrl)
+            MetadataResult(url = normalizedUrl, error = e.message ?: "", fetchError = classifyFetchError(e))
         }
     }
 
@@ -293,12 +305,21 @@ class MetadataEngine {
      * Use FFprobeKit to extract detailed stream info not available from MediaMetadataRetriever:
      * codec name/profile, pixel format, bit depth, color space, keyframe interval, etc.
      */
-    private fun probeWithFfprobe(context: Context, uri: Uri): Map<String, String> {
+    private suspend fun probeWithFfprobe(context: Context, uri: Uri): Map<String, String> {
         val tags = linkedMapOf<String, String>()
-        val tempFile = copyUriToTemp(context, uri) ?: return tags
+        // Read through ffmpeg-kit's SAF protocol when the provider supports it —
+        // inspecting a 2 GB video used to copy all of it into the cache first.
+        // Each FFprobe run needs its own SAF parameter (the descriptor is closed
+        // with the session), hence a path factory rather than one path.
+        var tempFile: File? = null
+        val nextPath: suspend () -> String = {
+            safParameterOrNull(context, uri) ?: (tempFile ?: UriStaging.copyToTemp(
+                context, uri, File(context.cacheDir, "inspect_temp"), "probe",
+            ).also { tempFile = it }).absolutePath
+        }
 
         try {
-            val session = FFprobeKit.getMediaInformation(tempFile.absolutePath)
+            val session = FFprobeKit.getMediaInformation(nextPath())
             if (!ReturnCode.isSuccess(session.returnCode)) return tags
 
             val info = session.mediaInformation ?: return tags
@@ -374,10 +395,10 @@ class MetadataEngine {
             }
 
             // Probe for keyframe positions using FFprobe packet analysis
-            val keyframeTags = probeKeyframes(tempFile.absolutePath)
+            val keyframeTags = probeKeyframes(nextPath())
             tags.putAll(keyframeTags)
         } finally {
-            tempFile.delete()
+            tempFile?.delete()
         }
 
         return tags
@@ -439,31 +460,12 @@ class MetadataEngine {
         return tags
     }
 
-    /** Copy a content URI to a temp file for FFprobe access. */
-    private fun copyUriToTemp(context: Context, uri: Uri): File? {
-        return try {
-            val tempDir = File(context.cacheDir, "inspect_temp").also { it.mkdirs() }
-            val tempFile = File(tempDir, "probe_${System.currentTimeMillis()}")
-            val stream = context.contentResolver.openInputStream(uri)
-            if (stream == null) {
-                Timber.w("Cannot open input stream for URI: %s", uri)
-                return null
-            }
-            stream.use { input ->
-                tempFile.outputStream().use { output ->
-                    input.copyTo(output)
-                }
-            }
-            if (tempFile.length() == 0L) {
-                Timber.w("Copied temp file is empty for URI: %s", uri)
-                tempFile.delete()
-                return null
-            }
-            tempFile
-        } catch (e: Exception) {
-            Timber.w(e, "Failed to copy URI to temp file for FFprobe: %s", uri)
-            null
-        }
+    /** An ffmpeg-kit `saf:` URL for [uri], or null when the provider can't supply one. */
+    private fun safParameterOrNull(context: Context, uri: Uri): String? = try {
+        FFmpegKitConfig.getSafParameterForRead(context, uri)
+    } catch (e: Exception) {
+        Timber.w(e, "No SAF parameter for %s, falling back to a temp copy", uri)
+        null
     }
 
     companion object {
@@ -484,7 +486,9 @@ data class MetadataResult(
     val twitterTags: Map<String, String> = emptyMap(),
     val generalTags: Map<String, String> = emptyMap(),
     val mediaTags: Map<String, String> = emptyMap(),
+    /** Raw failure detail (logged/secondary); [fetchError] drives the UI copy. */
     val error: String? = null,
+    val fetchError: FetchError? = null,
 ) {
     val hasData: Boolean get() = ogTags.isNotEmpty() || twitterTags.isNotEmpty() ||
         generalTags.isNotEmpty() || mediaTags.isNotEmpty()
@@ -510,5 +514,58 @@ sealed interface InspectState {
     data object Idle : InspectState
     data class Fetching(val url: String) : InspectState
     data class Success(val result: MetadataResult) : InspectState
-    data class Error(val message: String) : InspectState
+    data class Error(
+        val message: String,
+        /** Set for URL fetches; the screen shows matching localized guidance. */
+        val fetchError: FetchError? = null,
+    ) : InspectState
+}
+
+/** Why a URL fetch failed, mapped to localized copy by the Inspect screen. */
+enum class FetchError {
+    /** DNS failed — no such host, or no network. */
+    UNKNOWN_HOST,
+
+    /** The server didn't answer in time. */
+    TIMEOUT,
+
+    /** TLS failed: the site has no valid HTTPS, or the certificate is bad. */
+    TLS,
+
+    /** A redirect pointed at plain HTTP, which Android blocks. */
+    CLEARTEXT_BLOCKED,
+
+    /** The server answered with an HTTP error status. */
+    HTTP_STATUS,
+
+    /** The URL is not something we can fetch. */
+    INVALID_URL,
+
+    /** Anything else. */
+    OTHER,
+}
+
+/**
+ * Normalize user input to the HTTPS URL that is actually fetched: trims, adds
+ * `https://` when no scheme was typed, and upgrades `http://` to `https://`
+ * (cleartext is blocked at targetSdk >= 28 and nearly every site serves both).
+ */
+fun normalizeInspectUrl(input: String): String {
+    val trimmed = input.trim()
+    return when {
+        trimmed.startsWith("https://", ignoreCase = true) -> trimmed
+        trimmed.startsWith("http://", ignoreCase = true) -> "https://" + trimmed.substring("http://".length)
+        else -> "https://$trimmed"
+    }
+}
+
+/** Map a fetch exception to a [FetchError]. */
+fun classifyFetchError(e: Throwable): FetchError = when {
+    e is java.net.UnknownHostException -> FetchError.UNKNOWN_HOST
+    e is java.net.SocketTimeoutException -> FetchError.TIMEOUT
+    e is javax.net.ssl.SSLException -> FetchError.TLS
+    e is org.jsoup.HttpStatusException -> FetchError.HTTP_STATUS
+    e is IllegalArgumentException || e is java.net.MalformedURLException -> FetchError.INVALID_URL
+    e.message?.contains("Cleartext", ignoreCase = true) == true -> FetchError.CLEARTEXT_BLOCKED
+    else -> FetchError.OTHER
 }

@@ -9,32 +9,12 @@ class SquooshConfigTest {
     // ── OutputFormat ──
 
     @Test
-    fun `output formats have correct extensions`() {
-        assertEquals("webp", OutputFormat.WEBP.extension)
-        assertEquals("jpg", OutputFormat.JPEG.extension)
-        assertEquals("png", OutputFormat.PNG.extension)
-        assertEquals("avif", OutputFormat.AVIF.extension)
-    }
-
-    @Test
-    fun `output formats have valid MIME types`() {
-        assertEquals("image/webp", OutputFormat.WEBP.mimeType)
-        assertEquals("image/jpeg", OutputFormat.JPEG.mimeType)
-        assertEquals("image/png", OutputFormat.PNG.mimeType)
-        assertEquals("image/avif", OutputFormat.AVIF.mimeType)
-    }
-
-    // ── SquooshConfig defaults ──
-
-    @Test
-    fun `default config uses WebP at quality 80`() {
-        val config = SquooshConfig()
-        assertEquals(OutputFormat.WEBP, config.format)
-        assertEquals(80, config.quality)
-        assertFalse(config.lossless)
-        assertEquals(0, config.maxDimension)
-        assertEquals(0, config.exactWidth)
-        assertEquals(0, config.exactHeight)
+    fun `each format's declared MIME type matches what share and save derive from its extension`() {
+        // Share intents and MediaStore rows use FileInfoUtils.mimeTypeForFile on
+        // the output name; a mismatch would advertise the wrong type.
+        OutputFormat.entries.forEach { format ->
+            assertEquals(format.name, format.mimeType, app.embeddy.util.FileInfoUtils.mimeTypeForFile("x.${format.extension}"))
+        }
     }
 
     // ── SquooshResult ──

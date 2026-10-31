@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.embeddy.R
+import app.embeddy.inspect.FetchError
 import app.embeddy.inspect.InspectState
 import app.embeddy.inspect.MetadataResult
 import app.embeddy.viewmodel.InspectViewModel
@@ -188,7 +189,16 @@ fun InspectScreen(viewModel: InspectViewModel = viewModel()) {
                         )
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            text = s.message,
+                            text = when (s.fetchError) {
+                                null -> s.message
+                                FetchError.UNKNOWN_HOST -> stringResource(R.string.fetch_error_host)
+                                FetchError.TIMEOUT -> stringResource(R.string.fetch_error_timeout)
+                                FetchError.TLS -> stringResource(R.string.fetch_error_tls)
+                                FetchError.CLEARTEXT_BLOCKED -> stringResource(R.string.fetch_error_cleartext)
+                                FetchError.HTTP_STATUS -> stringResource(R.string.fetch_error_status, s.message)
+                                FetchError.INVALID_URL -> stringResource(R.string.fetch_error_invalid)
+                                FetchError.OTHER -> stringResource(R.string.fetch_error_other, s.message)
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f),
                         )

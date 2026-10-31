@@ -47,6 +47,44 @@
     <string name="animated_preview_desc">Animated preview</string>
     <string name="share_output">Share output</string>
     <string name="error_read_file">Failed to read file: %1$s</string>
+    <string name="loading_media">Reading file…</string>
+    <string name="back_to_edit">Edit again</string>
+    <string name="keep_original_resolution">Keep original resolution</string>
+    <string name="keep_original_fps">Keep original frame rate</string>
+    <string name="join_videos">Join videos</string>
+    <string name="images_to_animation">Images → animation</string>
+    <string name="start_over">Start over</string>
+    <string name="join_title">Joining %1$d clips</string>
+    <string name="join_total">Total %1$s</string>
+    <string name="join_add_clips">Add clips</string>
+    <string name="sequence_title">%1$d images</string>
+    <string name="sequence_add_images">Add images</string>
+    <string name="sequence_frame_duration">Each image: %1$s</string>
+    <string name="clip_label">%1$d. %2$s</string>
+    <string name="move_up">Move up</string>
+    <string name="move_down">Move down</string>
+    <string name="remove_item">Remove</string>
+
+    <!-- Edit tools -->
+    <string name="edit_tools">Edit</string>
+    <string name="edit_speed">Speed</string>
+    <string name="speed_factor">%1$s×</string>
+    <string name="edit_orientation">Rotate, flip and crop</string>
+    <string name="edit_rotate">Rotate 90° clockwise</string>
+    <string name="edit_flip_horizontal">Flip horizontally</string>
+    <string name="edit_flip_vertical">Flip vertically</string>
+    <string name="edit_crop">Crop</string>
+    <string name="edit_crop_reset">Reset crop</string>
+    <string name="edit_crop_overlay_desc">Crop area. Drag a corner to resize or drag inside to move.</string>
+    <string name="rotation_degrees">%1$d°</string>
+    <string name="edit_mute">Mute audio</string>
+    <string name="edit_reverse">Play in reverse</string>
+    <string name="edit_reverse_limit">Available for outputs up to %1$s — trim the clip or raise the speed</string>
+    <string name="grab_frame">Grab frame</string>
+    <string name="grab_frame_title">Frame</string>
+    <string name="grab_frame_failed">Could not grab the frame: %1$s</string>
+    <string name="grab_frame_preview_desc">Grabbed video frame</string>
+    <string name="grab_frame_squoosh">Compress in Squoosh</string>
 
     <!-- Save to Downloads (shared by Convert + Squoosh) -->
     <string name="saved_to_downloads">Saved to Downloads</string>
@@ -84,6 +122,13 @@
     <string name="copy_tag">Copy tag</string>
     <string name="inspect_hint">Enter a URL or pick a file to inspect metadata</string>
     <string name="failed_to_fetch">Failed to fetch</string>
+    <string name="fetch_error_host">Couldn’t find that site. Check the address and your connection.</string>
+    <string name="fetch_error_timeout">The site took too long to respond.</string>
+    <string name="fetch_error_tls">The site has no working HTTPS. Embeddy only fetches over HTTPS, so http:// links are upgraded automatically — this one doesn’t support it.</string>
+    <string name="fetch_error_cleartext">The site redirected to an insecure http:// address, which Android blocks.</string>
+    <string name="fetch_error_status">The site returned an error (%1$s).</string>
+    <string name="fetch_error_invalid">That doesn’t look like a web address.</string>
+    <string name="fetch_error_other">Couldn’t fetch the page: %1$s</string>
     <string name="inspect_file">Inspect File</string>
     <string name="social_preview_desc">Social preview image</string>
     <string name="expand">Expand</string>
@@ -136,6 +181,64 @@
     <string name="est_output">Est. output: %1$s</string>
     <string name="target_label">Target: %1$s</string>
     <string name="keeping_summary">Keeping %1$s of %2$s (removing %3$s)</string>
+
+    <!-- About -->
+    <string name="about">About</string>
+    <string name="about_version">Version %1$s</string>
+    <string name="about_tagline">Embed-ready media and quick video edits, processed on your device.</string>
+    <string name="about_privacy">Privacy policy</string>
+    <string name="about_source">Source code on GitHub</string>
+    <string name="about_notices_title">Open-source notices</string>
+    <string name="about_notices_body">Embeddy is built on the projects below. Because the bundled FFmpeg build is licensed under the GPL, its source and that of Embeddy are available from the linked repositories. Tap an entry to read its licence.</string>
+    <string name="about_no_browser">No browser available to open the link</string>
+    <string-array name="oss_names">
+        <item>FFmpeg 6.1 (built with --enable-gpl --enable-version3)</item>
+        <item>FFmpegKit (ffmpeg-kit-16kb 6.1.1)</item>
+        <item>FFmpeg libraries: libwebp, libvpx, OpenH264, Opus, Vorbis, Theora, dav1d, libaom, kvazaar</item>
+        <item>FFmpeg libraries: LAME, GMP, libiconv, fribidi, soxr, twolame, shine</item>
+        <item>avif-coder 2.1.4</item>
+        <item>libheif and libde265 (via avif-coder)</item>
+        <item>x265 (via avif-coder)</item>
+        <item>libaom and dav1d (via avif-coder)</item>
+        <item>AndroidX, Jetpack Compose, Material 3, WorkManager, DataStore</item>
+        <item>AndroidX Media3 (ExoPlayer)</item>
+        <item>Coil</item>
+        <item>Kotlin and kotlinx.coroutines</item>
+        <item>jsoup</item>
+        <item>Timber</item>
+    </string-array>
+    <string-array name="oss_licenses">
+        <item>GPL-3.0-or-later</item>
+        <item>LGPL-3.0</item>
+        <item>BSD-style (BSD-2-Clause / BSD-3-Clause)</item>
+        <item>LGPL (LAME: LGPL-2.0; GMP, libiconv, fribidi, soxr, twolame, shine: LGPL)</item>
+        <item>MIT</item>
+        <item>LGPL-3.0</item>
+        <item>GPL-2.0-or-later</item>
+        <item>BSD-2-Clause</item>
+        <item>Apache-2.0</item>
+        <item>Apache-2.0</item>
+        <item>Apache-2.0</item>
+        <item>Apache-2.0</item>
+        <item>MIT</item>
+        <item>Apache-2.0</item>
+    </string-array>
+    <string-array name="oss_urls" translatable="false">
+        <item>https://ffmpeg.org/legal.html</item>
+        <item>https://github.com/arthenica/ffmpeg-kit</item>
+        <item>https://ffmpeg.org/general.html#External-libraries</item>
+        <item>https://ffmpeg.org/general.html#External-libraries</item>
+        <item>https://github.com/awxkee/avif-coder</item>
+        <item>https://github.com/strukturag/libheif</item>
+        <item>https://bitbucket.org/multicoreware/x265_git</item>
+        <item>https://aomedia.googlesource.com/aom/</item>
+        <item>https://source.android.com/docs/setup/about/licenses</item>
+        <item>https://github.com/androidx/media</item>
+        <item>https://github.com/coil-kt/coil</item>
+        <item>https://github.com/Kotlin/kotlinx.coroutines</item>
+        <item>https://github.com/jhy/jsoup</item>
+        <item>https://github.com/JakeWharton/timber</item>
+    </string-array>
 
     <!-- Common -->
     <string name="cancel">Cancel</string>

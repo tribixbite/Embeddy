@@ -1,7 +1,6 @@
 package app.embeddy.viewmodel
 
 import android.app.Application
-import android.content.Intent
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.SavedStateHandle
@@ -21,15 +20,15 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class UploadViewModel(
     application: Application,
-    private val savedState: SavedStateHandle,
+    savedState: SavedStateHandle,
 ) : AndroidViewModel(application) {
 
     private val engine = UploadEngine(application)
     private val settingsRepo = SettingsRepository(application)
+    private val pickedFile = PickedFileState(savedState, prefix = "up")
 
     private val _state = MutableStateFlow<UploadState>(UploadState.Idle)
     val state: StateFlow<UploadState> = _state.asStateFlow()
@@ -42,12 +41,8 @@ class UploadViewModel(
 
     private var uploadJob: Job? = null
 
-    // SavedStateHandle keys for process death restoration (mirrors the sibling tabs)
-    private companion object {
-        const val KEY_FILE_NAME = "up_file_name"
-        const val KEY_FILE_SIZE = "up_file_size"
-        const val KEY_URI = "up_uri"
-    }
+    /** The Ready state the current upload started from (Cancel returns to it). */
+    private var uploadingFrom: UploadState.Ready? = null
 
     init {
         // Restore host + strip-metadata preferences from DataStore
@@ -57,26 +52,7 @@ class UploadViewModel(
             _stripMetadata.value = prefs.stripMetadata
         }
         // Restore Ready state from SavedStateHandle after process death
-        restoreReadyState()
-    }
-
-    private fun restoreReadyState() {
-        val fileName = savedState.get<String>(KEY_FILE_NAME) ?: return
-        val fileSize = savedState.get<Long>(KEY_FILE_SIZE) ?: return
-        val uri = savedState.get<String>(KEY_URI) ?: return
-        _state.value = UploadState.Ready(fileName = fileName, fileSize = fileSize, uri = uri)
-    }
-
-    private fun saveReadyState(fileName: String, fileSize: Long, uri: String) {
-        savedState[KEY_FILE_NAME] = fileName
-        savedState[KEY_FILE_SIZE] = fileSize
-        savedState[KEY_URI] = uri
-    }
-
-    private fun clearSavedReadyState() {
-        savedState.remove<String>(KEY_FILE_NAME)
-        savedState.remove<Long>(KEY_FILE_SIZE)
-        savedState.remove<String>(KEY_URI)
+        pickedFile.restore()?.let { _state.value = UploadState.Ready(it.fileName, it.fileSize, it.uri) }
     }
 
     private fun persistPrefs() {
@@ -95,28 +71,12 @@ class UploadViewModel(
         persistPrefs()
     }
 
-    /** Handle a file picked from the file picker. Single query for name+size. */
+    /** Handle a file picked from the file picker. */
     fun onFilePicked(uri: Uri) {
         viewModelScope.launch {
-            val ctx = getApplication<Application>()
-            // ContentResolver work off the main thread; state writes back on main.
-            val (fileName, fileSize) = withContext(Dispatchers.IO) {
-                // Take persistable permission so URI survives process death
-                try {
-                    ctx.contentResolver.takePersistableUriPermission(
-                        uri, Intent.FLAG_GRANT_READ_URI_PERMISSION,
-                    )
-                } catch (_: SecurityException) { /* non-fatal */ }
-
-                FileInfoUtils.queryFileInfo(ctx, uri)
-            }
-
-            _state.value = UploadState.Ready(
-                fileName = fileName,
-                fileSize = fileSize,
-                uri = uri.toString(),
-            )
-            saveReadyState(fileName, fileSize, uri.toString())
+            val file = resolvePickedFile(getApplication(), uri)
+            _state.value = UploadState.Ready(fileName = file.fileName, fileSize = file.fileSize, uri = file.uri)
+            pickedFile.save(file)
         }
     }
 
@@ -137,6 +97,7 @@ class UploadViewModel(
         }
 
         uploadJob?.cancel()
+        uploadingFrom = ready
         _state.value = UploadState.Uploading(ready.fileName, progress = 0f)
         uploadJob = viewModelScope.launch {
             try {
@@ -162,12 +123,11 @@ class UploadViewModel(
         }
     }
 
-    /** Cancel an in-progress upload. */
+    /** Cancel an in-progress upload; the picked file stays selected. */
     fun cancelUpload() {
         uploadJob?.cancel()
         uploadJob = null
-        _state.value = UploadState.Idle
-        clearSavedReadyState()
+        _state.value = uploadingFrom ?: UploadState.Idle
     }
 
     /** Reset to idle for a new upload. */
@@ -175,7 +135,7 @@ class UploadViewModel(
         uploadJob?.cancel()
         uploadJob = null
         _state.value = UploadState.Idle
-        clearSavedReadyState()
+        pickedFile.clear()
         viewModelScope.launch(Dispatchers.IO) { engine.cleanup() }
     }
 }

@@ -38,7 +38,7 @@ class InspectViewModel(application: Application) : AndroidViewModel(application)
         fetchJob = viewModelScope.launch {
             val result = engine.fetchMetadata(url)
             _state.value = if (result.error != null && !result.hasData) {
-                InspectState.Error(result.error)
+                InspectState.Error(result.error, result.fetchError ?: app.embeddy.inspect.FetchError.OTHER)
             } else {
                 InspectState.Success(result)
             }

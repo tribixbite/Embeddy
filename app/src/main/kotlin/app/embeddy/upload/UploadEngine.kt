@@ -2,11 +2,16 @@ package app.embeddy.upload
 
 import android.content.Context
 import android.net.Uri
-import android.provider.OpenableColumns
 import androidx.exifinterface.media.ExifInterface
 import app.embeddy.util.FileInfoUtils
+import app.embeddy.util.UriStaging
+import app.embeddy.util.deleteStaleEntries
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.job
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.io.File
@@ -28,6 +33,11 @@ class UploadEngine(private val context: Context) {
     /**
      * Upload a file to the selected host, optionally stripping metadata.
      * Retries up to [MAX_RETRIES] times on transient IO/HTTP failures.
+     *
+     * Cancellation actually stops the transfer: the body writer checks the
+     * coroutine between chunks and a cancelled job disconnects the socket, so
+     * a cancelled upload is never completed (and published) in the background.
+     *
      * @param onProgress callback with fraction 0f..1f of bytes written
      */
     suspend fun upload(
@@ -36,141 +46,103 @@ class UploadEngine(private val context: Context) {
         stripMetadata: Boolean,
         onProgress: (Float) -> Unit = {},
     ): UploadResult = withContext(Dispatchers.IO) {
-        val fileName = queryFileName(uri) ?: "file"
+        val fileName = FileInfoUtils.queryFileName(context, uri) ?: "file"
         val mimeType = context.contentResolver.getType(uri) ?: "application/octet-stream"
+        val job = coroutineContext.job
 
         // Copy to temp once — retries reuse the same file.
-        // Track the strip outcome instead of swallowing it: a HEIC with GPS data
-        // must not upload publicly while the UI claims metadata was removed.
-        val tempFile = copyToTemp(uri, fileName)
-        val metadataStripped: Boolean? = if (stripMetadata) {
-            isExifSupported(mimeType) && stripExifData(tempFile)
-        } else {
-            null
-        }
-
-        var lastException: Exception? = null
-        for (attempt in 1..MAX_RETRIES) {
-            try {
-                val resultUrl = when (host) {
-                    UploadHost.ZER0X0 -> uploadTo0x0(tempFile, fileName, mimeType, onProgress)
-                    UploadHost.CATBOX -> uploadToCatbox(tempFile, fileName, mimeType, onProgress)
-                }
-
-                val fileSize = tempFile.length()
-                tempFile.delete()
-
-                return@withContext UploadResult(
-                    url = resultUrl,
-                    fileName = fileName,
-                    host = host,
-                    fileSizeBytes = fileSize,
-                    metadataStripped = metadataStripped,
-                )
-            } catch (e: IOException) {
-                lastException = e
-                Timber.w("Upload attempt %d/%d to %s failed: %s", attempt, MAX_RETRIES, host.label, e.message)
-                if (attempt < MAX_RETRIES) {
-                    delay(RETRY_DELAY_MS * attempt) // Linear backoff
-                }
-            } catch (e: UploadException) {
-                // Server returned a non-retryable error (4xx) — don't retry
-                tempFile.delete()
-                Timber.e(e, "Upload to %s failed (non-retryable)", host.label)
-                throw e
+        val tempFile = UriStaging.copyToTemp(
+            context, uri, tempDir, "upload", "_" + FileInfoUtils.sanitizeFileName(fileName),
+        )
+        try {
+            // Track the strip outcome instead of swallowing it: a HEIC with GPS data
+            // must not upload publicly while the UI claims metadata was removed.
+            val metadataStripped: Boolean? = if (stripMetadata) {
+                isExifSupported(mimeType) && stripExifData(tempFile)
+            } else {
+                null
             }
+
+            var lastException: Exception? = null
+            for (attempt in 1..MAX_RETRIES) {
+                job.ensureActive()
+                try {
+                    val resultUrl = uploadMultipart(job, host, tempFile, fileName, mimeType, onProgress)
+                    return@withContext UploadResult(
+                        url = resultUrl,
+                        fileName = fileName,
+                        host = host,
+                        fileSizeBytes = tempFile.length(),
+                        metadataStripped = metadataStripped,
+                    )
+                } catch (e: IOException) {
+                    // A disconnect caused by cancellation surfaces as an IOException.
+                    job.ensureActive()
+                    lastException = e
+                    Timber.w("Upload attempt %d/%d to %s failed: %s", attempt, MAX_RETRIES, host.label, e.message)
+                    if (attempt < MAX_RETRIES) delay(RETRY_DELAY_MS * attempt) // Linear backoff
+                }
+            }
+            Timber.e(lastException, "Upload to %s failed after %d attempts", host.label, MAX_RETRIES)
+            throw UploadException("Upload failed after $MAX_RETRIES attempts: ${lastException?.message}", lastException)
+        } finally {
+            tempFile.delete()
         }
-
-        tempFile.delete()
-        Timber.e(lastException, "Upload to %s failed after %d attempts", host.label, MAX_RETRIES)
-        throw UploadException("Upload failed after $MAX_RETRIES attempts: ${lastException?.message}", lastException)
-    }
-
-    /** POST to https://0x0.st with multipart/form-data. */
-    private fun uploadTo0x0(
-        file: File,
-        fileName: String,
-        mimeType: String,
-        onProgress: (Float) -> Unit,
-    ): String {
-        val boundary = "----Embeddy${System.currentTimeMillis()}"
-        val url = URL("https://0x0.st")
-        val connection = (url.openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            doOutput = true
-            connectTimeout = 30_000
-            readTimeout = 60_000
-            setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
-            setRequestProperty("User-Agent", "Embeddy/1.0")
-            // Enable chunked streaming to avoid buffering entire request in memory
-            setChunkedStreamingMode(8192)
-        }
-
-        val totalBytes = file.length()
-
-        connection.outputStream.use { rawOutput ->
-            val progressOutput = ProgressOutputStream(rawOutput, totalBytes, onProgress)
-            writeMultipartFile(progressOutput, boundary, "file", fileName, mimeType, file)
-            progressOutput.write("--$boundary--\r\n".toByteArray())
-        }
-
-        return handleResponse(connection, "0x0.st")
-    }
-
-    /** POST to https://catbox.moe/user/api.php with multipart/form-data. */
-    private fun uploadToCatbox(
-        file: File,
-        fileName: String,
-        mimeType: String,
-        onProgress: (Float) -> Unit,
-    ): String {
-        val boundary = "----Embeddy${System.currentTimeMillis()}"
-        val url = URL("https://catbox.moe/user/api.php")
-        val connection = (url.openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            doOutput = true
-            connectTimeout = 30_000
-            readTimeout = 60_000
-            setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
-            setRequestProperty("User-Agent", "Embeddy/1.0")
-            setChunkedStreamingMode(8192)
-        }
-
-        val totalBytes = file.length()
-
-        connection.outputStream.use { rawOutput ->
-            val progressOutput = ProgressOutputStream(rawOutput, totalBytes, onProgress)
-            // Catbox requires a "reqtype" field
-            writeMultipartField(progressOutput, boundary, "reqtype", "fileupload")
-            writeMultipartFile(progressOutput, boundary, "fileToUpload", fileName, mimeType, file)
-            progressOutput.write("--$boundary--\r\n".toByteArray())
-        }
-
-        return handleResponse(connection, "catbox.moe")
     }
 
     /**
-     * Read HTTP response: 2xx returns body, 5xx throws IOException (retryable),
-     * 4xx throws UploadException (non-retryable).
+     * POST [file] as multipart/form-data to [host] and return the public URL.
+     * Throws IOException for retryable failures, [UploadException] otherwise.
      */
-    private fun handleResponse(connection: HttpURLConnection, hostName: String): String {
-        val responseCode = connection.responseCode
-        val responseBody = try {
-            if (responseCode in 200..299) {
-                connection.inputStream.bufferedReader().readText().trim()
+    private fun uploadMultipart(
+        job: Job,
+        host: UploadHost,
+        file: File,
+        fileName: String,
+        mimeType: String,
+        onProgress: (Float) -> Unit,
+    ): String {
+        val boundary = "----Embeddy${System.currentTimeMillis()}"
+        val connection = (URL(host.endpoint).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            doOutput = true
+            connectTimeout = 30_000
+            readTimeout = 60_000
+            setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+            setRequestProperty("User-Agent", "Embeddy/1.0")
+            // Chunked streaming avoids buffering the entire request in memory
+            setChunkedStreamingMode(8192)
+        }
+        // A blocked socket write can't see the cancellation check below;
+        // disconnecting from the cancelling thread unblocks it.
+        val cancelHandle = job.invokeOnCompletion { cause ->
+            if (cause is CancellationException) connection.disconnect()
+        }
+        try {
+            connection.outputStream.use { rawOutput ->
+                val progressOutput = ProgressOutputStream(
+                    rawOutput, file.length(), onProgress,
+                    checkCancelled = { job.ensureActive() },
+                )
+                host.extraFields.forEach { (name, value) -> writeMultipartField(progressOutput, boundary, name, value) }
+                writeMultipartFile(progressOutput, boundary, host.fileField, fileName, mimeType, file)
+                progressOutput.write("--$boundary--\r\n".toByteArray())
+            }
+            val code = connection.responseCode
+            val body = if (code in 200..299) {
+                connection.inputStream.bufferedReader().readText()
             } else {
-                val error = connection.errorStream?.bufferedReader()?.readText() ?: "Unknown error"
-                if (responseCode >= 500) {
-                    // Server error — retryable via IOException
-                    throw IOException("$hostName returned HTTP $responseCode: $error")
-                }
-                // Client error (4xx) — non-retryable
-                throw UploadException("$hostName returned HTTP $responseCode: $error")
+                connection.errorStream?.bufferedReader()?.readText() ?: ""
+            }
+            return when (val outcome = classifyUploadResponse(code, body, host.label)) {
+                is UploadOutcome.Success -> outcome.url
+                is UploadOutcome.Retryable -> throw IOException(outcome.message)
+                is UploadOutcome.Permanent -> throw UploadException(outcome.message)
             }
         } finally {
+            cancelHandle.dispose()
             connection.disconnect()
         }
-        return responseBody
     }
 
     /** Write a multipart form field. */
@@ -229,25 +201,11 @@ class UploadEngine(private val context: Context) {
         }
     }
 
-    private fun copyToTemp(uri: Uri, fileName: String): File {
-        val safeName = FileInfoUtils.sanitizeFileName(fileName)
-        val tempFile = File(tempDir, "upload_${System.currentTimeMillis()}_$safeName")
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            tempFile.outputStream().use { output -> input.copyTo(output) }
-        } ?: throw UploadException("Cannot read file")
-        return tempFile
-    }
 
-    private fun queryFileName(uri: Uri): String? {
-        return context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-            val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-            if (cursor.moveToFirst() && nameIndex >= 0) cursor.getString(nameIndex) else null
-        }
-    }
 
-    /** Clean up leftover temp files. */
+    /** Clean up leftover temp files (nothing in upload_temp outlives its upload). */
     fun cleanup() {
-        tempDir.listFiles()?.forEach { it.delete() }
+        deleteStaleEntries(tempDir, Long.MAX_VALUE)
     }
 
     companion object {
@@ -297,24 +255,31 @@ class ProgressOutputStream(
     private val wrapped: OutputStream,
     private val totalBytes: Long,
     private val onProgress: (Float) -> Unit,
+    /** Called before every write; throws to abort (cancellation). */
+    private val checkCancelled: () -> Unit = {},
+    /** Clock for the throttle — injectable so tests are deterministic. */
+    private val clock: () -> Long = System::currentTimeMillis,
 ) : OutputStream() {
 
     private var bytesWritten: Long = 0
     private var lastCallbackTime: Long = 0
 
     override fun write(b: Int) {
+        checkCancelled()
         wrapped.write(b)
         bytesWritten++
         reportProgress()
     }
 
     override fun write(b: ByteArray) {
+        checkCancelled()
         wrapped.write(b)
         bytesWritten += b.size
         reportProgress()
     }
 
     override fun write(b: ByteArray, off: Int, len: Int) {
+        checkCancelled()
         wrapped.write(b, off, len)
         bytesWritten += len
         reportProgress()
@@ -324,7 +289,7 @@ class ProgressOutputStream(
     override fun close() = wrapped.close()
 
     private fun reportProgress() {
-        val now = System.currentTimeMillis()
+        val now = clock()
         // Throttle to max ~20 callbacks/sec to avoid UI stutter
         if (now - lastCallbackTime < 50 && bytesWritten < totalBytes) return
         lastCallbackTime = now
@@ -336,10 +301,57 @@ class ProgressOutputStream(
     }
 }
 
-/** Supported upload hosts. */
-enum class UploadHost(val label: String, val maxSizeMb: Int) {
-    ZER0X0("0x0.st", 512),
-    CATBOX("catbox.moe", 200),
+/**
+ * Supported upload hosts and how each expects its multipart request.
+ *
+ * @property endpoint POST target
+ * @property fileField multipart field name carrying the file
+ * @property extraFields additional form fields sent before the file
+ */
+enum class UploadHost(
+    val label: String,
+    val maxSizeMb: Int,
+    val endpoint: String,
+    val fileField: String,
+    val extraFields: List<Pair<String, String>> = emptyList(),
+) {
+    ZER0X0("0x0.st", 512, "https://0x0.st", "file"),
+    CATBOX(
+        "catbox.moe", 200, "https://catbox.moe/user/api.php", "fileToUpload",
+        // Catbox requires a "reqtype" field
+        extraFields = listOf("reqtype" to "fileupload"),
+    ),
+}
+
+/** How an upload host's HTTP response should be treated. */
+sealed interface UploadOutcome {
+    /** 2xx with a URL body. */
+    data class Success(val url: String) : UploadOutcome
+
+    /** Server-side or transient failure — worth retrying. */
+    data class Retryable(val message: String) : UploadOutcome
+
+    /** Client error (bad request, too large, rejected) — retrying cannot help. */
+    data class Permanent(val message: String) : UploadOutcome
+}
+
+/**
+ * Classify a host response. 2xx bodies must be an http(s) URL — both hosts
+ * answer with the bare link, and anything else (an HTML error page behind a
+ * 200) would otherwise be shown and copied as if it were the link. 5xx and
+ * 429 are retryable; every other status is permanent.
+ */
+fun classifyUploadResponse(code: Int, body: String, hostLabel: String): UploadOutcome {
+    val trimmed = body.trim()
+    return when {
+        code in 200..299 && (trimmed.startsWith("https://") || trimmed.startsWith("http://")) ->
+            UploadOutcome.Success(trimmed)
+        code in 200..299 ->
+            UploadOutcome.Retryable("$hostLabel returned an unexpected response: ${trimmed.take(120)}")
+        code >= 500 || code == 429 ->
+            UploadOutcome.Retryable("$hostLabel returned HTTP $code: ${trimmed.take(200)}")
+        else -> UploadOutcome.Permanent("$hostLabel returned HTTP $code: ${trimmed.take(200).ifEmpty { "Unknown error" }}")
+    }
 }
 
 /** Upload result containing the public URL. */

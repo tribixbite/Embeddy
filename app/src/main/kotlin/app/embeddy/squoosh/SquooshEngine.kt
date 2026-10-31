@@ -2,14 +2,15 @@ package app.embeddy.squoosh
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
+
 import android.graphics.Canvas
-import android.graphics.Matrix
+
 import android.graphics.Rect
 import android.net.Uri
-import android.provider.OpenableColumns
 import androidx.exifinterface.media.ExifInterface
+import app.embeddy.util.BitmapLoader
 import app.embeddy.util.FileInfoUtils
+import app.embeddy.util.deleteStaleEntries
 import com.radzivon.bartoshyk.avif.coder.AvifSpeed
 import com.radzivon.bartoshyk.avif.coder.HeifCoder
 import com.radzivon.bartoshyk.avif.coder.PreciseMode
@@ -18,6 +19,7 @@ import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.io.File
 import java.io.FileOutputStream
+import kotlin.math.ceil
 
 /**
  * Image compression engine using Android's native Bitmap APIs.
@@ -38,7 +40,19 @@ class SquooshEngine(private val context: Context) {
 
     /** Compress an image with the given configuration. */
     suspend fun compress(uri: Uri, config: SquooshConfig): SquooshResult = withContext(Dispatchers.IO) {
-        val fileName = queryFileName(uri) ?: "image"
+        try {
+            compressInternal(uri, config)
+        } catch (e: OutOfMemoryError) {
+            // Decoding is budgeted (see BitmapLoader.decodePixelBudget), but rotation/scaling
+            // copies of an enormous image can still exhaust the heap. An Error
+            // is not an Exception: without this the ViewModel's catch missed it
+            // and the app crashed.
+            throw SquooshException("Image is too large to process on this device", e)
+        }
+    }
+
+    private fun compressInternal(uri: Uri, config: SquooshConfig): SquooshResult {
+        val fileName = FileInfoUtils.queryFileName(context, uri) ?: "image"
         val baseName = FileInfoUtils.sanitizeFileName(
             fileName.substringBeforeLast("."),
             fallback = "image",
@@ -59,16 +73,15 @@ class SquooshEngine(private val context: Context) {
             config.exactHeight > 0 -> config.exactHeight
             else -> config.maxDimension
         }
-        val decoded = decodeBitmap(uri, targetDim)
+        val decoded = BitmapLoader.load(context, uri, targetDim)
             ?: throw SquooshException("Failed to decode image")
-        val orientation = readExifOrientation(uri)
-        val bitmap = rotateForExif(decoded.bitmap, orientation)
+        val bitmap = decoded.bitmap
 
         // Report the TRUE source dimensions from the bounds pass, not the
         // subsampled decode size (inSampleSize made a 4032x3024 photo claim
-        // "original 1008x756"). EXIF 90/270-family orientations swap the axes.
-        val (originalWidth, originalHeight) =
-            orientedDimensions(orientation, decoded.sourceWidth, decoded.sourceHeight)
+        // "original 1008x756"); BitmapLoader already swaps for EXIF rotation.
+        val originalWidth = decoded.sourceWidth
+        val originalHeight = decoded.sourceHeight
         Timber.d("Squoosh: %s (%dx%d, %d bytes) → %s q=%d",
             fileName, originalWidth, originalHeight, originalSize,
             config.format.label, config.quality)
@@ -139,7 +152,7 @@ class SquooshEngine(private val context: Context) {
 
             val compressedSize = outputFile.length()
 
-            SquooshResult(
+            return SquooshResult(
                 outputPath = outputFile.absolutePath,
                 originalSizeBytes = originalSize,
                 compressedSizeBytes = compressedSize,
@@ -160,119 +173,17 @@ class SquooshEngine(private val context: Context) {
      * Produces an image that is exactly targetW x targetH without letterboxing.
      */
     private fun centerCrop(source: Bitmap, targetW: Int, targetH: Int): Bitmap {
-        val srcAspect = source.width.toFloat() / source.height
-        val dstAspect = targetW.toFloat() / targetH
-
-        // Round up and floor at the target so truncation can never leave the scaled
-        // bitmap smaller than the crop rect (which would throw from createBitmap).
-        val (scaledW, scaledH) = if (srcAspect > dstAspect) {
-            // Source is wider — fit height, crop width
-            val w = ceilToInt(source.width * targetH.toFloat() / source.height)
-            w.coerceAtLeast(targetW) to targetH
-        } else {
-            // Source is taller — fit width, crop height
-            val h = ceilToInt(source.height * targetW.toFloat() / source.width)
-            targetW to h.coerceAtLeast(targetH)
-        }
-
-        val scaled = Bitmap.createScaledBitmap(source, scaledW, scaledH, true)
+        val g = centerCropGeometry(source.width, source.height, targetW, targetH)
+        val scaled = Bitmap.createScaledBitmap(source, g.scaledWidth, g.scaledHeight, true)
         if (scaled !== source) source.recycle()
-
-        // Center-crop to exact dimensions
-        val cropX = (scaled.width - targetW) / 2
-        val cropY = (scaled.height - targetH) / 2
-        val cropped = Bitmap.createBitmap(scaled, cropX, cropY, targetW, targetH)
+        val cropped = Bitmap.createBitmap(scaled, g.cropX, g.cropY, targetW, targetH)
         if (cropped !== scaled) scaled.recycle()
         return cropped
     }
 
-    private fun ceilToInt(value: Float): Int = kotlin.math.ceil(value.toDouble()).toInt()
 
-    /** A decoded (possibly subsampled) bitmap plus the TRUE source dimensions. */
-    private data class DecodedImage(
-        val bitmap: Bitmap,
-        /** Full-resolution width from the bounds pass, before inSampleSize */
-        val sourceWidth: Int,
-        /** Full-resolution height from the bounds pass, before inSampleSize */
-        val sourceHeight: Int,
-    )
 
-    /**
-     * Decode bitmap from URI with efficient subsampling.
-     * First pass decodes bounds only, then calculates inSampleSize to load
-     * at roughly the target dimension to conserve memory. The bounds-pass
-     * dimensions are returned alongside the bitmap so callers can report the
-     * real source size rather than the subsampled decode size.
-     */
-    private fun decodeBitmap(uri: Uri, maxDimension: Int): DecodedImage? {
-        // Pass 1: decode bounds
-        val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        context.contentResolver.openInputStream(uri)?.use { stream ->
-            BitmapFactory.decodeStream(stream, null, boundsOpts)
-        }
 
-        val origW = boundsOpts.outWidth
-        val origH = boundsOpts.outHeight
-        if (origW <= 0 || origH <= 0) return null
-
-        // Calculate inSampleSize for memory efficiency
-        val targetDim = if (maxDimension > 0) maxDimension else maxOf(origW, origH)
-        var sampleSize = 1
-        while (origW / sampleSize > targetDim * 2 && origH / sampleSize > targetDim * 2) {
-            sampleSize *= 2
-        }
-
-        // Pass 2: decode at reduced resolution
-        val decodeOpts = BitmapFactory.Options().apply {
-            inSampleSize = sampleSize
-            inPreferredConfig = Bitmap.Config.ARGB_8888
-        }
-        val bitmap = context.contentResolver.openInputStream(uri)?.use { stream ->
-            BitmapFactory.decodeStream(stream, null, decodeOpts)
-        } ?: return null
-        return DecodedImage(bitmap, origW, origH)
-    }
-
-    /** Read the EXIF orientation tag, defaulting to NORMAL on any failure. */
-    private fun readExifOrientation(uri: Uri): Int = try {
-        context.contentResolver.openInputStream(uri)?.use { stream ->
-            ExifInterface(stream).getAttributeInt(
-                ExifInterface.TAG_ORIENTATION,
-                ExifInterface.ORIENTATION_NORMAL,
-            )
-        } ?: ExifInterface.ORIENTATION_NORMAL
-    } catch (_: Exception) {
-        ExifInterface.ORIENTATION_NORMAL
-    }
-
-    /**
-     * Rotate/flip the bitmap to match its EXIF orientation.
-     * BitmapFactory ignores EXIF orientation — without this, photos from cameras
-     * that store rotation in EXIF (most phones) appear sideways or upside-down.
-     */
-    private fun rotateForExif(bitmap: Bitmap, orientation: Int): Bitmap {
-        val matrix = Matrix()
-        when (orientation) {
-            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
-            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
-            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
-            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
-            ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
-            ExifInterface.ORIENTATION_TRANSPOSE -> {
-                matrix.postRotate(90f)
-                matrix.postScale(-1f, 1f)
-            }
-            ExifInterface.ORIENTATION_TRANSVERSE -> {
-                matrix.postRotate(270f)
-                matrix.postScale(-1f, 1f)
-            }
-            else -> return bitmap // No rotation needed
-        }
-
-        val rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-        if (rotated !== bitmap) bitmap.recycle()
-        return rotated
-    }
 
     /** Map our OutputFormat + config to the Android Bitmap.CompressFormat. */
     private fun resolveCompressFormat(config: SquooshConfig): Bitmap.CompressFormat {
@@ -301,23 +212,53 @@ class SquooshEngine(private val context: Context) {
         }
     }
 
-    private fun queryFileName(uri: Uri): String? {
-        return context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-            val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-            if (cursor.moveToFirst() && nameIndex >= 0) cursor.getString(nameIndex) else null
-        }
-    }
 
     /** Clean up old output files older than 24 hours. */
     fun cleanup() {
-        val cutoff = System.currentTimeMillis() - 24 * 60 * 60 * 1000
-        outputDir.listFiles()?.filter { it.lastModified() < cutoff }?.forEach { it.delete() }
+        deleteStaleEntries(outputDir, System.currentTimeMillis() - 24L * 60 * 60 * 1000)
     }
 
-    companion object {
-        /** AVIF encoding is always available via bundled libaom native library. */
-        fun isAvifEncodingAvailable(): Boolean = true
+}
+
+/**
+ * BitmapFactory `inSampleSize` (a power of two) for decoding a [width]x[height]
+ * image.
+ *
+ * Two rules: subsample while the image is more than twice [targetDim] on both
+ * axes (quality-preserving downscale headroom), then keep halving until the
+ * decode fits [maxPixels]. The second rule is what prevents the OOM: with
+ * "no resize" (targetDim 0) a 200 MP photo used to decode at full size —
+ * ~800 MB of ARGB — and crash the app.
+ */
+internal fun sampleSizeFor(width: Int, height: Int, targetDim: Int, maxPixels: Long): Int {
+    if (width <= 0 || height <= 0) return 1
+    val target = if (targetDim > 0) targetDim else maxOf(width, height)
+    var sample = 1
+    while (width / sample > target * 2 && height / sample > target * 2) sample *= 2
+    while ((width / sample).toLong() * (height / sample) > maxPixels && sample < 1 shl 10) sample *= 2
+    return sample
+}
+
+/** Scale-then-crop plan for an exact-size center crop. */
+internal data class CropGeometry(val scaledWidth: Int, val scaledHeight: Int, val cropX: Int, val cropY: Int)
+
+/**
+ * Scale a [srcW]x[srcH] image to cover [targetW]x[targetH], then center-crop.
+ * The scaled size rounds UP and is floored at the target, so truncation can
+ * never leave the scaled bitmap a pixel smaller than the crop rect (which made
+ * `Bitmap.createBitmap` throw).
+ */
+internal fun centerCropGeometry(srcW: Int, srcH: Int, targetW: Int, targetH: Int): CropGeometry {
+    val srcAspect = srcW.toFloat() / srcH
+    val dstAspect = targetW.toFloat() / targetH
+    val (scaledW, scaledH) = if (srcAspect > dstAspect) {
+        // Source is wider — fit height, crop width
+        ceil(srcW * targetH.toDouble() / srcH).toInt().coerceAtLeast(targetW) to targetH
+    } else {
+        // Source is taller — fit width, crop height
+        targetW to ceil(srcH * targetW.toDouble() / srcW).toInt().coerceAtLeast(targetH)
     }
+    return CropGeometry(scaledW, scaledH, (scaledW - targetW) / 2, (scaledH - targetH) / 2)
 }
 
 /**

@@ -1,7 +1,6 @@
 package app.embeddy.viewmodel
 
 import android.app.Application
-import android.content.Intent
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.SavedStateHandle
@@ -10,25 +9,23 @@ import app.embeddy.squoosh.OutputFormat
 import app.embeddy.squoosh.SquooshConfig
 import app.embeddy.squoosh.SquooshEngine
 import app.embeddy.squoosh.SquooshState
-import app.embeddy.util.FileInfoUtils
 import app.embeddy.util.SettingsRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class SquooshViewModel(
     application: Application,
-    private val savedState: SavedStateHandle,
+    savedState: SavedStateHandle,
 ) : AndroidViewModel(application) {
 
     private val engine = SquooshEngine(application)
     private val settingsRepo = SettingsRepository(application)
+    private val pickedFile = PickedFileState(savedState, prefix = "sq")
 
     private val _state = MutableStateFlow<SquooshState>(SquooshState.Idle)
     val state: StateFlow<SquooshState> = _state.asStateFlow()
@@ -36,72 +33,29 @@ class SquooshViewModel(
     private val _config = MutableStateFlow(SquooshConfig())
     val config: StateFlow<SquooshConfig> = _config.asStateFlow()
 
-    private var compressionJob: Job? = null
+    /** Latest user change awaiting the debounced DataStore write. */
+    private val pendingSave = MutableStateFlow<SquooshConfig?>(null)
 
-    private companion object {
-        const val KEY_FILE_NAME = "sq_file_name"
-        const val KEY_FILE_SIZE = "sq_file_size"
-        const val KEY_URI = "sq_uri"
-    }
+    private var compressionJob: Job? = null
 
     init {
         viewModelScope.launch(Dispatchers.IO) { engine.cleanup() }
-        // Restore saved config from DataStore
         viewModelScope.launch {
-            _config.value = settingsRepo.squooshConfig.first()
+            val loaded = settingsRepo.squooshConfig.first()
+            // A change made before DataStore answered wins over the stored value.
+            if (pendingSave.value == null) _config.value = loaded
         }
+        viewModelScope.persistDebounced(pendingSave) { settingsRepo.saveSquooshConfig(it) }
         // Restore Ready state from SavedStateHandle after process death
-        restoreReadyState()
+        pickedFile.restore()?.let { _state.value = SquooshState.Ready(it.fileName, it.fileSize, it.uri) }
     }
 
-    private fun restoreReadyState() {
-        val fileName = savedState.get<String>(KEY_FILE_NAME) ?: return
-        val fileSize = savedState.get<Long>(KEY_FILE_SIZE) ?: return
-        val uri = savedState.get<String>(KEY_URI) ?: return
-        _state.value = SquooshState.Ready(fileName = fileName, fileSize = fileSize, uri = uri)
-    }
-
-    private fun saveReadyState(fileName: String, fileSize: Long, uri: String) {
-        savedState[KEY_FILE_NAME] = fileName
-        savedState[KEY_FILE_SIZE] = fileSize
-        savedState[KEY_URI] = uri
-    }
-
-    private fun clearSavedReadyState() {
-        savedState.remove<String>(KEY_FILE_NAME)
-        savedState.remove<Long>(KEY_FILE_SIZE)
-        savedState.remove<String>(KEY_URI)
-    }
-
-    /** Persist current config to DataStore whenever it changes. */
-    private fun persistConfig() {
-        viewModelScope.launch {
-            settingsRepo.saveSquooshConfig(_config.value)
-        }
-    }
-
-    /** Handle a file picked from the image picker. Single query for name+size. */
+    /** Handle a file picked from the image picker. */
     fun onFilePicked(uri: Uri) {
         viewModelScope.launch {
-            val ctx = getApplication<Application>()
-            // ContentResolver work off the main thread; state writes back on main.
-            val (fileName, fileSize) = withContext(Dispatchers.IO) {
-                // Take persistable permission so URI survives process death
-                try {
-                    ctx.contentResolver.takePersistableUriPermission(
-                        uri, Intent.FLAG_GRANT_READ_URI_PERMISSION,
-                    )
-                } catch (_: SecurityException) { /* non-fatal */ }
-
-                FileInfoUtils.queryFileInfo(ctx, uri)
-            }
-
-            _state.value = SquooshState.Ready(
-                fileName = fileName,
-                fileSize = fileSize,
-                uri = uri.toString(),
-            )
-            saveReadyState(fileName, fileSize, uri.toString())
+            val file = resolvePickedFile(getApplication(), uri)
+            _state.value = SquooshState.Ready(fileName = file.fileName, fileSize = file.fileSize, uri = file.uri)
+            pickedFile.save(file)
         }
     }
 
@@ -117,55 +71,30 @@ class SquooshViewModel(
                 val result = engine.compress(uri, _config.value)
                 _state.value = SquooshState.Done(result, ready.fileName, ready.uri)
             } catch (e: Exception) {
-                // Cancellation (Cancel button / superseding job) must not paint an
-                // Error card over whatever state the canceller just set.
+                // Cancellation must not paint an Error card over the canceller's state.
                 e.rethrowIfCancellation()
                 _state.value = SquooshState.Error(e.message ?: "Compression failed")
             }
         }
     }
 
-    fun setFormat(format: OutputFormat) {
-        _config.update { it.copy(format = format) }
-        persistConfig()
+    private fun updateConfig(transform: SquooshConfig.() -> SquooshConfig) {
+        _config.value = _config.value.transform()
+        pendingSave.value = _config.value
     }
 
-    fun setQuality(quality: Int) {
-        _config.update { it.copy(quality = quality) }
-        persistConfig()
-    }
+    fun setFormat(format: OutputFormat) = updateConfig { copy(format = format) }
+    fun setQuality(quality: Int) = updateConfig { copy(quality = quality) }
+    fun setLossless(lossless: Boolean) = updateConfig { copy(lossless = lossless) }
+    fun setMaxDimension(maxDim: Int) = updateConfig { copy(maxDimension = maxDim) }
+    fun setExactWidth(width: Int) = updateConfig { copy(exactWidth = width) }
+    fun setExactHeight(height: Int) = updateConfig { copy(exactHeight = height) }
 
-    fun setLossless(lossless: Boolean) {
-        _config.update { it.copy(lossless = lossless) }
-        persistConfig()
-    }
-
-    fun setMaxDimension(maxDim: Int) {
-        _config.update { it.copy(maxDimension = maxDim) }
-        persistConfig()
-    }
-
-    fun setExactWidth(width: Int) {
-        _config.update { it.copy(exactWidth = width) }
-        persistConfig()
-    }
-
-    fun setExactHeight(height: Int) {
-        _config.update { it.copy(exactHeight = height) }
-        persistConfig()
-    }
-
-    fun cancel() {
-        compressionJob?.cancel()
-        compressionJob = null
-        _state.value = SquooshState.Idle
-        clearSavedReadyState()
-    }
-
+    /** Cancel any compression and return to the picker. */
     fun reset() {
         compressionJob?.cancel()
         compressionJob = null
         _state.value = SquooshState.Idle
-        clearSavedReadyState()
+        pickedFile.clear()
     }
 }
