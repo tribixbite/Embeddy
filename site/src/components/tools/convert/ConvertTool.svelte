@@ -37,6 +37,8 @@
   import { sniffFile } from "../../../lib/media/sniff";
   import { formatFileSize } from "../shared/format-size";
   import { createGenerationGuard } from "./conversion-guard";
+  import { recoverFromChunkError } from "../../../lib/pwa/chunk-reload";
+  import { BUILD_ID } from "../../../lib/build";
   import type {
     ConvertOptions,
     ConvertProgress,
@@ -270,6 +272,8 @@
       // A superseded decode's failure (including deliberate aborts) must not
       // paint the error screen over whatever the user is doing now
       if (!guard.isCurrent(gen) || isAbortError(e)) return;
+      // A stale deploy's missing chunk: reload once instead of erroring (M4)
+      if (recoverFromChunkError(e, BUILD_ID)) return;
       error = e instanceof Error ? e.message : "Failed to decode file";
       state = "error";
     }
@@ -483,6 +487,7 @@
       // rejection is an AbortError) — swallowing stale-generation and abort
       // failures keeps cancel/"Change file" off the error screen (M17)
       if (!guard.isCurrent(gen) || isAbortError(e)) return;
+      if (recoverFromChunkError(e, BUILD_ID)) return;
       error = e instanceof Error ? e.message : "Encoding failed";
       state = "error";
     }

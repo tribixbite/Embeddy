@@ -2,7 +2,7 @@
   "name": "Embeddy",
   "short_name": "Embeddy",
   "description": "Convert, compress, inspect, and upload media — right in your browser.",
-  "start_url": "/tools/convert",
+  "start_url": "/tools/convert/",
   "display": "standalone",
   "background_color": "#1a1025",
   "theme_color": "#1a1025",

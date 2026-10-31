@@ -10,6 +10,8 @@
   import { compress, type CompressOptions } from "../../../lib/squoosh/compress";
   import { GIF_UNSUPPORTED_MESSAGE } from "../../../lib/squoosh/codecs";
   import { createGenerationGuard } from "../convert/conversion-guard";
+  import { recoverFromChunkError } from "../../../lib/pwa/chunk-reload";
+  import { BUILD_ID } from "../../../lib/build";
 
   type State = "idle" | "loading" | "settings" | "compressing" | "done" | "error";
 
@@ -99,6 +101,8 @@
       state = "done";
     } catch (e) {
       if (!guard.isCurrent(gen)) return;
+      // A stale deploy's missing codec chunk: reload once instead of erroring (M4)
+      if (recoverFromChunkError(e, BUILD_ID)) return;
       error = e instanceof Error ? e.message : "Compression failed";
       state = "error";
     }

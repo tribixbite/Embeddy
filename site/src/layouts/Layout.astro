@@ -107,16 +107,9 @@ const ogAlt = `${title} — ${description}`;
   <body class="min-h-screen bg-dark-950 text-white font-body antialiased">
     <slot />
     <SiteFooter />
-    <script is:inline>
-      if ("serviceWorker" in navigator) {
-        navigator.serviceWorker.register("/sw.js").then((reg) => {
-          // Check for updates every 60s and whenever the tab becomes visible
-          setInterval(() => reg.update(), 60_000);
-          document.addEventListener("visibilitychange", () => {
-            if (!document.hidden) reg.update();
-          });
-        }).catch(() => {});
-      }
+    <script>
+      // Bundled: SW registration, update prompt, chunk-failure recovery (M4)
+      import "../lib/pwa/register-sw";
     </script>
   </body>
 </html>
