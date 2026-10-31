@@ -7,6 +7,7 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -59,7 +60,13 @@ fun AboutSheet(onDismiss: () -> Unit) {
     val licenses = stringArrayResource(R.array.oss_licenses)
     val urls = stringArrayResource(R.array.oss_urls)
 
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+    // statusBarsPadding: fully expanded under edge-to-edge, the sheet otherwise
+    // runs up behind the status bar (drag handle overlapping the clock/icons).
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        modifier = Modifier.statusBarsPadding(),
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()

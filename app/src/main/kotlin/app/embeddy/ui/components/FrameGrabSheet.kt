@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -51,7 +52,12 @@ fun FrameGrabSheet(
     if (state == FrameGrabState.Idle) return
     val context = LocalContext.current
     val save = rememberDownloadsSaver()
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+    // statusBarsPadding: keep the expanded sheet clear of the status bar (edge-to-edge).
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        modifier = Modifier.statusBarsPadding(),
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()

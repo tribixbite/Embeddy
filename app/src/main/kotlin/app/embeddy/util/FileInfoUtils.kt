@@ -79,6 +79,9 @@ object FileInfoUtils {
             "png" -> "image/png"
             "jpg", "jpeg" -> "image/jpeg"
             "avif" -> "image/avif"
+            "m4a" -> "audio/mp4"
+            "aac" -> "audio/aac"
+            "opus", "ogg" -> "audio/ogg"
             else -> "application/octet-stream"
         }
 

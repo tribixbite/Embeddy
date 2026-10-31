@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -72,6 +73,12 @@ import coil.request.ImageRequest
 fun InspectScreen(viewModel: InspectViewModel = viewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val urlInput by viewModel.urlInput.collectAsStateWithLifecycle()
+    // Dismiss the IME when a fetch starts so the results aren't hidden under it.
+    val keyboard = LocalSoftwareKeyboardController.current
+    val fetch = {
+        keyboard?.hide()
+        viewModel.fetchMetadata()
+    }
 
     // File picker for local file inspection. (The Convert tab's info icon drives
     // inspection through the shared InspectViewModel directly — no parameter needed.)
@@ -100,7 +107,7 @@ fun InspectScreen(viewModel: InspectViewModel = viewModel()) {
                 keyboardType = KeyboardType.Uri,
                 imeAction = ImeAction.Go,
             ),
-            keyboardActions = KeyboardActions(onGo = { viewModel.fetchMetadata() }),
+            keyboardActions = KeyboardActions(onGo = { fetch() }),
             shape = RoundedCornerShape(16.dp),
         )
 
@@ -110,7 +117,7 @@ fun InspectScreen(viewModel: InspectViewModel = viewModel()) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Button(
-                onClick = viewModel::fetchMetadata,
+                onClick = fetch,
                 modifier = Modifier
                     .weight(1f)
                     .height(48.dp),

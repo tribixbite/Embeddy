@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AudioFile
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Refresh
@@ -83,32 +84,54 @@ fun OutputPreviewCard(
 
             Spacer(Modifier.height(12.dp))
 
-            // Animated WebP preview — uses the app-wide Coil loader (EmbeddyApp),
-            // which carries the API-gated animated-image decoders.
+            val mimeType = FileInfoUtils.mimeTypeForFile(state.outputPath)
+            val isAudio = mimeType.startsWith("audio/")
+
+            // Output preview — the app-wide Coil loader (EmbeddyApp) carries the
+            // API-gated animated-image decoders plus a video-frame decoder.
+            // Fit, not FillWidth: a portrait output in this height-capped box was
+            // cropped to its middle band. Audio has no frame to show.
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 300.dp)
+                    .heightIn(min = if (isAudio) 120.dp else 0.dp, max = 300.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .background(MaterialTheme.colorScheme.surfaceVariant),
                 contentAlignment = Alignment.Center,
             ) {
-                AsyncImage(
-                    model = ImageRequest.Builder(context)
-                        .data(File(state.outputPath))
-                        .crossfade(true)
-                        .build(),
-                    contentDescription = stringResource(R.string.converted_preview_desc),
-                    modifier = Modifier.fillMaxWidth(),
-                    contentScale = ContentScale.FillWidth,
-                )
+                if (isAudio) {
+                    Icon(
+                        imageVector = Icons.Outlined.AudioFile,
+                        contentDescription = stringResource(R.string.converted_audio_desc),
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(56.dp),
+                    )
+                } else {
+                    AsyncImage(
+                        model = ImageRequest.Builder(context)
+                            .data(File(state.outputPath))
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = stringResource(R.string.converted_preview_desc),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 300.dp),
+                        contentScale = ContentScale.Fit,
+                    )
+                }
             }
 
             Spacer(Modifier.height(12.dp))
 
-            // File info badge
+            // File info badge. Quality is only meaningful for the animated-image
+            // quality ladder; video/audio outputs are bitrate-driven, and in
+            // target-size MP4 mode the number would be the unused starting value.
             Text(
-                text = stringResource(R.string.output_size, sizeLabel, state.qualityUsed),
+                text = if (mimeType.startsWith("image/")) {
+                    stringResource(R.string.output_size, sizeLabel, state.qualityUsed)
+                } else {
+                    sizeLabel
+                },
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

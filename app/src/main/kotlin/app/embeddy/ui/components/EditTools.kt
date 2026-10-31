@@ -104,8 +104,21 @@ fun EditToolsCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 // Material icon buttons are 48dp touch targets by default.
+                // The button itself has no on/off state, so show (and announce) the
+                // current angle; otherwise a tap gives no visible feedback at all.
+                val rotation = edit.normalizedRotation
                 OutlinedIconButton(onClick = { onEditChanged { copy(rotationDegrees = (normalizedRotation + 90) % 360) } }) {
-                    Icon(Icons.AutoMirrored.Filled.RotateRight, contentDescription = stringResource(R.string.edit_rotate))
+                    Icon(
+                        Icons.AutoMirrored.Filled.RotateRight,
+                        contentDescription = stringResource(R.string.edit_rotate_state, rotation),
+                    )
+                }
+                if (rotation != 0) {
+                    Text(
+                        text = stringResource(R.string.edit_rotation_degrees, rotation),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
                 }
                 FilledTonalIconToggleButton(
                     checked = edit.flipHorizontal,

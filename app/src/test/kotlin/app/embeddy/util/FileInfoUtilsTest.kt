@@ -77,6 +77,11 @@ class FileInfoUtilsTest {
         assertEquals("video/mp4", FileInfoUtils.mimeTypeForFile("out_embeddy.mp4"))
         assertEquals("video/webm", FileInfoUtils.mimeTypeForFile("out.webm"))
         assertEquals("video/x-matroska", FileInfoUtils.mimeTypeForFile("out.mkv"))
+        // Extract-audio output: an octet-stream mime made music apps and share
+        // targets ignore the saved/shared file.
+        assertEquals("audio/mp4", FileInfoUtils.mimeTypeForFile("clip_embeddy.m4a"))
+        assertEquals("audio/aac", FileInfoUtils.mimeTypeForFile("clip.aac"))
+        assertEquals("audio/ogg", FileInfoUtils.mimeTypeForFile("clip.opus"))
     }
 
     @Test

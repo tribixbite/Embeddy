@@ -29,6 +29,7 @@
     <string name="encoding_status">Encoding… · %1$s</string>
     <string name="progress_status">%1$d%% · %2$s</string>
     <string name="progress_status_eta">%1$d%% · %2$s · ~%3$s left</string>
+    <string name="converted_audio_desc">Extracted audio track</string>
     <string name="output_size">%1$s · quality %2$d</string>
     <string name="pick_file">Tap to pick a file</string>
     <string name="or_share">or share a file to Embeddy</string>
@@ -70,7 +71,8 @@
     <string name="edit_speed">Speed</string>
     <string name="speed_factor">%1$s×</string>
     <string name="edit_orientation">Rotate, flip and crop</string>
-    <string name="edit_rotate">Rotate 90° clockwise</string>
+    <string name="edit_rotate_state">Rotate 90° clockwise (currently %1$d°)</string>
+    <string name="edit_rotation_degrees">%1$d°</string>
     <string name="edit_flip_horizontal">Flip horizontally</string>
     <string name="edit_flip_vertical">Flip vertically</string>
     <string name="edit_crop">Crop</string>
