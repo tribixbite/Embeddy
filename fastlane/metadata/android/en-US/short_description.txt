@@ -1,1 +1,1 @@
-Convert, compress, inspect and share embeddable media — fully offline.
+Trim, join and convert video. Make GIF/WebP that fits chat size limits.

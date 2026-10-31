@@ -1,19 +1,29 @@
-Embeddy is a media toolkit for getting images and video into the size and format
-that chat apps, forums and social sites actually accept.
+Embeddy is a quick video editor and media toolkit: trim, join and convert clips,
+and get images and video into the size and format that chat apps, forums and
+social sites actually accept.
 
-All conversion and compression runs on your device. Nothing is uploaded unless
-you explicitly choose the Upload tool.
+All editing, conversion and compression runs on your device. Nothing is
+uploaded unless you explicitly choose the Upload tool.
+
+<b>Edit</b>
+• Trim to a range, or cut several segments and stitch them together
+• Join separate videos into one, in any order, each with its own trim
+• Speed from 0.25× to 4×, rotate, flip, crop and reverse
+• Per-segment volume, mute, or extract the audio track as M4A
+• Grab a still frame and compress it in Squoosh
+• Turn a set of photos into an animation or a video
 
 <b>Convert</b>
-Turn video, GIF or animated WebP into animated WebP. An adaptive quality pass
-starts at your chosen quality and steps down until the file fits a size target,
-so you get the best quality that still uploads.
+Export MP4, the original container, animated WebP or GIF. For WebP and GIF an
+adaptive quality pass steps down until the file fits a size target; for MP4 the
+bitrate is computed from the target, so you get the best quality that still
+uploads.
 
 • Presets for Discord (10 MB), Telegram stickers (256 KB) and Slack (5 MB)
-• Trim to a range, or stitch several segments together
+• Keep the original resolution and frame rate, or scale down
 • Lanczos downscaling, optional sharpening, denoise and dithering
-• Exact output dimensions with centre-crop, or scale to a maximum size
 • Generate a 3-second preview before committing to a full encode
+• Location and other metadata are removed from exported video
 
 <b>Squoosh</b>
 Compress still images to WebP, JPEG, PNG or AVIF with a before/after slider so
@@ -29,5 +39,9 @@ Send a file to an anonymous host (0x0.st or catbox.moe) and get a link back.
 EXIF is stripped before upload when the format supports it.
 
 <b>Privacy</b>
-No analytics, no accounts, no ads. The only network access is the Inspect tool
-fetching a URL you typed, and the Upload tool sending a file you chose.
+No analytics, no accounts, no ads, and no access to your photo library — you
+pick each file yourself. The only network access is the Inspect tool fetching a
+URL you typed, and the Upload tool sending a file you chose.
+Privacy policy: https://embeddy.link/privacy/
+
+Embeddy is free software (GPL-3.0). Source: https://github.com/tribixbite/Embeddy
