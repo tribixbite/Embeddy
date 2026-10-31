@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -39,6 +41,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import app.embeddy.R
@@ -57,10 +60,12 @@ fun SettingsPanel(
     onConfigChanged: (ConversionConfig.() -> ConversionConfig) -> Unit,
     onPreview: (() -> Unit)? = null,
     /**
-     * True when the loaded input is a real video: shows the WebP/MP4/Original
-     * output-format picker. GIF/animated-WebP inputs stay WebP-only.
+     * Output formats the loaded input can produce; the picker is shown when
+     * there is a choice (video inputs). Empty/one entry hides it.
      */
-    showVideoFormats: Boolean = false,
+    availableFormats: List<OutputMediaFormat> = emptyList(),
+    /** False hides the preview button (audio-only output has nothing to preview). */
+    previewEnabled: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -107,7 +112,7 @@ fun SettingsPanel(
 
             // Output format picker — video inputs only, always visible so the
             // choice isn't buried behind the expand toggle
-            if (showVideoFormats) {
+            if (availableFormats.size > 1) {
                 Spacer(Modifier.height(12.dp))
                 Text(
                     text = stringResource(R.string.output_format),
@@ -116,7 +121,7 @@ fun SettingsPanel(
                 )
                 Spacer(Modifier.height(4.dp))
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutputMediaFormat.entries.forEach { format ->
+                    availableFormats.forEach { format ->
                         FilterChip(
                             selected = config.outputFormat == format,
                             onClick = { onConfigChanged { copy(outputFormat = format) } },
@@ -135,17 +140,28 @@ fun SettingsPanel(
                 Column {
                     Spacer(Modifier.height(16.dp))
 
-                    // Max dimension slider
-                    SettingSlider(
-                        label = stringResource(R.string.max_dimension),
-                        value = config.maxDimension.toFloat(),
-                        valueRange = 240f..1280f,
-                        steps = 12,
-                        valueLabel = "${config.maxDimension}px",
-                        onValueChange = { dim ->
-                            onConfigChanged { copy(maxDimension = dim.roundToInt()) }
+                    // Max dimension slider, or keep the source resolution
+                    OriginalToggleRow(
+                        label = stringResource(R.string.keep_original_resolution),
+                        checked = config.maxDimension == ConversionConfig.ORIGINAL_DIMENSION,
+                        onCheckedChange = { keep ->
+                            onConfigChanged {
+                                copy(maxDimension = if (keep) ConversionConfig.ORIGINAL_DIMENSION else preset.maxDimension)
+                            }
                         },
                     )
+                    if (config.maxDimension != ConversionConfig.ORIGINAL_DIMENSION) {
+                        SettingSlider(
+                            label = stringResource(R.string.max_dimension),
+                            value = config.maxDimension.toFloat(),
+                            valueRange = 240f..1280f,
+                            steps = 12,
+                            valueLabel = "${config.maxDimension}px",
+                            onValueChange = { dim ->
+                                onConfigChanged { copy(maxDimension = dim.roundToInt()) }
+                            },
+                        )
+                    }
 
                     // Exact dimensions
                     Text(
@@ -188,17 +204,26 @@ fun SettingsPanel(
 
                     Spacer(Modifier.height(12.dp))
 
-                    // FPS slider
-                    SettingSlider(
-                        label = stringResource(R.string.frame_rate),
-                        value = config.fps.toFloat(),
-                        valueRange = 6f..30f,
-                        steps = 7,
-                        valueLabel = "${config.fps} fps",
-                        onValueChange = { fps ->
-                            onConfigChanged { copy(fps = fps.roundToInt()) }
+                    // FPS slider, or keep the source frame rate
+                    OriginalToggleRow(
+                        label = stringResource(R.string.keep_original_fps),
+                        checked = config.fps == ConversionConfig.ORIGINAL_FPS,
+                        onCheckedChange = { keep ->
+                            onConfigChanged { copy(fps = if (keep) ConversionConfig.ORIGINAL_FPS else preset.fps) }
                         },
                     )
+                    if (config.fps != ConversionConfig.ORIGINAL_FPS) {
+                        SettingSlider(
+                            label = stringResource(R.string.frame_rate),
+                            value = config.fps.toFloat(),
+                            valueRange = 6f..30f,
+                            steps = 7,
+                            valueLabel = "${config.fps} fps",
+                            onValueChange = { fps ->
+                                onConfigChanged { copy(fps = fps.roundToInt()) }
+                            },
+                        )
+                    }
 
                     // Quality slider
                     SettingSlider(
@@ -293,10 +318,13 @@ fun SettingsPanel(
                                 },
                             )
 
-                            // WebP-only encoder options — pixel-format choice,
-                            // palette dithering, animation looping, and libwebp's
-                            // compression effort have no meaning for MP4/WebM
-                            // encodes and must not leak into them.
+                            // Animated-image options. Pixel format and libwebp's
+                            // compression effort are WebP-only; dithering and
+                            // looping apply to GIF too. None of them mean
+                            // anything for MP4/WebM encodes.
+                            val animatedOutput = config.outputFormat == OutputMediaFormat.WEBP ||
+                                config.outputFormat == OutputMediaFormat.GIF
+                            if (animatedOutput) {
                             if (config.outputFormat == OutputMediaFormat.WEBP) {
                             // 2. Color space selector
                             Text(
@@ -316,6 +344,7 @@ fun SettingsPanel(
                             }
 
                             Spacer(Modifier.height(12.dp))
+                            } // end WebP-only color space
 
                             // 3. Dithering mode
                             Text(
@@ -354,7 +383,7 @@ fun SettingsPanel(
                             )
 
                             // 5. Compression level (0-6, higher = slower but smaller)
-                            SettingSlider(
+                            if (config.outputFormat == OutputMediaFormat.WEBP) SettingSlider(
                                 label = stringResource(R.string.compression_level),
                                 value = config.compressionLevel.toFloat(),
                                 valueRange = 0f..6f,
@@ -364,10 +393,10 @@ fun SettingsPanel(
                                     onConfigChanged { copy(compressionLevel = v.roundToInt()) }
                                 },
                             )
-                            } // end WebP-only options
+                            } // end animated-image options
 
                             // 6. Preview button — generates a 3-second clip
-                            if (onPreview != null) {
+                            if (onPreview != null && previewEnabled) {
                                 Spacer(Modifier.height(8.dp))
                                 Button(
                                     onClick = onPreview,
@@ -387,6 +416,36 @@ fun SettingsPanel(
                 }
             }
         }
+    }
+}
+
+/**
+ * "Keep original …" switch row. The whole row is the touch target (≥48dp tall)
+ * so the switch is easy to hit.
+ */
+@Composable
+private fun OriginalToggleRow(
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f),
+        )
+        // The row handles the toggle; a null callback keeps the switch from
+        // consuming the tap separately (and TalkBack reads one control).
+        Switch(checked = checked, onCheckedChange = null)
     }
 }
 

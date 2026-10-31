@@ -8,9 +8,11 @@ import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
 import android.graphics.Paint
 import android.graphics.Rect
+import kotlinx.coroutines.ensureActive
 import timber.log.Timber
 import java.io.File
 import java.util.Locale
+import kotlin.coroutines.coroutineContext
 
 /**
  * Turns an animated WebP into a PNG sequence plus an FFmpeg concat script.
@@ -43,9 +45,18 @@ class AnimatedWebPExtractor(private val workDir: File) {
      * Decode [source] and write its frames as PNGs under [workDir].
      * Returns null when the input is not an animated WebP.
      *
+     * Suspends only to check for cancellation between frames — a 1500-frame
+     * PNG extraction otherwise kept running long after the user cancelled.
+     *
      * @param maxFrames safety cap on how many frames are written to disk
+     * @param maxDurationMs stop once this much animation time has been written
+     * (previews only need their window, not every frame); 0 = no limit
      */
-    fun extract(source: ByteArray, maxFrames: Int = MAX_FRAMES): Extracted? {
+    suspend fun extract(
+        source: ByteArray,
+        maxFrames: Int = MAX_FRAMES,
+        maxDurationMs: Long = 0,
+    ): Extracted? {
         val frameSet = WebPFrameSplitter.split(source) ?: return null
 
         val canvas = Bitmap.createBitmap(
@@ -59,12 +70,14 @@ class AnimatedWebPExtractor(private val workDir: File) {
         }
 
         val limit = minOf(frameSet.frames.size, maxFrames)
-        val lines = StringBuilder()
+        val entries = mutableListOf<ConcatScript.Entry>()
         var written = 0
         var totalDurationMs = 0
 
         try {
             for (index in 0 until limit) {
+                coroutineContext.ensureActive()
+                if (maxDurationMs > 0 && totalDurationMs >= maxDurationMs) break
                 val frame = frameSet.frames[index]
 
                 val bitmap = BitmapFactory.decodeByteArray(frame.bytes, 0, frame.bytes.size)
@@ -86,14 +99,10 @@ class AnimatedWebPExtractor(private val workDir: File) {
                     canvas.compress(Bitmap.CompressFormat.PNG, 100, out)
                 }
 
-                // A zero duration means "as fast as possible"; clamp so the concat
-                // script never emits a 0s entry, which FFmpeg treats as undefined.
-                val durationMs = frame.durationMs.coerceAtLeast(MIN_FRAME_DURATION_MS)
-                totalDurationMs += durationMs
-                lines.append("file '").append(outFile.name).append("'\n")
-                lines.append(
-                    String.format(Locale.US, "duration %.3f%n", durationMs / 1000.0)
-                )
+                // A zero duration means "as fast as possible"; ConcatScript clamps
+                // it so the script never emits a 0 s entry.
+                entries += ConcatScript.Entry(outFile.name, frame.durationMs)
+                totalDurationMs += ConcatScript.clampDuration(frame.durationMs)
                 written++
 
                 if (frame.dispose == WebPFrameSplitter.Dispose.BACKGROUND) {
@@ -106,13 +115,7 @@ class AnimatedWebPExtractor(private val workDir: File) {
 
         if (written == 0) return null
 
-        // The concat demuxer ignores the final entry's duration unless the last
-        // file is repeated, so re-list it to give the closing frame its time.
-        lines.append(
-            String.format(Locale.US, "file 'frame_%05d.png'%n", written - 1)
-        )
-
-        val script = File(workDir, "frames.txt").apply { writeText(lines.toString()) }
+        val script = File(workDir, "frames.txt").apply { writeText(ConcatScript.build(entries)) }
         Timber.d(
             "Extracted %d animated WebP frames (%dx%d, %dms total)",
             written, frameSet.width, frameSet.height, totalDurationMs,
@@ -128,16 +131,13 @@ class AnimatedWebPExtractor(private val workDir: File) {
                 written * 1000.0 / totalDurationMs
             } else 0.0,
             loopCount = frameSet.loopCount,
-            truncated = limit < frameSet.frames.size,
+            truncated = written < frameSet.frames.size,
         )
     }
 
     companion object {
         /** Bounds temp-directory usage; matches the web decoder's cap. */
         const val MAX_FRAMES = 1500
-
-        /** WebP allows 0ms delays; FFmpeg needs a real duration. */
-        private const val MIN_FRAME_DURATION_MS = 20
 
         private val CLEAR_PAINT = Paint().apply {
             color = Color.TRANSPARENT

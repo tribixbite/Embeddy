@@ -39,46 +39,6 @@ class ConversionConfigTest {
         assertEquals(0.5f, TrimSegment(0, 1000, volume = 0.5f).volume)
     }
 
-    // ── ConversionConfig.totalKeptDurationMs ──
-
-    @Test
-    fun `totalKeptDurationMs returns zero when no trim and no segments`() {
-        val config = ConversionConfig()
-        assertEquals(0L, config.totalKeptDurationMs)
-    }
-
-    @Test
-    fun `totalKeptDurationMs from single trim range`() {
-        val config = ConversionConfig(trimStartMs = 2000, trimEndMs = 8000)
-        assertEquals(6000L, config.totalKeptDurationMs)
-    }
-
-    @Test
-    fun `totalKeptDurationMs from segments overrides trim range`() {
-        val config = ConversionConfig(
-            trimStartMs = 0,
-            trimEndMs = 10000,
-            segments = listOf(
-                TrimSegment(0, 3000),   // 3s
-                TrimSegment(5000, 8000), // 3s
-            ),
-        )
-        assertEquals(6000L, config.totalKeptDurationMs)
-    }
-
-    @Test
-    fun `totalKeptDurationMs with multiple segments sums correctly`() {
-        val config = ConversionConfig(
-            segments = listOf(
-                TrimSegment(0, 1000),
-                TrimSegment(2000, 3500),
-                TrimSegment(7000, 10000),
-            ),
-        )
-        // 1000 + 1500 + 3000 = 5500
-        assertEquals(5500L, config.totalKeptDurationMs)
-    }
-
     // ── ConversionConfig.effectiveMinQuality ──
 
     @Test
@@ -150,18 +110,20 @@ class ConversionConfigTest {
         assertEquals(0, config.denoiseStrength)
         assertEquals(ColorSpace.AUTO, config.colorSpace)
         assertEquals(DitherMode.NONE, config.ditherMode)
-        assertTrue(config.segments.isEmpty())
-        assertEquals(0L, config.trimStartMs)
-        assertEquals(0L, config.trimEndMs)
         assertEquals(OutputMediaFormat.WEBP, config.outputFormat)
     }
 
     @Test
-    fun `OutputMediaFormat offers exactly WebP, MP4, and Original`() {
-        assertEquals(
-            listOf(OutputMediaFormat.WEBP, OutputMediaFormat.MP4, OutputMediaFormat.ORIGINAL),
-            OutputMediaFormat.entries.toList(),
-        )
+    fun `only container formats count as video outputs`() {
+        assertTrue(OutputMediaFormat.MP4.isVideo)
+        assertTrue(OutputMediaFormat.ORIGINAL.isVideo)
+        assertFalse(OutputMediaFormat.WEBP.isVideo)
+    }
+
+    @Test
+    fun `original fps falls back to 30 for estimates only`() {
+        assertEquals(30, ConversionConfig(fps = ConversionConfig.ORIGINAL_FPS).estimationFps)
+        assertEquals(12, ConversionConfig(fps = 12).estimationFps)
     }
 
     // ── Enum values ──
@@ -185,20 +147,5 @@ class ConversionConfigTest {
         assertEquals("bayer", DitherMode.BAYER.ffmpegValue)
         assertEquals("floyd_steinberg", DitherMode.FLOYD_STEINBERG.ffmpegValue)
         assertEquals("sierra2_4a", DitherMode.SIERRA.ffmpegValue)
-    }
-
-    // ── Copy & modify ──
-
-    @Test
-    fun `config copy preserves segments`() {
-        val original = ConversionConfig(
-            segments = listOf(TrimSegment(0, 5000)),
-            preset = Preset.CUSTOM,
-        )
-        val copied = original.copy(fps = 24)
-        assertEquals(1, copied.segments.size)
-        assertEquals(0L, copied.segments[0].startMs)
-        assertEquals(5000L, copied.segments[0].endMs)
-        assertEquals(24, copied.fps)
     }
 }

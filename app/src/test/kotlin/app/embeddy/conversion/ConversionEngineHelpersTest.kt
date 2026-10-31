@@ -16,24 +16,32 @@ class ConversionEngineHelpersTest {
     private val script = File("/tmp/frames/frames.txt")
 
     private fun command(
-        config: ConversionConfig,
+        edit: EditSpec = EditSpec(),
         concatScript: File? = null,
         sourceLoopCount: Int? = null,
         quality: Int = 70,
+        config: ConversionConfig = ConversionConfig(),
     ): String = buildFfmpegCommand(
-        inputPath = "/in/input.mp4",
-        outputPath = "/out/output.webp",
-        config = config,
-        quality = quality,
-        concatScript = concatScript,
-        sourceLoopCount = sourceLoopCount,
+        CommandRequest(
+            input = if (concatScript != null) {
+                InputSpec(path = concatScript.absolutePath, isConcatScript = true)
+            } else {
+                InputSpec(path = "/in/input.mp4")
+            },
+            outputPath = "/out/output.webp",
+            target = OutputTarget.AnimatedWebp,
+            config = config,
+            edit = edit,
+            quality = quality,
+            sourceLoopCount = sourceLoopCount,
+        ),
     )
 
     // ── concat-script input (pre-decoded animated WebP) ──
 
     @Test
     fun `concat script input uses the concat demuxer and the script path`() {
-        val cmd = command(ConversionConfig(), concatScript = script)
+        val cmd = command(concatScript = script)
         assertTrue(cmd, "-f concat -safe 0" in cmd)
         assertTrue(cmd, script.absolutePath in cmd)
         assertFalse(cmd, "/in/input.mp4" in cmd)
@@ -42,11 +50,7 @@ class ConversionEngineHelpersTest {
     @Test
     fun `preview of an animated WebP uses the concat demuxer when a script is passed`() {
         // Mirrors generatePreview: single-segment trim override + concat script (M24)
-        val previewConfig = ConversionConfig(
-            trimStartMs = 0,
-            trimEndMs = 3000,
-            segments = emptyList(),
-        )
+        val previewConfig = EditSpec(trimStartMs = 0, trimEndMs = 3000)
         val cmd = command(previewConfig, concatScript = script)
         assertTrue(cmd, "-f concat -safe 0" in cmd)
         assertTrue(cmd, script.absolutePath in cmd)
@@ -56,14 +60,14 @@ class ConversionEngineHelpersTest {
 
     @Test
     fun `all segments survive stitching when the input is a concat script`() {
-        val config = ConversionConfig(
+        val edit = EditSpec(
             segments = listOf(
                 TrimSegment(0, 1000),
                 TrimSegment(2000, 3000),
                 TrimSegment(4000, 5000),
             ),
         )
-        val cmd = command(config, concatScript = script)
+        val cmd = command(edit, concatScript = script)
         // Previously the concat branch won and used only segments.first()
         assertTrue(cmd, "concat=n=3" in cmd)
         assertTrue(cmd, "[v2]" in cmd)
@@ -71,17 +75,14 @@ class ConversionEngineHelpersTest {
         assertTrue(cmd, "-f concat -safe 0" in cmd)
         assertTrue(cmd, script.absolutePath in cmd)
         // All three trim ranges appear in the filtergraph
-        assertTrue(cmd, "trim=0.000:1.000" in cmd)
-        assertTrue(cmd, "trim=2.000:3.000" in cmd)
-        assertTrue(cmd, "trim=4.000:5.000" in cmd)
+        assertTrue(cmd, "trim=start=0.000:end=1.000" in cmd)
+        assertTrue(cmd, "trim=start=2.000:end=3.000" in cmd)
+        assertTrue(cmd, "trim=start=4.000:end=5.000" in cmd)
     }
 
     @Test
     fun `multi-segment stitching over a direct input is unchanged`() {
-        val config = ConversionConfig(
-            segments = listOf(TrimSegment(0, 1000), TrimSegment(2000, 3000)),
-        )
-        val cmd = command(config)
+        val cmd = command(EditSpec(segments = listOf(TrimSegment(0, 1000), TrimSegment(2000, 3000))))
         assertTrue(cmd, "concat=n=2" in cmd)
         assertTrue(cmd, "-i \"/in/input.mp4\"" in cmd)
     }
@@ -89,30 +90,30 @@ class ConversionEngineHelpersTest {
     // ── single-segment trim ──
 
     @Test
-    fun `single trim seeks before input and limits output duration`() {
-        val cmd = command(ConversionConfig(trimStartMs = 1000, trimEndMs = 3000))
+    fun `single trim seeks and limits duration as input options`() {
+        val cmd = command(EditSpec(trimStartMs = 1000, trimEndMs = 3000))
         assertTrue(cmd, "-ss 1.000" in cmd)
-        assertTrue(cmd, "-to 2.000" in cmd)
+        assertTrue(cmd, "-t 2.000" in cmd)
     }
 
     // ── stitch edge cases (segment list robustness) ──
 
     @Test
     fun `single segment uses the seek path, not a filtergraph`() {
-        val cmd = command(ConversionConfig(segments = listOf(TrimSegment(1000, 4000))))
+        val cmd = command(EditSpec(segments = listOf(TrimSegment(1000, 4000))))
         assertTrue(cmd, "-ss 1.000" in cmd)
-        assertTrue(cmd, "-to 3.000" in cmd)
+        assertTrue(cmd, "-t 3.000" in cmd)
         assertFalse(cmd, "-filter_complex" in cmd)
     }
 
     @Test
     fun `many segments all appear in the filtergraph in order`() {
         val segments = (0 until 6).map { TrimSegment(it * 2000L, it * 2000L + 1000L) }
-        val cmd = command(ConversionConfig(segments = segments))
+        val cmd = command(EditSpec(segments = segments))
         assertTrue(cmd, "concat=n=6" in cmd)
         (0 until 6).forEach { i ->
             assertTrue(cmd, "[v$i]" in cmd)
-            assertTrue(cmd, "trim=${i * 2}.000:${i * 2 + 1}.000" in cmd)
+            assertTrue(cmd, "trim=start=${i * 2}.000:end=${i * 2 + 1}.000" in cmd)
         }
     }
 
@@ -121,15 +122,15 @@ class ConversionEngineHelpersTest {
         // The builder has no duration knowledge; FFmpeg's trim simply stops at
         // EOF, so the values must be emitted as given rather than dropped.
         val cmd = command(
-            ConversionConfig(segments = listOf(TrimSegment(0, 1000), TrimSegment(2000, 125_000))),
+            EditSpec(segments = listOf(TrimSegment(0, 1000), TrimSegment(2000, 125_000))),
         )
-        assertTrue(cmd, "trim=2.000:125.000" in cmd)
+        assertTrue(cmd, "trim=start=2.000:end=125.000" in cmd)
     }
 
     @Test
     fun `zero-length segments are dropped from the filtergraph`() {
         val cmd = command(
-            ConversionConfig(
+            EditSpec(
                 segments = listOf(
                     TrimSegment(0, 1000),
                     TrimSegment(3000, 3000), // empty trim stream would abort concat
@@ -138,33 +139,33 @@ class ConversionEngineHelpersTest {
             ),
         )
         assertTrue(cmd, "concat=n=2" in cmd)
-        assertFalse(cmd, "trim=3.000:3.000" in cmd)
+        assertFalse(cmd, "trim=start=3.000:end=3.000" in cmd)
     }
 
     @Test
     fun `dropping zero-length segments can collapse stitching to the seek path`() {
         val cmd = command(
-            ConversionConfig(segments = listOf(TrimSegment(1000, 4000), TrimSegment(6000, 6000))),
+            EditSpec(segments = listOf(TrimSegment(1000, 4000), TrimSegment(6000, 6000))),
         )
         assertFalse(cmd, "-filter_complex" in cmd)
         assertTrue(cmd, "-ss 1.000" in cmd)
-        assertTrue(cmd, "-to 3.000" in cmd)
+        assertTrue(cmd, "-t 3.000" in cmd)
     }
 
     @Test
     fun `unsorted segments are emitted in start-time order`() {
         val cmd = command(
-            ConversionConfig(segments = listOf(TrimSegment(4000, 5000), TrimSegment(0, 1000))),
+            EditSpec(segments = listOf(TrimSegment(4000, 5000), TrimSegment(0, 1000))),
         )
-        val first = cmd.indexOf("trim=0.000:1.000")
-        val second = cmd.indexOf("trim=4.000:5.000")
+        val first = cmd.indexOf("trim=start=0.000:end=1.000")
+        val second = cmd.indexOf("trim=start=4.000:end=5.000")
         assertTrue(cmd, first in 0 until second)
     }
 
     @Test
     fun `zero-length segments are dropped on the concat-script input too`() {
         val cmd = command(
-            ConversionConfig(
+            EditSpec(
                 segments = listOf(
                     TrimSegment(0, 1000),
                     TrimSegment(2000, 2000),
@@ -175,7 +176,7 @@ class ConversionEngineHelpersTest {
         )
         assertTrue(cmd, "concat=n=2" in cmd)
         assertTrue(cmd, "-f concat -safe 0" in cmd)
-        assertFalse(cmd, "trim=2.000:2.000" in cmd)
+        assertFalse(cmd, "trim=start=2.000:end=2.000" in cmd)
     }
 
     // ── encoder flags: keyframeInterval removed (M64), colorSpace mapping (M39) ──
@@ -183,13 +184,13 @@ class ConversionEngineHelpersTest {
     @Test
     fun `no -g flag is ever emitted`() {
         // libwebp_anim never reads gop_size; the flag was a silent no-op
-        assertFalse("-g " in command(ConversionConfig()))
+        assertFalse("-g " in command())
     }
 
     @Test
     fun `colorSpace AUTO emits no pix_fmt, YUV420 emits yuv420p`() {
-        assertFalse("-pix_fmt" in command(ConversionConfig(colorSpace = ColorSpace.AUTO)))
-        assertTrue("-pix_fmt yuv420p" in command(ConversionConfig(colorSpace = ColorSpace.YUV420)))
+        assertFalse("-pix_fmt" in command(config = ConversionConfig(colorSpace = ColorSpace.AUTO)))
+        assertTrue("-pix_fmt yuv420p" in command(config = ConversionConfig(colorSpace = ColorSpace.YUV420)))
     }
 
     // ── loop-count resolution (M70) ──
@@ -216,7 +217,7 @@ class ConversionEngineHelpersTest {
 
     @Test
     fun `source loop count reaches the -loop flag`() {
-        val cmd = command(ConversionConfig(), concatScript = script, sourceLoopCount = 2)
+        val cmd = command(concatScript = script, sourceLoopCount = 2)
         assertTrue(cmd, "-loop 2" in cmd)
     }
 

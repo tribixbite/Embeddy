@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material.icons.outlined.Share
@@ -49,9 +50,11 @@ fun OutputPreviewCard(
     state: ConversionState.Done,
     onNewConversion: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Return to the same input with its edit intact; null hides the button. */
+    onEditAgain: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
-    val sizeMb = String.format("%.2f", state.outputSizeBytes / 1_000_000.0)
+    val sizeLabel = FileInfoUtils.formatFileSize(state.outputSizeBytes)
     val saveToDownloads = rememberDownloadsSaver()
 
     Card(
@@ -105,7 +108,7 @@ fun OutputPreviewCard(
 
             // File info badge
             Text(
-                text = stringResource(R.string.output_size, "$sizeMb MB", state.qualityUsed),
+                text = stringResource(R.string.output_size, sizeLabel, state.qualityUsed),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -142,6 +145,17 @@ fun OutputPreviewCard(
             }
 
             Spacer(Modifier.height(8.dp))
+
+            if (onEditAgain != null) {
+                TextButton(
+                    onClick = onEditAgain,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Outlined.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(stringResource(R.string.back_to_edit))
+                }
+            }
 
             TextButton(
                 onClick = onNewConversion,

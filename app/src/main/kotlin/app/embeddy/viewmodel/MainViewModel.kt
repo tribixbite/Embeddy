@@ -7,46 +7,44 @@ import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
+import app.embeddy.BuildConfig
 import app.embeddy.conversion.ConversionConfig
 import app.embeddy.conversion.ConversionEngine
-import app.embeddy.conversion.ConversionProgress
-import app.embeddy.conversion.ConversionState
-import app.embeddy.conversion.OutputMediaFormat
-import app.embeddy.conversion.Preset
-import app.embeddy.conversion.TrimSegment
-import app.embeddy.conversion.mergeOverlappingSegments
-import app.embeddy.ui.isAnimatedImageFile
-import app.embeddy.R
-import app.embeddy.util.FileInfoUtils
+import app.embeddy.conversion.SourceKind
 import app.embeddy.util.SettingsRepository
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.io.File
 
+/**
+ * Android wiring for the Convert tab: builds a [ConvertController] around the
+ * FFmpeg engine, DataStore preferences and SavedStateHandle, and routes share
+ * intents. All state-machine logic lives in the controller.
+ */
 class MainViewModel(
     application: Application,
-    private val savedState: SavedStateHandle,
+    savedState: SavedStateHandle,
 ) : AndroidViewModel(application) {
 
     private val engine = ConversionEngine(application)
     private val settingsRepo = SettingsRepository(application)
 
-    private val _state = MutableStateFlow<ConversionState>(ConversionState.Idle)
-    val state: StateFlow<ConversionState> = _state.asStateFlow()
-
-    private val _config = MutableStateFlow(ConversionConfig.fromPreset(Preset.DISCORD))
-    val config: StateFlow<ConversionConfig> = _config.asStateFlow()
-
-    private var conversionJob: Job? = null
-    private var previewJob: Job? = null
+    /** The Convert tab's state machine. */
+    val controller = ConvertController(
+        scope = viewModelScope,
+        engine = engine,
+        configStore = object : ConfigStore {
+            override suspend fun load(): ConversionConfig = settingsRepo.conversionConfig.first()
+            override suspend fun save(config: ConversionConfig) = settingsRepo.saveConversionConfig(config)
+        },
+        sessionStore = object : SessionStore {
+            override fun read(): String? = savedState.get<String>(KEY_SESSION)
+            override fun write(value: String?) {
+                if (value == null) savedState.remove<String>(KEY_SESSION) else savedState[KEY_SESSION] = value
+            }
+        },
+    )
 
     /** One-shot signal telling the scaffold to bring the Convert tab to the front. */
     private val _navigateToConvert = NavigationSignal()
@@ -55,135 +53,28 @@ class MainViewModel(
     /** Called by the scaffold after it has switched tabs, so the signal is not replayed. */
     fun onNavigateToConvertHandled() = _navigateToConvert.markHandled()
 
-    // SavedStateHandle keys for process death restoration
-    private companion object {
-        const val KEY_INPUT_URI = "ss_input_uri"
-        const val KEY_FILE_NAME = "ss_file_name"
-        const val KEY_FILE_SIZE = "ss_file_size"
-        const val KEY_DURATION_MS = "ss_duration_ms"
-        const val KEY_WIDTH = "ss_width"
-        const val KEY_HEIGHT = "ss_height"
-        const val KEY_HAS_AUDIO = "ss_has_audio"
-    }
-
     init {
         viewModelScope.launch(Dispatchers.IO) {
             engine.cleanupOldFiles()
-            // Log available encoders for diagnostics
-            engine.checkEncoderAvailability()
-        }
-        // Restore saved config from DataStore
-        viewModelScope.launch {
-            _config.value = settingsRepo.conversionConfig.first()
-        }
-        // Restore Ready state from SavedStateHandle if process was killed
-        restoreReadyState()
-    }
-
-    /** Restore the Ready state from SavedStateHandle after process death. */
-    private fun restoreReadyState() {
-        val uri = savedState.get<String>(KEY_INPUT_URI) ?: return
-        val fileName = savedState.get<String>(KEY_FILE_NAME) ?: return
-        val fileSize = savedState.get<Long>(KEY_FILE_SIZE) ?: return
-        _state.value = ConversionState.Ready(
-            inputUri = uri,
-            fileName = fileName,
-            fileSize = fileSize,
-            durationMs = savedState.get<Long>(KEY_DURATION_MS) ?: 0L,
-            width = savedState.get<Int>(KEY_WIDTH) ?: 0,
-            height = savedState.get<Int>(KEY_HEIGHT) ?: 0,
-            hasAudio = savedState.get<Boolean>(KEY_HAS_AUDIO) ?: false,
-        )
-    }
-
-    /** Persist Ready state fields to SavedStateHandle. */
-    private fun saveReadyState(ready: ConversionState.Ready) {
-        savedState[KEY_INPUT_URI] = ready.inputUri
-        savedState[KEY_FILE_NAME] = ready.fileName
-        savedState[KEY_FILE_SIZE] = ready.fileSize
-        savedState[KEY_DURATION_MS] = ready.durationMs
-        savedState[KEY_WIDTH] = ready.width
-        savedState[KEY_HEIGHT] = ready.height
-        savedState[KEY_HAS_AUDIO] = ready.hasAudio
-    }
-
-    /** Clear saved Ready state when leaving that state. */
-    private fun clearSavedReadyState() {
-        savedState.remove<String>(KEY_INPUT_URI)
-        savedState.remove<String>(KEY_FILE_NAME)
-        savedState.remove<Long>(KEY_FILE_SIZE)
-        savedState.remove<Long>(KEY_DURATION_MS)
-        savedState.remove<Int>(KEY_WIDTH)
-        savedState.remove<Int>(KEY_HEIGHT)
-        savedState.remove<Boolean>(KEY_HAS_AUDIO)
-    }
-
-    /** Persist current config to DataStore. */
-    private fun persistConfig() {
-        viewModelScope.launch {
-            settingsRepo.saveConversionConfig(_config.value)
+            // A synchronous FFmpeg run purely for logcat: debug builds only.
+            if (BuildConfig.DEBUG) engine.checkEncoderAvailability()
         }
     }
 
-    /** Handle a file picked via the system file picker. */
-    fun onFilePicked(uri: Uri) {
-        // A new input supersedes any in-flight work — without these cancels the old
-        // conversion/preview keeps running and later paints its Done/PreviewReady
-        // state (for the PREVIOUS file) over this file's Ready state.
-        conversionJob?.cancel()
-        conversionJob = null
-        previewJob?.cancel()
-        previewJob = null
-
-        viewModelScope.launch {
-            try {
-                val ctx = getApplication<Application>()
-                // ContentResolver queries and the probe are disk/IPC work — keep them
-                // off the main thread; state + SavedStateHandle writes stay on main.
-                val ready = withContext(Dispatchers.IO) {
-                    // Take persistable permission so URI survives process death
-                    try {
-                        ctx.contentResolver.takePersistableUriPermission(
-                            uri, Intent.FLAG_GRANT_READ_URI_PERMISSION,
-                        )
-                    } catch (_: SecurityException) {
-                        // Not all URIs support persistable permission — non-fatal
-                    }
-
-                    val (fileName, fileSize) = FileInfoUtils.queryFileInfo(ctx, uri)
-                    val info = engine.probeInput(uri)
-
-                    ConversionState.Ready(
-                        inputUri = uri.toString(),
-                        fileName = fileName,
-                        fileSize = fileSize,
-                        durationMs = info.durationMs,
-                        width = info.width,
-                        height = info.height,
-                        hasAudio = info.hasAudio,
-                    )
-                }
-                // GIF/animated-WebP inputs only ever produce WebP; the format
-                // picker is hidden for them, so a persisted MP4/Original choice
-                // from a previous video must not silently apply.
-                if (isAnimatedImageFile(ready.fileName) &&
-                    _config.value.outputFormat != OutputMediaFormat.WEBP
-                ) {
-                    _config.update { it.copy(outputFormat = OutputMediaFormat.WEBP) }
-                }
-                _state.value = ready
-                saveReadyState(ready)
-            } catch (e: Exception) {
-                e.rethrowIfCancellation()
-                _state.value = ConversionState.Error(
-                    getApplication<Application>().getString(R.string.error_read_file, e.message ?: ""),
-                )
-            }
-        }
-    }
-
-    /** Handle a shared intent (ACTION_SEND or ACTION_VIEW). */
+    /** Handle a shared intent (ACTION_SEND, ACTION_SEND_MULTIPLE or ACTION_VIEW). */
     fun onSharedIntent(intent: Intent) {
+        if (intent.action == Intent.ACTION_SEND_MULTIPLE) {
+            val uris = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM)
+            }.orEmpty()
+            if (uris.isEmpty()) return
+            controller.onFilesPicked(uris.map(Uri::toString), sharedMultipleKind(intent.type))
+            _navigateToConvert.emit()
+            return
+        }
         val uri = when (intent.action) {
             Intent.ACTION_SEND -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
@@ -195,7 +86,7 @@ class MainViewModel(
             else -> null
         }
         if (uri != null) {
-            onFilePicked(uri)
+            controller.onFilePicked(uri.toString())
             // A share that arrives while another tab is open would otherwise load the
             // file into an invisible Convert tab. NavigationSignal replays the emission,
             // covering the onNewIntent-before-first-frame-collector race as well.
@@ -203,219 +94,16 @@ class MainViewModel(
         }
     }
 
-    /** Start the conversion process. */
-    fun startConversion() {
-        val ready = _state.value as? ConversionState.Ready ?: return
-        // Merge any overlapping segments before building FFmpeg command
-        val currentConfig = _config.value.let { cfg ->
-            if (cfg.segments.size > 1) cfg.copy(segments = mergeOverlappingSegments(cfg.segments))
-            else cfg
-        }
-        val uri = Uri.parse(ready.inputUri)
-        val baseName = ready.fileName.substringBeforeLast(".")
+    private companion object {
+        /**
+         * Several shared images become an image sequence; anything else (videos,
+         * mixed media) is joined. The intent's MIME type is the senders' common
+         * type, e.g. "image/(any)" for a gallery multi-select of photos.
+         */
+        fun sharedMultipleKind(mimeType: String?): SourceKind =
+            if (mimeType?.startsWith("image/") == true && mimeType != "image/gif") SourceKind.IMAGE_SEQUENCE else SourceKind.JOIN
 
-        conversionJob?.cancel()
-        conversionJob = viewModelScope.launch {
-            _state.value = ConversionState.Converting()
-
-            engine.convert(uri, currentConfig, baseName, sourceFileName = ready.fileName).collect { progress ->
-                when (progress) {
-                    is ConversionProgress.Attempt -> {
-                        _state.update { current ->
-                            if (current is ConversionState.Converting) {
-                                current.copy(
-                                    currentQuality = progress.quality,
-                                    attempt = progress.attemptNumber,
-                                )
-                            } else current
-                        }
-                    }
-
-                    is ConversionProgress.Progress -> {
-                        _state.update { current ->
-                            if (current is ConversionState.Converting) {
-                                current.copy(
-                                    progress = progress.fraction,
-                                    currentQuality = progress.currentQuality,
-                                    attempt = progress.attempt,
-                                    elapsedMs = progress.elapsedMs,
-                                )
-                            } else current
-                        }
-                    }
-
-                    is ConversionProgress.SizeExceeded -> {
-                        // Just let Converting state continue with updated attempt
-                    }
-
-                    is ConversionProgress.Complete -> {
-                        _state.value = ConversionState.Done(
-                            outputPath = progress.outputPath,
-                            outputSizeBytes = progress.fileSizeBytes,
-                            qualityUsed = progress.qualityUsed,
-                            inputFileName = ready.fileName,
-                        )
-                    }
-
-                    is ConversionProgress.CompletedOversize -> {
-                        _state.value = ConversionState.SizeWarning(
-                            outputPath = progress.outputPath,
-                            outputSizeBytes = progress.fileSizeBytes,
-                            targetSizeBytes = progress.targetSizeBytes,
-                            qualityUsed = progress.qualityUsed,
-                            inputFileName = ready.fileName,
-                        )
-                    }
-
-                    is ConversionProgress.Failed -> {
-                        _state.value = ConversionState.Error(progress.message)
-                    }
-                }
-            }
-        }
-    }
-
-    /** Accept the oversize output as-is. */
-    fun acceptOversize() {
-        val warning = _state.value as? ConversionState.SizeWarning ?: return
-        _state.value = ConversionState.Done(
-            outputPath = warning.outputPath,
-            outputSizeBytes = warning.outputSizeBytes,
-            qualityUsed = warning.qualityUsed,
-            inputFileName = warning.inputFileName,
-        )
-    }
-
-    /** Set trim points (in milliseconds from start of video). Legacy single-trim API. */
-    fun setTrim(startMs: Long, endMs: Long) {
-        _config.update { it.copy(trimStartMs = startMs, trimEndMs = endMs, segments = emptyList(), preset = Preset.CUSTOM) }
-        // Don't persist trim values — they're per-file, not user preferences
-    }
-
-    /** Replace the segments list (for multi-segment stitching). */
-    fun setSegments(segments: List<TrimSegment>) {
-        _config.update { it.copy(segments = segments, preset = Preset.CUSTOM) }
-    }
-
-    /** Add a new segment to the keep list. */
-    fun addSegment(segment: TrimSegment) {
-        _config.update { current ->
-            val newSegments = (current.segments + segment).sortedBy { it.startMs }
-            current.copy(segments = newSegments, preset = Preset.CUSTOM)
-        }
-    }
-
-    /** Remove a segment by index (bounds-checked). */
-    fun removeSegment(index: Int) {
-        _config.update { current ->
-            if (index !in current.segments.indices) return@update current
-            val newSegments = current.segments.toMutableList().apply { removeAt(index) }
-            current.copy(segments = newSegments, preset = Preset.CUSTOM)
-        }
-    }
-
-    /** Update a specific segment at the given index. */
-    fun updateSegment(index: Int, segment: TrimSegment) {
-        _config.update { current ->
-            val newSegments = current.segments.toMutableList().apply { set(index, segment) }
-            current.copy(segments = newSegments.sortedBy { it.startMs }, preset = Preset.CUSTOM)
-        }
-    }
-
-    /** Generate a ~3-second preview clip using the current settings. */
-    fun startPreview() {
-        // Drop any stale notice from a previous failed preview
-        val ready = (_state.value as? ConversionState.Ready ?: return).copy(notice = null)
-        // Merge overlapping segments here too, so the preview reflects exactly what
-        // startConversion() would encode rather than duplicating frames.
-        val currentConfig = _config.value.let { cfg ->
-            if (cfg.segments.size > 1) cfg.copy(segments = mergeOverlappingSegments(cfg.segments))
-            else cfg
-        }
-        val uri = Uri.parse(ready.inputUri)
-
-        previewJob?.cancel()
-        previewJob = viewModelScope.launch {
-            _state.value = ConversionState.Previewing(previousReady = ready)
-
-            engine.generatePreview(uri, currentConfig).collect { progress ->
-                when (progress) {
-                    is ConversionProgress.Progress -> {
-                        _state.update { current ->
-                            if (current is ConversionState.Previewing) {
-                                current.copy(progress = progress.fraction)
-                            } else current
-                        }
-                    }
-                    is ConversionProgress.Complete -> {
-                        _state.value = ConversionState.PreviewReady(
-                            previewPath = progress.outputPath,
-                            fileSizeBytes = progress.fileSizeBytes,
-                            previousReady = ready,
-                        )
-                    }
-                    is ConversionProgress.Failed -> {
-                        // Keep the picked file, but surface why the preview didn't render
-                        // instead of silently snapping back to an unchanged Ready card.
-                        _state.value = ready.copy(notice = progress.message)
-                    }
-                    else -> { /* Attempt, SizeExceeded — ignored for preview */ }
-                }
-            }
-        }
-    }
-
-    /** Cancel a running preview and restore the Ready state. */
-    fun cancelPreview() {
-        previewJob?.cancel()
-        previewJob = null
-        when (val current = _state.value) {
-            // Use the stashed Ready rather than SavedStateHandle — the latter can be
-            // empty, which would leave the UI stuck on the preview spinner forever.
-            is ConversionState.Previewing -> _state.value = current.previousReady
-            is ConversionState.PreviewReady -> dismissPreview()
-            else -> { /* not previewing */ }
-        }
-    }
-
-    /** Dismiss preview result, delete temp file, restore Ready state. */
-    fun dismissPreview() {
-        val preview = _state.value as? ConversionState.PreviewReady ?: return
-        // Delete the temp preview file off the main thread
-        val path = preview.previewPath
-        viewModelScope.launch(Dispatchers.IO) { File(path).delete() }
-        _state.value = preview.previousReady
-    }
-
-    /** Cancel an in-progress conversion. */
-    fun cancelConversion() {
-        conversionJob?.cancel()
-        conversionJob = null
-        previewJob?.cancel()
-        previewJob = null
-        _state.value = ConversionState.Idle
-        clearSavedReadyState()
-    }
-
-    /** Reset to idle state for a new conversion. */
-    fun reset() {
-        conversionJob?.cancel()
-        conversionJob = null
-        previewJob?.cancel()
-        previewJob = null
-        _state.value = ConversionState.Idle
-        clearSavedReadyState()
-    }
-
-    /** Update the active preset, reconfiguring all settings. */
-    fun setPreset(preset: Preset) {
-        _config.value = ConversionConfig.fromPreset(preset)
-        persistConfig()
-    }
-
-    /** Update individual config fields (switches to CUSTOM preset). */
-    fun updateConfig(transform: ConversionConfig.() -> ConversionConfig) {
-        _config.update { it.transform().copy(preset = Preset.CUSTOM) }
-        persistConfig()
+        /** SavedStateHandle key for the encoded [app.embeddy.conversion.ConvertSession]. */
+        const val KEY_SESSION = "convert_session"
     }
 }

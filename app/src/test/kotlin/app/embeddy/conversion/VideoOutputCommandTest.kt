@@ -17,7 +17,8 @@ class VideoOutputCommandTest {
     private val script = File("/tmp/frames/frames.txt")
 
     private fun command(
-        config: ConversionConfig,
+        config: ConversionConfig = ConversionConfig(),
+        edit: EditSpec = EditSpec(),
         container: VideoContainer? = VideoContainer.MP4,
         hasAudio: Boolean = true,
         quality: Int = 70,
@@ -25,16 +26,20 @@ class VideoOutputCommandTest {
         sourceWidth: Int = 1920,
         sourceHeight: Int = 1080,
     ): String = buildFfmpegCommand(
-        inputPath = "/in/input.mp4",
-        outputPath = "/out/output.${container?.extension ?: "webp"}",
-        config = config,
-        quality = quality,
-        concatScript = concatScript,
-        sourceLoopCount = null,
-        container = container,
-        hasAudio = hasAudio,
-        sourceWidth = sourceWidth,
-        sourceHeight = sourceHeight,
+        CommandRequest(
+            input = InputSpec(
+                path = concatScript?.absolutePath ?: "/in/input.mp4",
+                isConcatScript = concatScript != null,
+                hasAudio = hasAudio,
+                width = sourceWidth,
+                height = sourceHeight,
+            ),
+            outputPath = "/out/output.${container?.extension ?: "webp"}",
+            target = container?.let { OutputTarget.Video(it) } ?: OutputTarget.AnimatedWebp,
+            config = config,
+            edit = edit,
+            quality = quality,
+        ),
     )
 
     // ── container resolution ──
@@ -129,7 +134,7 @@ class VideoOutputCommandTest {
 
     @Test
     fun `webm output uses libvpx plus libopus without movflags`() {
-        val cmd = command(ConversionConfig(), container = VideoContainer.WEBM)
+        val cmd = command(container = VideoContainer.WEBM)
         assertTrue(cmd, "-c:v libvpx" in cmd)
         assertTrue(cmd, "-c:a libopus" in cmd)
         assertFalse(cmd, "-movflags" in cmd)
@@ -137,7 +142,7 @@ class VideoOutputCommandTest {
 
     @Test
     fun `video output without an audio track strips audio`() {
-        val cmd = command(ConversionConfig(), hasAudio = false)
+        val cmd = command(hasAudio = false)
         assertTrue(cmd, "-an" in cmd)
         assertFalse(cmd, "-c:a" in cmd)
     }
@@ -155,38 +160,38 @@ class VideoOutputCommandTest {
         val config = ConversionConfig(maxDimension = 720, fps = 12)
         val cmdHigh = command(config, quality = 90)
         val cmdLow = command(config, quality = 40)
-        // Estimated output for 1920x1080 source at maxDimension 720 is 720x405
-        assertTrue(cmdHigh, "-b:v ${videoBitrateBps(720, 405, 12, 90)}" in cmdHigh)
-        assertTrue(cmdLow, "-b:v ${videoBitrateBps(720, 405, 12, 40)}" in cmdLow)
+        // 1920x1080 at maxDimension 720 is 720x405, forced even (M3) to 720x404
+        assertTrue(cmdHigh, "-b:v ${videoBitrateBps(720, 404, 12, 90)}" in cmdHigh)
+        assertTrue(cmdLow, "-b:v ${videoBitrateBps(720, 404, 12, 40)}" in cmdLow)
     }
 
     // ── single-segment / legacy trim for video outputs ──
 
     @Test
     fun `single trim on a video output keeps the seek path and audio`() {
-        val cmd = command(ConversionConfig(trimStartMs = 1000, trimEndMs = 3000))
+        val cmd = command(edit = EditSpec(trimStartMs = 1000, trimEndMs = 3000))
         assertTrue(cmd, "-ss 1.000" in cmd)
-        assertTrue(cmd, "-to 2.000" in cmd)
+        assertTrue(cmd, "-t 2.000" in cmd)
         assertTrue(cmd, "-c:a aac" in cmd)
         assertFalse(cmd, "-filter_complex" in cmd)
     }
 
     @Test
     fun `single segment with non-unity volume adds an audio filter`() {
-        val cmd = command(ConversionConfig(segments = listOf(TrimSegment(0, 2000, volume = 0.5f))))
+        val cmd = command(edit = EditSpec(segments = listOf(TrimSegment(0, 2000, volume = 0.5f))))
         assertTrue(cmd, "-af \"volume=0.500\"" in cmd)
     }
 
     @Test
     fun `single segment at unity volume emits no audio filter`() {
-        val cmd = command(ConversionConfig(segments = listOf(TrimSegment(0, 2000, volume = 1f))))
+        val cmd = command(edit = EditSpec(segments = listOf(TrimSegment(0, 2000, volume = 1f))))
         assertFalse(cmd, "-af" in cmd)
     }
 
     @Test
     fun `single segment volume is ignored without an audio track`() {
         val cmd = command(
-            ConversionConfig(segments = listOf(TrimSegment(0, 2000, volume = 0.5f))),
+            edit = EditSpec(segments = listOf(TrimSegment(0, 2000, volume = 0.5f))),
             hasAudio = false,
         )
         assertFalse(cmd, "-af" in cmd)
@@ -198,7 +203,7 @@ class VideoOutputCommandTest {
     @Test
     fun `stitched video with audio builds paired trim-atrim streams`() {
         val cmd = command(
-            ConversionConfig(
+            edit = EditSpec(
                 segments = listOf(
                     TrimSegment(0, 1000, volume = 1f),
                     TrimSegment(2000, 3000, volume = 1.5f),
@@ -218,7 +223,7 @@ class VideoOutputCommandTest {
     @Test
     fun `stitched video without audio builds a video-only graph`() {
         val cmd = command(
-            ConversionConfig(segments = listOf(TrimSegment(0, 1000), TrimSegment(2000, 3000))),
+            edit = EditSpec(segments = listOf(TrimSegment(0, 1000), TrimSegment(2000, 3000))),
             hasAudio = false,
         )
         assertTrue(cmd, "concat=n=2:v=1:a=0" in cmd)
@@ -230,7 +235,8 @@ class VideoOutputCommandTest {
     @Test
     fun `stitched video applies scale-fps filters after the concat`() {
         val cmd = command(
-            ConversionConfig(fps = 24, segments = listOf(TrimSegment(0, 1000), TrimSegment(2000, 3000))),
+            ConversionConfig(fps = 24),
+            edit = EditSpec(segments = listOf(TrimSegment(0, 1000), TrimSegment(2000, 3000))),
         )
         assertTrue(cmd, "[cat]" in cmd)
         assertTrue(cmd, "fps=24" in cmd)
@@ -240,7 +246,7 @@ class VideoOutputCommandTest {
     @Test
     fun `stitched video drops zero-length segments`() {
         val cmd = command(
-            ConversionConfig(
+            edit = EditSpec(
                 segments = listOf(
                     TrimSegment(0, 1000),
                     TrimSegment(1500, 1500),
@@ -255,7 +261,7 @@ class VideoOutputCommandTest {
     @Test
     fun `volume is clamped to the 0 to 2 range in the graph`() {
         val cmd = command(
-            ConversionConfig(
+            edit = EditSpec(
                 segments = listOf(
                     TrimSegment(0, 1000, volume = -1f),
                     TrimSegment(2000, 3000, volume = 9f),
@@ -272,7 +278,7 @@ class VideoOutputCommandTest {
         try {
             Locale.setDefault(Locale.FRANCE) // decimal comma locale
             val cmd = command(
-                ConversionConfig(
+                edit = EditSpec(
                     segments = listOf(
                         TrimSegment(0, 1000, volume = 1.5f),
                         TrimSegment(2000, 3000, volume = 0.5f),
@@ -292,7 +298,7 @@ class VideoOutputCommandTest {
     @Test
     fun `concat-script input can be stitched to a video container without audio filters`() {
         val cmd = command(
-            ConversionConfig(segments = listOf(TrimSegment(0, 1000), TrimSegment(2000, 3000))),
+            edit = EditSpec(segments = listOf(TrimSegment(0, 1000), TrimSegment(2000, 3000))),
             hasAudio = false,
             concatScript = script,
         )
@@ -302,22 +308,16 @@ class VideoOutputCommandTest {
         assertTrue(cmd, "-c:v libopenh264" in cmd)
     }
 
-    // ── the webp path must be unaffected by the new parameters ──
+    // ── the webp path must be unaffected by video-only parameters ──
 
     @Test
-    fun `null container keeps the animated webp command byte-identical`() {
-        val config = ConversionConfig(segments = listOf(TrimSegment(0, 1000), TrimSegment(2000, 3000)))
-        val webpCmd = buildFfmpegCommand(
-            inputPath = "/in/input.mp4",
-            outputPath = "/out/output.webp",
-            config = config,
-            quality = 70,
-        )
-        // hasAudio/source dimensions are video-output-only inputs; they must not
-        // perturb the WebP command in any way.
-        val webpCmdExplicit = command(config, container = null, hasAudio = true)
-        assertEquals(webpCmd, webpCmdExplicit)
-        assertTrue(webpCmd, "-c:v libwebp_anim" in webpCmd)
-        assertTrue(webpCmd, "-an" in webpCmd)
+    fun `audio flag and source dimensions do not perturb the animated webp command`() {
+        val edit = EditSpec(segments = listOf(TrimSegment(0, 1000), TrimSegment(2000, 3000)))
+        val plain = command(edit = edit, container = null, hasAudio = false, sourceWidth = 0, sourceHeight = 0)
+        val withVideoInputs = command(edit = edit, container = null, hasAudio = true)
+        assertEquals(plain, withVideoInputs)
+        assertTrue(plain, "-c:v libwebp_anim" in plain)
+        assertTrue(plain, "-an" in plain)
+        assertFalse(plain, "atrim" in plain)
     }
 }

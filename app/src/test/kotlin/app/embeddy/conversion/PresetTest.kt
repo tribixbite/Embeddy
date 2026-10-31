@@ -47,8 +47,20 @@ class PresetTest {
     }
 
     @Test
-    fun `custom preset label is Custom`() {
-        assertEquals("Custom", Preset.CUSTOM.label)
+    fun `every preset round-trips through fromPreset`() {
+        // fromPreset is what the preset chips apply; a field it forgets would
+        // silently keep the previous preset's value.
+        Preset.entries.forEach { preset ->
+            val config = ConversionConfig.fromPreset(preset)
+            assertEquals(preset, config.preset)
+            assertEquals(preset.maxDimension, config.maxDimension)
+            assertEquals(preset.fps, config.fps)
+            assertEquals(preset.startQuality, config.startQuality)
+            assertEquals(preset.minQuality, config.minQuality)
+            assertEquals(preset.qualityStep, config.qualityStep)
+            assertEquals(preset.targetSizeBytes, config.targetSizeBytes)
+            assertEquals(preset.sharpen, config.sharpen)
+        }
     }
 
     @Test
