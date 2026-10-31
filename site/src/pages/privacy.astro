@@ -74,7 +74,8 @@ const updated = "2026-10-31";
         <strong>Inspect a URL</strong> and <strong>Upload</strong> cannot be done directly from a browser because of
         cross-origin restrictions, so they go through Embeddy's relay at <code>api.embeddy.link</code>, a Cloudflare
         Worker. The relay fetches the page you asked about, or forwards your file to the host you chose, and returns
-        the result. It does not store files or page contents. Cloudflare keeps short-lived request logs (time, path,
+        the result. It does not store files or page contents. Metadata stripping for uploads (JPEG, PNG, WebP)
+        happens in your browser before the file is sent, and the upload is cancelled if stripping fails. Cloudflare keeps short-lived request logs (time, path,
         status and similar request metadata) for operating and debugging the relay; these are not used for any other
         purpose.
       </p>

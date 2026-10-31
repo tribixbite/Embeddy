@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * Upload tool — anonymous file upload with EXIF stripping.
+   * Upload tool — anonymous file upload with metadata stripping.
    * States: idle → ready → uploading → done / error
    */
   import FileDropZone from "../shared/FileDropZone.svelte";
@@ -33,7 +33,7 @@
     selectedFile !== null && selectedFile.size > hostLimit,
   );
 
-  /** EXIF stripping only works on JPEG; say so rather than implying all images */
+  /** Metadata stripping covers JPEG, PNG and WebP; say so rather than implying all images */
   let exifStrippable = $derived(selectedFile !== null && canStripExif(selectedFile));
 
   function handleFile(files: File[]) {
@@ -60,13 +60,20 @@
     error = "";
     let fileToUpload = selectedFile;
 
-    // Strip EXIF if enabled and the format supports it
+    // Strip metadata if enabled and the format supports it. Fails CLOSED: a
+    // user who asked for stripping must never publish the original (with GPS)
+    // to a public host just because the container was unexpected.
     if (stripExifEnabled && canStripExif(selectedFile)) {
       state = "stripping";
       try {
         fileToUpload = await stripExif(selectedFile);
-      } catch {
-        // Continue with original file if stripping fails
+      } catch (e) {
+        const reason = e instanceof Error ? e.message : String(e);
+        error =
+          `Couldn't remove metadata (${reason}). Nothing was uploaded — ` +
+          `turn off "Strip metadata" to upload the file unchanged.`;
+        state = "error";
+        return;
       }
     }
 
@@ -145,7 +152,7 @@
 
       <HostSelector bind:selected={host} />
 
-      <!-- EXIF strip toggle (JPEG only — piexifjs can't rewrite other formats) -->
+      <!-- Metadata strip toggle (JPEG/PNG/WebP — see lib/upload/strip-exif.ts) -->
       {#if exifStrippable}
         <label class="mt-4 flex cursor-pointer items-center gap-3">
           <input
@@ -153,12 +160,12 @@
             bind:checked={stripExifEnabled}
             class="h-4 w-4 rounded border-white/20 bg-white/5 accent-brand-500"
           />
-          <span class="text-sm text-white/60">Strip EXIF metadata</span>
-          <span class="text-xs text-white/30">(GPS, camera info)</span>
+          <span class="text-sm text-white/70">Strip metadata</span>
+          <span class="text-xs text-white/40">(EXIF, GPS, XMP, comments)</span>
         </label>
       {:else if selectedFile?.type.startsWith("image/")}
         <p class="mt-4 text-xs text-white/30">
-          EXIF stripping is only available for JPEG — this file will be uploaded as-is.
+          Metadata stripping is available for JPEG, PNG and WebP — this file will be uploaded as-is.
         </p>
       {/if}
 
@@ -180,7 +187,7 @@
   {:else if state === "stripping"}
     <div class="flex items-center justify-center py-12">
       <div class="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-brand-400"></div>
-      <span class="ml-3 text-sm text-white/50">Stripping EXIF data...</span>
+      <span class="ml-3 text-sm text-white/50">Removing metadata…</span>
     </div>
   {:else if state === "uploading"}
     <UploadProgressBar {progress} />
