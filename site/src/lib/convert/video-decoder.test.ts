@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { IDENTITY_TRANSFORM } from "./prepare-frame";
 import {
   availableFrameCount,
   decodeVideo,
@@ -100,7 +101,7 @@ describe("already-aborted fast paths (pre-DOM)", () => {
   test("streamDecodeVideo rejects on the first next()", async () => {
     const gen = streamDecodeVideo(
       videoFile(),
-      { targetFps: 10, maxFrames: 10, crop: null, maxDimension: 0 },
+      { targetFps: 10, maxFrames: 10, transform: IDENTITY_TRANSFORM },
       undefined,
       abortedSignal(),
     );

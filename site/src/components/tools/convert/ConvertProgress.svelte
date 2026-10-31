@@ -11,7 +11,16 @@
   import type { ConvertProgress } from "../../../lib/convert/types";
   import { estimateRemainingMs, formatEta } from "../../../lib/convert/eta";
 
-  let { progress, elapsedMs = 0 }: { progress: ConvertProgress; elapsedMs?: number } = $props();
+  let {
+    progress,
+    elapsedMs = 0,
+    oncancel,
+  }: {
+    progress: ConvertProgress;
+    elapsedMs?: number;
+    /** When set, a Cancel button is shown — decode/encode can run for minutes (H1) */
+    oncancel?: () => void;
+  } = $props();
 
   const phaseLabels: Record<ConvertProgress["phase"], string> = {
     decoding: "Decoding frames",
@@ -40,8 +49,16 @@
     {/if}
   </div>
 
-  <!-- Progress bar -->
-  <div class="h-2 overflow-hidden rounded-full bg-white/10">
+  <!-- Progress bar — exposed as a real progressbar for assistive tech (A2);
+       aria-valuenow is omitted while indeterminate, per ARIA -->
+  <div
+    class="h-2 overflow-hidden rounded-full bg-white/10"
+    role="progressbar"
+    aria-label={phaseLabels[progress.phase] ?? progress.phase}
+    aria-valuemin={0}
+    aria-valuemax={100}
+    aria-valuenow={indeterminate ? undefined : progress.percent}
+  >
     {#if indeterminate}
       <div class="h-full w-1/3 rounded-full bg-brand-500 animate-shimmer"></div>
     {:else}
@@ -53,7 +70,7 @@
   </div>
 
   {#if !indeterminate}
-    <p class="mt-2 text-center text-xs text-white/30">
+    <p class="mt-2 text-center text-xs text-white/30" aria-live="polite">
       {progress.percent}%{#if etaMs !== null}
         <span class="ml-2 text-white/40">{formatEta(etaMs)}</span>
       {/if}
@@ -62,6 +79,16 @@
     <p class="mt-2 text-center text-xs text-white/30">
       Encoding {progress.total} frames...
     </p>
+  {/if}
+
+  {#if oncancel}
+    <button
+      type="button"
+      onclick={oncancel}
+      class="mt-4 w-full min-h-11 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-medium text-white/60 transition-colors hover:bg-white/10"
+    >
+      Cancel
+    </button>
   {/if}
 </div>
 

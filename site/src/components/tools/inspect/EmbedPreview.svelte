@@ -10,7 +10,7 @@
   let { data }: { data: MetadataResult } = $props();
 
   /** Extract domain for display */
-  let domain = $derived(() => {
+  let domain = $derived.by(() => {
     try {
       return new URL(data.url).hostname;
     } catch {
@@ -38,7 +38,7 @@
       rel="noopener noreferrer"
       class="mb-1 block text-sm font-semibold text-brand-300 hover:underline"
     >
-      {data.ogTitle || data.title || domain()}
+      {data.ogTitle || data.title || domain}
     </a>
 
     <!-- Description -->

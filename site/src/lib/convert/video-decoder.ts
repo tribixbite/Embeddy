@@ -5,8 +5,12 @@
  *  2. Probe-only: extract metadata without decoding pixels (for streaming pipeline)
  */
 
-import type { DecodedFrame, SourceInfo, ConvertProgress, CropRect } from "./types";
-import { cropFrame, resizeFrame } from "./encoder";
+import type { DecodedFrame, SourceInfo, ConvertProgress } from "./types";
+import { abortError, isAbortError, throwIfAborted } from "./abort";
+import { FramePreparer, createCanvas2d, getContext2d, type FrameTransform } from "./prepare-frame";
+
+// Re-exported for existing callers/tests that import them from here
+export { isAbortError, throwIfAborted };
 
 /**
  * Number of frames extractable from a video of the given duration at a
@@ -17,32 +21,6 @@ import { cropFrame, resizeFrame } from "./encoder";
  */
 export function availableFrameCount(durationSeconds: number, targetFps: number): number {
   return Math.max(1, Math.floor(durationSeconds * targetFps));
-}
-
-/**
- * The error thrown/rejected when an AbortSignal cancels a decode: the signal's
- * own reason when one was set (matching `AbortSignal.throwIfAborted` semantics),
- * otherwise a DOMException named "AbortError".
- */
-function abortError(signal: AbortSignal): unknown {
-  return signal.reason ?? new DOMException("The operation was aborted", "AbortError");
-}
-
-/**
- * Throw the signal's abort reason if it has already been aborted; no-op
- * otherwise (or when no signal was supplied). Exported for testing.
- */
-export function throwIfAborted(signal?: AbortSignal): void {
-  if (signal?.aborted) throw abortError(signal);
-}
-
-/**
- * True when a caught value is an abort-triggered rejection (a DOMException or
- * Error named "AbortError"). Callers use this to swallow deliberate
- * cancellations instead of surfacing them as failures. Exported for testing.
- */
-export function isAbortError(e: unknown): boolean {
-  return typeof e === "object" && e !== null && (e as { name?: unknown }).name === "AbortError";
 }
 
 /**
@@ -90,14 +68,7 @@ export async function decodeVideo(
     const delayMs = Math.round(1000 / targetFps);
 
     // Canvas for frame capture
-    const canvas =
-      typeof OffscreenCanvas !== "undefined"
-        ? new OffscreenCanvas(width, height)
-        : createFallbackCanvas(width, height);
-    const ctx = canvas.getContext("2d") as
-      | OffscreenCanvasRenderingContext2D
-      | CanvasRenderingContext2D;
-    if (!ctx) throw new Error("Could not create canvas context");
+    const ctx = getContext2d(createCanvas2d(width, height), true);
 
     // Frame 0 seeks to t=0, which never fires 'seeked' — make sure pixels exist first
     await waitForFrameData(video, signal);
@@ -263,13 +234,6 @@ function detachVideo(video: HTMLVideoElement) {
   video.load();
 }
 
-/** Create a DOM <canvas> fallback for environments without OffscreenCanvas */
-function createFallbackCanvas(w: number, h: number): HTMLCanvasElement {
-  const c = document.createElement("canvas");
-  c.width = w;
-  c.height = h;
-  return c;
-}
 
 /**
  * Probe a video file for metadata without decoding any frames.
@@ -333,14 +297,16 @@ export async function probeVideo(
 export interface StreamDecodeOptions {
   targetFps: number;
   maxFrames: number;
-  crop: CropRect | null;
-  maxDimension: number;
+  /** Crop/resize/rotate/flip applied to every frame in one drawImage */
+  transform: FrameTransform;
 }
 
 /**
  * Async generator that decodes video frames one at a time.
- * Each yielded frame is crop+resize processed and ready for encoding.
- * Only one frame of RGBA data exists at a time — previous frames are GC'd.
+ * Each yielded frame is already transformed (crop/resize/rotate/flip) by a
+ * single drawImage straight from the <video> element — no full-resolution
+ * readback followed by JS-side crop/resize (P2). Only one frame of RGBA data
+ * exists at a time.
  *
  * @param file - Video file
  * @param options - Decode/process options
@@ -383,29 +349,8 @@ export async function* streamDecodeVideo(
       options.maxFrames,
     );
     const delayMs = Math.round(1000 / options.targetFps);
-
-    // Canvas for frame capture (reused across all frames)
-    const canvas =
-      typeof OffscreenCanvas !== "undefined"
-        ? new OffscreenCanvas(srcW, srcH)
-        : createFallbackCanvas(srcW, srcH);
-    const ctx = canvas.getContext("2d") as
-      | OffscreenCanvasRenderingContext2D
-      | CanvasRenderingContext2D;
-    if (!ctx) throw new Error("Could not create canvas context");
-
-    // Pre-calculate output dimensions after crop + resize
-    let outW = srcW;
-    let outH = srcH;
-    if (options.crop) {
-      outW = Math.max(1, Math.round(options.crop.w * srcW));
-      outH = Math.max(1, Math.round(options.crop.h * srcH));
-    }
-    if (options.maxDimension > 0 && (outW > options.maxDimension || outH > options.maxDimension)) {
-      const scale = Math.min(options.maxDimension / outW, options.maxDimension / outH);
-      outW = Math.round(outW * scale);
-      outH = Math.round(outH * scale);
-    }
+    // Identity transforms still need a readback canvas, so always draw
+    const preparer = new FramePreparer(srcW, srcH, options.transform);
 
     // Frame 0 seeks to t=0, which never fires 'seeked' — make sure pixels exist first
     await waitForFrameData(video, signal);
@@ -414,7 +359,6 @@ export async function* streamDecodeVideo(
       // Checked on every resume from yield — an abort while the consumer was
       // encoding stops the decode before the next seek
       throwIfAborted(signal);
-      const seekTime = i * frameInterval;
 
       onProgress?.({
         phase: "decoding",
@@ -423,32 +367,10 @@ export async function* streamDecodeVideo(
         total: totalFrames,
       });
 
-      await seekTo(video, seekTime, signal);
+      await seekTo(video, i * frameInterval, signal);
 
-      // Capture raw RGBA from video frame
-      ctx.drawImage(video, 0, 0, srcW, srcH);
-      const imageData = ctx.getImageData(0, 0, srcW, srcH);
-      let rgba = new Uint8Array(imageData.data.buffer);
-      let w = srcW;
-      let h = srcH;
-
-      // Crop if needed
-      if (options.crop) {
-        const cropped = cropFrame(rgba, w, h, options.crop);
-        rgba = new Uint8Array(cropped.data);
-        w = cropped.width;
-        h = cropped.height;
-      }
-
-      // Resize if needed
-      if (options.maxDimension > 0 && (w > options.maxDimension || h > options.maxDimension)) {
-        const resized = resizeFrame(rgba, w, h, options.maxDimension);
-        rgba = new Uint8Array(resized.data);
-        w = resized.width;
-        h = resized.height;
-      }
-
-      yield { rgba, width: w, height: h, delay: delayMs };
+      const { rgba, width, height } = preparer.fromImage(video);
+      yield { rgba, width, height, delay: delayMs };
     }
   } finally {
     detachVideo(video);

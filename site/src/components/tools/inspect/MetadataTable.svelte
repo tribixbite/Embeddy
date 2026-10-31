@@ -11,7 +11,7 @@
   let expanded = $state(true);
 
   /** Group tags by their prefix (og, twitter, etc.) */
-  let grouped = $derived(() => {
+  let grouped = $derived.by(() => {
     const groups = new Map<string, MetaTag[]>();
     for (const tag of tags) {
       const prefix = tag.property.includes(":") ? tag.property.split(":")[0]! : "other";
@@ -45,7 +45,7 @@
 
   {#if expanded}
     <div class="border-t border-white/5 px-5 pb-4">
-      {#each [...grouped()] as [prefix, groupTags]}
+      {#each [...grouped] as [prefix, groupTags]}
         <div class="mt-4 first:mt-2">
           <h4 class="mb-2 text-xs font-semibold text-white/30 uppercase tracking-wider">{prefix}</h4>
           <div class="space-y-1">

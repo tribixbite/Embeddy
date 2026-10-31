@@ -63,6 +63,12 @@ export interface ConvertOptions {
   outputFormat: "webp" | "gif";
   /** Crop region or null for no crop */
   crop: CropRect | null;
+  /** Clockwise rotation in degrees, applied after crop + resize */
+  rotate: 0 | 90 | 180 | 270;
+  /** Mirror horizontally */
+  flipH: boolean;
+  /** Mirror vertically */
+  flipV: boolean;
   /** Target file size in bytes (0 = disabled, encode at fixed quality) */
   targetSizeBytes: number;
   /** Compression effort 0-6. Higher = slower but smaller output.

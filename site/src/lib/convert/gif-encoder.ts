@@ -5,14 +5,9 @@
  */
 
 import type { DecodedFrame, ConvertOptions, ConvertProgress } from "./types";
-import {
-  cropFrame,
-  cropRectToPixels,
-  resizeFrame,
-  subsampleFrames,
-  YIELD_EVERY,
-  yieldToEventLoop,
-} from "./encoder";
+import { subsampleFrames, YIELD_EVERY, yieldToEventLoop } from "./encoder";
+import { FramePreparer, transformFromOptions } from "./prepare-frame";
+import { throwIfAborted } from "./abort";
 
 /** Lazy-loaded gifenc module */
 let gifencModule: typeof import("gifenc") | null = null;
@@ -38,13 +33,16 @@ function frameHasTransparency(rgba: Uint8Array): boolean {
 
 /**
  * Encode decoded frames into an animated GIF blob.
- * Pipeline: subsample → crop → resize → quantize → encode
+ * Pipeline per frame: subsample → crop/resize/rotate (one drawImage) →
+ * quantize → write. Frames are transformed one at a time inside the write
+ * loop, so no transformed copy of the whole animation is ever held (H2).
  * @param frames - RGBA frames with per-frame delays
  * @param width - Source canvas width
  * @param height - Source canvas height
  * @param options - Encoding options
  * @param sourceFps - Original source FPS (for subsampling)
  * @param onProgress - Progress callback
+ * @param signal - Aborting rejects with an AbortError at the next frame (M7)
  */
 export async function encodeAnimatedGif(
   frames: DecodedFrame[],
@@ -53,62 +51,15 @@ export async function encodeAnimatedGif(
   options: ConvertOptions,
   sourceFps: number,
   onProgress?: (p: ConvertProgress) => void,
+  signal?: AbortSignal,
 ): Promise<Blob> {
+  throwIfAborted(signal);
   const { GIFEncoder, quantize, applyPalette } = await getGifenc();
 
-  // Subsample if target FPS is lower than source
-  let workFrames = subsampleFrames(frames, sourceFps, options.targetFps);
-
-  // Crop all frames if crop is set. Output dims come from the same clamped
-  // arithmetic cropFrame uses — recomputing them from the fraction alone
-  // could disagree by a pixel and skew every row of the encoded GIF.
-  let outW = width;
-  let outH = height;
-  if (options.crop) {
-    const { pw, ph } = cropRectToPixels(width, height, options.crop);
-    outW = pw;
-    outH = ph;
-    const cropped: DecodedFrame[] = [];
-    for (let i = 0; i < workFrames.length; i++) {
-      const frame = workFrames[i];
-      onProgress?.({
-        phase: "cropping",
-        percent: Math.round((i / workFrames.length) * 100),
-        frame: i + 1,
-        total: workFrames.length,
-      });
-      const result = cropFrame(frame.rgba, width, height, options.crop);
-      cropped.push({ rgba: result.data, delay: frame.delay });
-      // Synchronous canvas work starves the renderer — let progress paint
-      if (i % YIELD_EVERY === YIELD_EVERY - 1) await yieldToEventLoop();
-    }
-    workFrames = cropped;
-  }
-
-  // Resize all frames if maxDimension is set
-  if (options.maxDimension > 0 && (outW > options.maxDimension || outH > options.maxDimension)) {
-    const scale = Math.min(options.maxDimension / outW, options.maxDimension / outH);
-    const newW = Math.round(outW * scale);
-    const newH = Math.round(outH * scale);
-
-    const resizedFrames: DecodedFrame[] = [];
-    for (let i = 0; i < workFrames.length; i++) {
-      const frame = workFrames[i];
-      onProgress?.({
-        phase: "resizing",
-        percent: Math.round((i / workFrames.length) * 100),
-        frame: i + 1,
-        total: workFrames.length,
-      });
-      const resized = resizeFrame(frame.rgba, outW, outH, options.maxDimension);
-      resizedFrames.push({ rgba: resized.data, delay: frame.delay });
-      if (i % YIELD_EVERY === YIELD_EVERY - 1) await yieldToEventLoop();
-    }
-    workFrames = resizedFrames;
-
-    outW = newW;
-    outH = newH;
-  }
+  // Subsample if target FPS is lower than source (keeps references, no copy)
+  const workFrames = subsampleFrames(frames, sourceFps, options.targetFps);
+  const preparer = new FramePreparer(width, height, transformFromOptions(options));
+  const { outW, outH } = preparer.plan;
 
   // Encode to GIF frame by frame
   const gif = GIFEncoder();
@@ -118,7 +69,9 @@ export async function encodeAnimatedGif(
   const maxColors = Math.max(16, Math.round((options.quality / 100) * 256));
 
   for (let i = 0; i < workFrames.length; i++) {
-    const frame = workFrames[i];
+    throwIfAborted(signal);
+    const source = workFrames[i]!;
+    const frame = { rgba: preparer.fromRgba(source.rgba).rgba, delay: source.delay };
 
     onProgress?.({
       phase: "encoding",

@@ -7,6 +7,8 @@ import { parseGIF, decompressFrames } from "gifuct-js";
 import type { ParsedGif } from "gifuct-js";
 import type { DecodedFrame, SourceInfo, ConvertProgress } from "./types";
 import { YIELD_EVERY, yieldToEventLoop } from "./encoder";
+import { createCanvas2d, getContext2d } from "./prepare-frame";
+import { throwIfAborted } from "./abort";
 
 /** Same RGBA budget the video and WebP decoders use (512 MB). */
 const MEMORY_BUDGET_BYTES = 512 * 1024 * 1024;
@@ -55,11 +57,16 @@ export function readGifLoopCount(parsed: ParsedGif): number {
  * Decode a GIF ArrayBuffer into composited RGBA frames.
  * GIF frames are partial patches that must be layered onto a canvas
  * with proper disposal method handling.
+ * @param buffer - Whole GIF file
+ * @param onProgress - Per-frame progress callback
+ * @param signal - Aborting rejects with an AbortError at the next yield point
  */
 export async function decodeGif(
   buffer: ArrayBuffer,
   onProgress?: (p: ConvertProgress) => void,
+  signal?: AbortSignal,
 ): Promise<{ frames: DecodedFrame[]; info: SourceInfo }> {
+  throwIfAborted(signal);
   const parsed = parseGIF(buffer);
   const rawFrames = decompressFrames(parsed, true); // true = generate RGBA patches
 
@@ -77,24 +84,12 @@ export async function decodeGif(
   const frameLimit = Math.min(rawFrames.length, MAX_FRAMES, memoryMaxFrames);
 
   // Use OffscreenCanvas for compositing if available, else <canvas>
-  const canvas =
-    typeof OffscreenCanvas !== "undefined"
-      ? new OffscreenCanvas(width, height)
-      : createFallbackCanvas(width, height);
-  const ctx = canvas.getContext("2d") as
-    | OffscreenCanvasRenderingContext2D
-    | CanvasRenderingContext2D;
-  if (!ctx) throw new Error("Could not create canvas context");
+  const canvas = createCanvas2d(width, height);
+  const ctx = getContext2d(canvas, true);
 
   // Temp canvas for drawing individual frame patches
-  const patchCanvas =
-    typeof OffscreenCanvas !== "undefined"
-      ? new OffscreenCanvas(width, height)
-      : createFallbackCanvas(width, height);
-  const patchCtx = patchCanvas.getContext("2d") as
-    | OffscreenCanvasRenderingContext2D
-    | CanvasRenderingContext2D;
-  if (!patchCtx) throw new Error("Could not create patch canvas context");
+  const patchCanvas = createCanvas2d(width, height);
+  const patchCtx = getContext2d(patchCanvas);
 
   const frames: DecodedFrame[] = [];
   let totalDuration = 0;
@@ -146,7 +141,11 @@ export async function decodeGif(
 
     // Decoding is otherwise fully synchronous, which starves the renderer and
     // freezes the progress bar for the whole decode.
-    if (i % YIELD_EVERY === YIELD_EVERY - 1) await yieldToEventLoop();
+    if (i % YIELD_EVERY === YIELD_EVERY - 1) {
+      await yieldToEventLoop();
+      // Cancel lands here — the only points where the UI got a turn (H1)
+      throwIfAborted(signal);
+    }
   }
 
   const avgFps = frames.length / (totalDuration / 1000);
@@ -166,10 +165,3 @@ export async function decodeGif(
   };
 }
 
-/** Create a DOM <canvas> fallback for environments without OffscreenCanvas */
-function createFallbackCanvas(w: number, h: number): HTMLCanvasElement {
-  const c = document.createElement("canvas");
-  c.width = w;
-  c.height = h;
-  return c;
-}

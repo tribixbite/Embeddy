@@ -75,16 +75,18 @@ export class StreamingWebPEncoder {
 
   /**
    * Push one RGBA frame to the encoder.
-   * A copy of the pixel data is transferred to the Worker — the caller's
-   * rgba buffer stays valid. The copy is load-bearing: the same frames are
+   * By default a copy of the pixel data is transferred, so the caller's
+   * buffer stays valid — load-bearing for buffered source frames, which are
    * re-pushed when the user adjusts settings or the adaptive target-size
-   * loop re-encodes at a lower quality.
+   * loop re-encodes. Pass `transfer: true` for a throwaway buffer (a freshly
+   * transformed frame) to hand it over zero-copy; it is neutered afterwards.
    */
   async pushFrame(
     rgba: Uint8Array,
     width: number,
     height: number,
     frameOptions: FrameOptions,
+    transfer = false,
   ): Promise<void> {
     if (!this.worker) throw new Error("Encoder not initialized");
 
@@ -116,9 +118,10 @@ export class StreamingWebPEncoder {
       };
       this.worker!.addEventListener("message", handler);
 
-      // Always copy before transfer — the original frames may be re-encoded
-      // if the user adjusts settings. Transfer neuters the ArrayBuffer.
-      const buffer = rgba.slice().buffer;
+      // Transfer neuters the ArrayBuffer, so shared frames are copied first.
+      // A view that doesn't span its whole buffer must be copied either way.
+      const owned = transfer && rgba.byteOffset === 0 && rgba.byteLength === rgba.buffer.byteLength;
+      const buffer = (owned ? rgba : rgba.slice()).buffer as ArrayBuffer;
 
       this.worker!.postMessage(
         { type: "push", rgba: buffer, width, height, frameOptions },

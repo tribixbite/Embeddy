@@ -6,6 +6,7 @@
  */
 
 import { getDecoder, getEncoder, type OutputFormat } from "./codecs";
+import { sniffMimeType } from "../media/sniff";
 
 export interface CompressOptions {
   format: OutputFormat;
@@ -60,28 +61,12 @@ function resizeImageData(data: ImageData, maxDim: number): ImageData {
 }
 
 /**
- * Detect MIME type from the first few bytes of a buffer (magic bytes).
- * Fallback to the File's reported MIME type.
+ * Detect MIME type from the first few bytes of a buffer (magic bytes),
+ * falling back to the File's reported type. Thin alias of the shared sniffer
+ * so Squoosh and Convert classify files identically (L6).
  */
 export function detectMimeType(buffer: ArrayBuffer, fallback: string): string {
-  const view = new Uint8Array(buffer.slice(0, 12));
-
-  // JPEG: FF D8 FF
-  if (view[0] === 0xFF && view[1] === 0xD8 && view[2] === 0xFF) return "image/jpeg";
-  // PNG: 89 50 4E 47
-  if (view[0] === 0x89 && view[1] === 0x50 && view[2] === 0x4E && view[3] === 0x47) return "image/png";
-  // WebP: RIFF....WEBP
-  if (view[0] === 0x52 && view[1] === 0x49 && view[2] === 0x46 && view[3] === 0x46 &&
-      view[8] === 0x57 && view[9] === 0x45 && view[10] === 0x42 && view[11] === 0x50) return "image/webp";
-  // AVIF: ....ftypavif or ....ftypavis — "ftyp" alone is any ISO-BMFF file
-  // (HEIC, MP4, ...), so the major brand at bytes 8-11 must match too
-  if (view[4] === 0x66 && view[5] === 0x74 && view[6] === 0x79 && view[7] === 0x70) {
-    const brand = String.fromCharCode(view[8]!, view[9]!, view[10]!, view[11]!);
-    if (brand === "avif" || brand === "avis") return "image/avif";
-    return fallback;
-  }
-
-  return fallback;
+  return sniffMimeType(buffer, fallback);
 }
 
 /**

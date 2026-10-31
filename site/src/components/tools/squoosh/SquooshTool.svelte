@@ -9,6 +9,7 @@
   import BeforeAfter from "./BeforeAfter.svelte";
   import { compress, type CompressOptions } from "../../../lib/squoosh/compress";
   import { GIF_UNSUPPORTED_MESSAGE } from "../../../lib/squoosh/codecs";
+  import { createGenerationGuard } from "../convert/conversion-guard";
 
   type State = "idle" | "loading" | "settings" | "compressing" | "done" | "error";
 
@@ -27,6 +28,13 @@
     maxDimension: 0,
     lossless: false,
   });
+
+  /**
+   * Orphans in-flight image loads/compressions on reset: "Change file" mid
+   * compress used to let the late result set state "done" with sourceFile
+   * nulled — no template branch matched and the screen went blank (H3).
+   */
+  const guard = createGenerationGuard();
 
   function handleFile(files: File[]) {
     const file = files[0];
@@ -47,6 +55,7 @@
       return;
     }
 
+    const gen = guard.invalidate();
     sourceFile = file;
     state = "loading";
     error = "";
@@ -55,6 +64,10 @@
     const img = new Image();
     const url = URL.createObjectURL(file);
     img.onload = () => {
+      if (!guard.isCurrent(gen)) {
+        URL.revokeObjectURL(url);
+        return;
+      }
       sourceWidth = img.naturalWidth;
       sourceHeight = img.naturalHeight;
       sourceUrl = url;
@@ -62,6 +75,7 @@
     };
     img.onerror = () => {
       URL.revokeObjectURL(url);
+      if (!guard.isCurrent(gen)) return;
       error = "Failed to load image";
       state = "error";
     };
@@ -72,21 +86,26 @@
     if (!sourceFile) return;
     state = "compressing";
     error = "";
+    const gen = guard.token();
 
     try {
       const blob = await compress(sourceFile, options);
+      // Superseded by reset/new file — drop the result, don't touch state
+      if (!guard.isCurrent(gen)) return;
       // Clean up previous result
       if (resultUrl) URL.revokeObjectURL(resultUrl);
       resultBlob = blob;
       resultUrl = URL.createObjectURL(blob);
       state = "done";
     } catch (e) {
+      if (!guard.isCurrent(gen)) return;
       error = e instanceof Error ? e.message : "Compression failed";
       state = "error";
     }
   }
 
   function reset() {
+    guard.invalidate();
     if (sourceUrl) URL.revokeObjectURL(sourceUrl);
     if (resultUrl) URL.revokeObjectURL(resultUrl);
     sourceFile = null;
