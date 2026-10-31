@@ -19,6 +19,17 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { BlockedRequestError, MAX_REDIRECTS, isAllowedUrl, safeFetch } from "./ssrf";
+import {
+  INSPECT_TIMEOUT_MS,
+  MAX_ERROR_TEXT_CHARS,
+  MAX_TAGS,
+  MAX_TAG_CONTENT_CHARS,
+  MAX_TAG_NAME_CHARS,
+  UPLOAD_TIMEOUT_MS,
+  drainCapped,
+  isTimeoutError,
+  truncate,
+} from "./limits";
 
 type Bindings = {
   // Add KV/D1/R2 bindings here if needed later
@@ -90,6 +101,14 @@ app.get("/api/inspect", async (c) => {
   try {
     const tags: MetaTag[] = [];
     let title = "";
+    /** Record a tag within the count/length caps (L1) */
+    const addTag = (property: string, content: string) => {
+      if (tags.length >= MAX_TAGS) return;
+      tags.push({
+        property: truncate(property, MAX_TAG_NAME_CHARS),
+        content: truncate(content, MAX_TAG_CONTENT_CHARS),
+      });
+    };
 
     // Fetch with HTMLRewriter to extract meta tags. Redirects are followed
     // manually so each hop is re-validated against the SSRF blocklist.
@@ -98,9 +117,12 @@ app.get("/api/inspect", async (c) => {
         "User-Agent": "Embeddy/1.0 (metadata inspector; +https://embeddy.link)",
         Accept: "text/html,application/xhtml+xml",
       },
+      signal: AbortSignal.timeout(INSPECT_TIMEOUT_MS),
     });
 
     if (!response.ok) {
+      // Never read — release the connection instead of leaving it pinned
+      await response.body?.cancel().catch(() => {});
       return c.json(
         { error: `Upstream returned HTTP ${response.status}` },
         502,
@@ -109,6 +131,7 @@ app.get("/api/inspect", async (c) => {
 
     const contentType = response.headers.get("content-type") ?? "";
     if (!contentType.includes("text/html") && !contentType.includes("xhtml")) {
+      await response.body?.cancel().catch(() => {});
       return c.json(
         { error: "URL did not return HTML content" },
         422,
@@ -127,18 +150,14 @@ app.get("/api/inspect", async (c) => {
         element(el) {
           const prop = el.getAttribute("property");
           const content = el.getAttribute("content");
-          if (prop && content) {
-            tags.push({ property: prop, content });
-          }
+          if (prop && content) addTag(prop, content);
         },
       })
       .on('meta[name]', {
         element(el) {
           const name = el.getAttribute("name");
           const content = el.getAttribute("content");
-          if (name && content) {
-            tags.push({ property: name, content });
-          }
+          if (name && content) addTag(name, content);
         },
       })
       // `rel~=` matches a whitespace-separated list, so this covers both
@@ -146,9 +165,7 @@ app.get("/api/inspect", async (c) => {
       .on('link[rel~="icon" i]', {
         element(el) {
           const href = el.getAttribute("href");
-          if (href) {
-            tags.push({ property: "favicon", content: resolveUrl(href, finalUrl) });
-          }
+          if (href) addTag("favicon", resolveUrl(href, finalUrl));
         },
       });
 
@@ -184,32 +201,16 @@ app.get("/api/inspect", async (c) => {
     if (err instanceof BlockedRequestError) {
       return c.json({ error: err.message }, 403);
     }
+    if (isTimeoutError(err)) {
+      return c.json(
+        { error: `Upstream did not respond within ${INSPECT_TIMEOUT_MS / 1000}s` },
+        504,
+      );
+    }
     const message = err instanceof Error ? err.message : "Unknown error";
-    return c.json({ error: `Failed to fetch URL: ${message}` }, 502);
+    return c.json({ error: `Failed to fetch URL: ${truncate(message, MAX_ERROR_TEXT_CHARS)}` }, 502);
   }
 });
-
-/**
- * Read a response body until `maxBytes`, then cancel the stream.
- * Nothing is retained — this exists purely to drive HTMLRewriter's handlers.
- */
-async function drainCapped(response: Response, maxBytes: number): Promise<void> {
-  const body = response.body;
-  if (!body) return;
-
-  const reader = body.getReader();
-  let read = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      read += value?.byteLength ?? 0;
-      if (read >= maxBytes) break;
-    }
-  } finally {
-    await reader.cancel().catch(() => {});
-  }
-}
 
 /** Resolve a potentially relative URL against a base URL */
 function resolveUrl(href: string, base: string): string {
@@ -316,10 +317,12 @@ app.post("/api/upload", async (c) => {
     const response = await fetch(hostConfig.url, {
       method: "POST",
       body: upstreamForm,
+      signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
     });
 
     if (!response.ok) {
-      const text = await response.text();
+      // Hosts answer errors with whole HTML pages — echo only the start (L1)
+      const text = truncate((await response.text()).trim(), MAX_ERROR_TEXT_CHARS);
       return c.json(
         { error: `Upload host returned HTTP ${response.status}: ${text}` },
         502,
@@ -331,15 +334,21 @@ app.post("/api/upload", async (c) => {
     // Validate we got a URL back
     if (!resultUrl.startsWith("http")) {
       return c.json(
-        { error: `Unexpected response from host: ${resultUrl}` },
+        { error: `Unexpected response from host: ${truncate(resultUrl, MAX_ERROR_TEXT_CHARS)}` },
         502,
       );
     }
 
     return c.json({ url: resultUrl });
   } catch (err) {
+    if (isTimeoutError(err)) {
+      return c.json(
+        { error: `Upload host did not respond within ${UPLOAD_TIMEOUT_MS / 1000}s` },
+        504,
+      );
+    }
     const message = err instanceof Error ? err.message : "Unknown error";
-    return c.json({ error: `Upload failed: ${message}` }, 500);
+    return c.json({ error: `Upload failed: ${truncate(message, MAX_ERROR_TEXT_CHARS)}` }, 500);
   }
 });
 
@@ -353,6 +362,9 @@ app.get("/health", (c) => {
       maxInspectBytes: MAX_INSPECT_BYTES,
       maxUploadBytes: MAX_UPLOAD_BYTES,
       maxRedirects: MAX_REDIRECTS,
+      inspectTimeoutMs: INSPECT_TIMEOUT_MS,
+      uploadTimeoutMs: UPLOAD_TIMEOUT_MS,
+      maxTags: MAX_TAGS,
     },
   });
 });

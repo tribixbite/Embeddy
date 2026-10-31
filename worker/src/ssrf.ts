@@ -10,6 +10,12 @@
 export const MAX_REDIRECTS = 5;
 
 /**
+ * Per-lookup DoH timeout. The guard fails open on resolver errors, so a slow
+ * resolver must not stall the request either — it times out and fails open.
+ */
+export const DOH_TIMEOUT_MS = 3_000;
+
+/**
  * Thrown when a request is refused by SSRF policy (blocked redirect target or
  * a hostname resolving into private address space) — as opposed to an upstream
  * transport failure. Lets the route map policy refusals to 403 instead of 502.
@@ -193,13 +199,16 @@ async function resolvesToPublicAddresses(hostname: string): Promise<boolean> {
       try {
         const res = await fetch(
           `${DOH_ENDPOINT}?name=${encodeURIComponent(hostname)}&type=${type}`,
-          { headers: { accept: "application/dns-json" } },
+          {
+            headers: { accept: "application/dns-json" },
+            signal: AbortSignal.timeout(DOH_TIMEOUT_MS),
+          },
         );
         if (!res.ok) return true; // fail open on resolver errors
         const json = (await res.json()) as { Answer?: DohRecord[] };
         return areDnsAnswersAllowed(json.Answer);
       } catch {
-        return true; // fail open on transport errors
+        return true; // fail open on transport errors and timeouts
       }
     }),
   );
