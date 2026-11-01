@@ -232,20 +232,28 @@ fun VideoTrimPlayer(
         shape = RoundedCornerShape(16.dp),
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
-            // Preview surface: ExoPlayer for video, Coil animated image for GIF/WebP
+            // Preview surface: ExoPlayer for video, Coil animated image for GIF/WebP.
+            // Only the media layer is clipped to rounded corners: Compose clips
+            // hit-testing to the clip shape too, and the crop handles sit on the
+            // video's corners — inside a clipped box a touch on a handle missed
+            // the overlay and scrolled the page instead.
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .aspectRatio(16f / 9f)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                    .aspectRatio(16f / 9f),
                 contentAlignment = Alignment.Center,
             ) {
+                Box(
+                    Modifier
+                        .matchParentSize()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                )
                 if (exoPlayer == null) {
                     AsyncImage(
                         model = ImageRequest.Builder(context).data(uri).crossfade(true).build(),
                         contentDescription = stringResource(R.string.animated_preview_desc),
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)),
                         contentScale = ContentScale.Fit,
                     )
                 } else {
@@ -258,7 +266,7 @@ fun VideoTrimPlayer(
                             }
                         },
                         update = { view -> view.player = exoPlayer },
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)),
                     )
 
                     IconButton(

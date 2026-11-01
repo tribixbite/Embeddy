@@ -365,5 +365,13 @@ Pushed phase 9 (merged the CI's v0.1.53 pin commit, no rebase). Worker deployed
   were queried on 28-30 where the keys don't exist); display-only String.format calls take the
   user locale explicitly.
 
+- [x] **10.7** Found on device (S938U1, Android 17): Images → animation failed for EVERY image with
+  "Cannot open <name>" — a bounds-only BitmapFactory decode returns null by design, and the code
+  chained `?: throw` after it. Verified after fix: 3 JPEGs, reordered → GIF frames in the new order, 1.56 s.
+- [x] **10.8** Found on device: crop corner handles were not grabbable at the corners — the preview
+  box's rounded clip also clips hit-testing, so a touch on a handle scrolled the page. Only the media
+  layer is clipped now. Verified: drags starting exactly on the TL/BR corners resize the crop; reverse +
+  crop MP4 → 778x418 (even), 6.0 s, AAC kept, frames in reverse order.
+
 ### Store
 - [x] **10.6** Feature graphic set in Inter (site typeface) via a private fontconfig; was DejaVu.

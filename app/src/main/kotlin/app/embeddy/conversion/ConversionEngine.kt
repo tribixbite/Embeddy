@@ -107,9 +107,11 @@ class ConversionEngine(private val context: Context) : ConvertEngine {
         }
         val (fileName, fileSize) = FileInfoUtils.queryFileInfo(context, parsed)
         val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        context.contentResolver.openInputStream(parsed)?.use {
-            android.graphics.BitmapFactory.decodeStream(it, null, bounds)
-        } ?: throw IllegalStateException("Cannot open $fileName")
+        // Bounds-only decodes always return null, so only the stream itself is
+        // null-checked (chaining `?: throw` after decodeStream failed every image)
+        val stream = context.contentResolver.openInputStream(parsed)
+            ?: throw IllegalStateException("Cannot open $fileName")
+        stream.use { android.graphics.BitmapFactory.decodeStream(it, null, bounds) }
         if (bounds.outWidth <= 0) throw IllegalStateException("$fileName is not a readable image")
         SourceClip(uri = uri, fileName = fileName, fileSize = fileSize, width = bounds.outWidth, height = bounds.outHeight)
     }
