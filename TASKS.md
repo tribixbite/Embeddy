@@ -346,5 +346,8 @@ Pushed phase 9 (merged the CI's v0.1.53 pin commit, no rebase). Worker deployed
   (`lib/convert/time-stretch.ts`, pitch preserved like FFmpeg atempo) via Mediabunny's
   `audio.process`. Verified in headless Chromium: 3 s clip → 1.51 s @2x / 6.01 s @0.5x,
   440 Hz tone stays 440 Hz, loudness unchanged; trimmed 2 s window → 1.02 s / 4.01 s.
-- [ ] **10.2** Squoosh encode off the main thread (Web Worker)
+- [x] **10.2** Squoosh compression runs in a Web Worker (`squoosh/compress-client.ts`), kept warm
+  between runs; main-thread fallback when module Workers are unavailable. New Cancel button
+  terminates the encode. Built-site check in Chromium: 2400x1800 PNG → WebP 445→97 KB in 1.9 s;
+  worst main-thread stall during an AVIF encode 4 ms; Cancel → terminate() → next run uses a new Worker.
 - [ ] **10.3** Web join: per-clip trim/crop/rotate for added clips

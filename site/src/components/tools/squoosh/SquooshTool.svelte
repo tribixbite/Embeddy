@@ -1,6 +1,7 @@
 <script lang="ts">
   /**
-   * Squoosh tool — client-side image compression via @jsquash WASM codecs.
+   * Squoosh tool — client-side image compression via @jsquash WASM codecs,
+   * run in a Web Worker so the page stays responsive and Cancel is immediate.
    * States: idle → loading → settings → compressing → done
    */
   import FileDropZone from "../shared/FileDropZone.svelte";
@@ -11,7 +12,9 @@
   import SquooshSettings from "./SquooshSettings.svelte";
   import SquooshResult from "./SquooshResult.svelte";
   import BeforeAfter from "./BeforeAfter.svelte";
-  import { compress, type CompressOptions } from "../../../lib/squoosh/compress";
+  import type { CompressOptions } from "../../../lib/squoosh/compress";
+  import { compressOffThread } from "../../../lib/squoosh/compress-client";
+  import { isAbortError } from "../../../lib/convert/abort";
   import { GIF_UNSUPPORTED_MESSAGE } from "../../../lib/squoosh/codecs";
   import { createGenerationGuard } from "../convert/conversion-guard";
   import { recoverFromChunkError } from "../../../lib/pwa/chunk-reload";
@@ -41,6 +44,8 @@
    * nulled — no template branch matched and the screen went blank (H3).
    */
   const guard = createGenerationGuard();
+  /** Aborts the compression in progress (Cancel, Change file, new file) */
+  let inFlight: AbortController | null = null;
 
   /** Inputs the codecs handle (also filters page-wide drops and pastes) */
   const ACCEPT = "image/jpeg,image/png,image/webp,image/avif";
@@ -98,9 +103,12 @@
     state = "compressing";
     error = "";
     const gen = guard.token();
+    inFlight?.abort();
+    const ctrl = new AbortController();
+    inFlight = ctrl;
 
     try {
-      const blob = await compress(sourceFile, options);
+      const blob = await compressOffThread(sourceFile, options, ctrl.signal);
       // Superseded by reset/new file — drop the result, don't touch state
       if (!guard.isCurrent(gen)) return;
       // Clean up previous result
@@ -109,15 +117,27 @@
       resultUrl = URL.createObjectURL(blob);
       state = "done";
     } catch (e) {
-      if (!guard.isCurrent(gen)) return;
+      if (!guard.isCurrent(gen) || isAbortError(e)) return;
       // A stale deploy's missing codec chunk: reload once instead of erroring (M4)
       if (recoverFromChunkError(e, BUILD_ID)) return;
       error = e instanceof Error ? e.message : "Compression failed";
       state = "error";
+    } finally {
+      if (inFlight === ctrl) inFlight = null;
     }
   }
 
+  /** Stop the running encode (terminates its Worker) and go back to settings */
+  function cancelCompress() {
+    inFlight?.abort();
+    inFlight = null;
+    guard.invalidate();
+    state = "settings";
+  }
+
   function reset() {
+    inFlight?.abort();
+    inFlight = null;
     guard.invalidate();
     if (sourceUrl) URL.revokeObjectURL(sourceUrl);
     if (resultUrl) URL.revokeObjectURL(resultUrl);
@@ -170,7 +190,10 @@
     />
 
     {#if state === "compressing"}
-      <Spinner label="Compressing..." padding="py-8" />
+      <div class="flex flex-col items-center">
+        <Spinner label="Compressing..." padding="pt-8 pb-3" />
+        <button onclick={cancelCompress} class={TEXT_BUTTON}>Cancel</button>
+      </div>
     {/if}
   {:else if state === "done" && resultBlob && sourceFile}
     <BeforeAfter
