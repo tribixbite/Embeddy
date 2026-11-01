@@ -31,6 +31,8 @@ const COARSE_STEP = 4;
 
 /** Per-channel planar audio: one Float32Array per channel, equal lengths */
 export type PlanarAudio = Float32Array[];
+/** Stretcher output: always freshly allocated (never a shared/foreign buffer) */
+export type PlanarOutput = Float32Array<ArrayBuffer>[];
 
 export class WsolaStretcher {
   readonly speed: number;
@@ -97,7 +99,7 @@ export class WsolaStretcher {
    * Append input and return every output frame that is now final.
    * @param chunk - One Float32Array per channel, all the same length
    */
-  push(chunk: PlanarAudio): PlanarAudio {
+  push(chunk: PlanarAudio): PlanarOutput {
     if (this.flushed) throw new Error("push() after flush()");
     if (chunk.length !== this.channels) throw new RangeError(`expected ${this.channels} channels, got ${chunk.length}`);
     const n = chunk[0]!.length;
@@ -115,7 +117,7 @@ export class WsolaStretcher {
   }
 
   /** Process the remaining input (zero-padded) and return the final output */
-  flush(): PlanarAudio {
+  flush(): PlanarOutput {
     if (this.flushed) return this.emptyChunk();
     const out = this.drain(true);
     this.flushed = true;
@@ -123,8 +125,8 @@ export class WsolaStretcher {
   }
 
   /** Place frames while enough input is buffered; `final` pads with silence */
-  private drain(final: boolean): PlanarAudio {
-    const pieces: PlanarAudio[] = [];
+  private drain(final: boolean): PlanarOutput {
+    const pieces: PlanarOutput[] = [];
     const target = this.expectedOutputFrames;
     for (;;) {
       // Output already returned + the hop this frame would finalize
@@ -211,9 +213,9 @@ export class WsolaStretcher {
    * Return the first `count` (≤ hop) accumulator samples, which no later
    * frame overlaps, and shift the accumulator left by one hop.
    */
-  private emitHop(count: number): PlanarAudio {
+  private emitHop(count: number): PlanarOutput {
     const n = Math.max(0, Math.min(this.hop, count));
-    const out: PlanarAudio = [];
+    const out: PlanarOutput = [];
     for (let c = 0; c < this.channels; c++) {
       const acc = this.acc[c]!;
       out.push(acc.slice(0, n));
@@ -248,19 +250,31 @@ export class WsolaStretcher {
     this.monoBuf = mono;
   }
 
-  private emptyChunk(): PlanarAudio {
+  private emptyChunk(): PlanarOutput {
     return Array.from({ length: this.channels }, () => new Float32Array(0));
   }
 }
 
 /** Concatenate per-channel pieces into one planar chunk */
-function concat(pieces: PlanarAudio[], channels: number): PlanarAudio {
+function concat(pieces: PlanarOutput[], channels: number): PlanarOutput {
   const total = pieces.reduce((sum, p) => sum + p[0]!.length, 0);
-  const out: PlanarAudio = Array.from({ length: channels }, () => new Float32Array(total));
+  const out: PlanarOutput = Array.from({ length: channels }, () => new Float32Array(total));
   let at = 0;
   for (const p of pieces) {
     for (let c = 0; c < channels; c++) out[c]!.set(p[c]!, at);
     at += p[0]!.length;
   }
   return out;
+}
+
+/**
+ * Stretch a complete signal in one call (for audio that is already fully
+ * rendered, e.g. a join clip's AudioBuffer). Returns `round(len / speed)`
+ * frames per channel.
+ */
+export function stretchPlanar(planes: PlanarAudio, speed: number, sampleRate: number): PlanarOutput {
+  const stretcher = new WsolaStretcher(speed, sampleRate, planes.length);
+  const head = stretcher.push(planes);
+  const tail = stretcher.flush();
+  return concat([head, tail], planes.length);
 }

@@ -2,7 +2,7 @@
   /**
    * Quick-edit controls for the Convert tool: a scrubbable video preview with
    * frame grab, trim range, speed, rotate/flip, mute, and extra clips to join
-   * (video output). Geometry is applied by FramePreparer / Mediabunny; time
+   * (video output), each with its own trim. Geometry is applied by FramePreparer / Mediabunny; time
    * edits by lib/convert/timeline.ts.
    */
   import type { ConvertOptions, SourceInfo } from "../../../lib/convert/types";
@@ -15,6 +15,13 @@
   import ToggleGroup from "../shared/ToggleGroup.svelte";
   import { SECONDARY_BUTTON } from "../shared/buttons";
   import { formatFileSize } from "../shared/format-size";
+  import {
+    createJoinClip,
+    disposeJoinClips,
+    isTrimmed,
+    moveItem,
+    type JoinClipItem,
+  } from "../../../lib/convert/join-clips";
 
   let {
     options = $bindable(),
@@ -30,7 +37,7 @@
     sourceName: string;
     disabled?: boolean;
     /** Extra videos appended after the source (video output only) */
-    joinClips: File[];
+    joinClips: JoinClipItem[];
   } = $props();
 
   let video: HTMLVideoElement | undefined = $state();
@@ -82,20 +89,48 @@
   }
 
   let clipInput: HTMLInputElement | undefined = $state();
-  function addClips(e: Event) {
+  /** Clips still being probed, and per-file probe failures */
+  let addingClips = $state(0);
+  let clipError = $state("");
+  /** Id of the clip whose trim editor is open (one at a time keeps the page short) */
+  let openClipId: number | null = $state(null);
+  let clipVideo: HTMLVideoElement | undefined = $state();
+
+  async function addClips(e: Event) {
     const input = e.currentTarget as HTMLInputElement;
     const picked = Array.from(input.files ?? []).filter((f) => f.type.startsWith("video/") || /\.(mp4|webm|mov|mkv|m4v)$/i.test(f.name));
-    joinClips = [...joinClips, ...picked];
     input.value = "";
+    clipError = "";
+    addingClips += picked.length;
+    const failures: string[] = [];
+    // Probe in order so clips keep the order they were picked in
+    for (const file of picked) {
+      try {
+        const clip = await createJoinClip(file);
+        joinClips = [...joinClips, clip];
+      } catch (err) {
+        failures.push(err instanceof Error ? err.message : `${file.name} couldn't be read`);
+      } finally {
+        addingClips--;
+      }
+    }
+    if (failures.length) clipError = failures.join(" · ");
   }
   function removeClip(index: number) {
+    const removed = joinClips[index];
+    if (!removed) return;
+    disposeJoinClips([removed]);
+    if (openClipId === removed.id) openClipId = null;
     joinClips = joinClips.filter((_, i) => i !== index);
   }
   function moveClip(index: number, delta: number) {
-    const next = [...joinClips];
-    const [clip] = next.splice(index, 1);
-    next.splice(Math.max(0, Math.min(next.length, index + delta)), 0, clip!);
-    joinClips = next;
+    joinClips = moveItem(joinClips, index, delta);
+  }
+  function toggleClipTrim(id: number) {
+    openClipId = openClipId === id ? null : id;
+  }
+  function seekClip(ms: number) {
+    if (clipVideo) clipVideo.currentTime = ms / 1000;
   }
 </script>
 
@@ -170,7 +205,9 @@
     <div class="space-y-2">
       <div class="flex items-center justify-between">
         <span class="text-sm text-white/60">Join clips</span>
-        <button type="button" class={SECONDARY_BUTTON} onclick={() => clipInput?.click()} {disabled}>Add videos…</button>
+        <button type="button" class={SECONDARY_BUTTON} onclick={() => clipInput?.click()} disabled={disabled || addingClips > 0}>
+          {addingClips > 0 ? "Reading…" : "Add videos…"}
+        </button>
         <input
           bind:this={clipInput}
           type="file"
@@ -182,20 +219,58 @@
           onchange={addClips}
         />
       </div>
+      {#if clipError}<p class="text-xs text-red-400" role="alert">{clipError}</p>{/if}
       {#if joinClips.length > 0}
         <ol class="space-y-1 text-xs text-white/60">
           <li class="rounded-lg bg-white/[0.03] px-3 py-2">1. {sourceName} <span class="text-white/30">(trimmed as above)</span></li>
-          {#each joinClips as clip, i (clip)}
-            <li class="flex items-center gap-2 rounded-lg bg-white/[0.03] px-3 py-1">
-              <span class="flex-1 truncate">{i + 2}. {clip.name} <span class="text-white/30">{formatFileSize(clip.size)}</span></span>
-              <button type="button" class="min-h-11 min-w-11 text-white/50 hover:text-white" onclick={() => moveClip(i, -1)} disabled={disabled || i === 0} aria-label="Move {clip.name} up">↑</button>
-              <button type="button" class="min-h-11 min-w-11 text-white/50 hover:text-white" onclick={() => moveClip(i, 1)} disabled={disabled || i === joinClips.length - 1} aria-label="Move {clip.name} down">↓</button>
-              <button type="button" class="min-h-11 min-w-11 text-white/50 hover:text-red-300" onclick={() => removeClip(i)} {disabled} aria-label="Remove {clip.name}">✕</button>
+          {#each joinClips as clip, i (clip.id)}
+            <li class="rounded-lg bg-white/[0.03] px-3 py-1">
+              <div class="flex items-center gap-2">
+                <span class="flex-1 truncate">
+                  {i + 2}. {clip.file.name}
+                  <span class="text-white/30">{formatFileSize(clip.file.size)}{isTrimmed(clip) ? " · trimmed" : ""}</span>
+                </span>
+                {#if clip.durationMs > 0}
+                  <button
+                    type="button"
+                    class="min-h-11 rounded-lg px-2 text-white/50 hover:text-white {openClipId === clip.id ? 'text-brand-300' : ''}"
+                    onclick={() => toggleClipTrim(clip.id)}
+                    {disabled}
+                    aria-expanded={openClipId === clip.id}
+                    aria-label="Trim {clip.file.name}"
+                  >Trim</button>
+                {/if}
+                <button type="button" class="min-h-11 min-w-11 text-white/50 hover:text-white" onclick={() => moveClip(i, -1)} disabled={disabled || i === 0} aria-label="Move {clip.file.name} up">↑</button>
+                <button type="button" class="min-h-11 min-w-11 text-white/50 hover:text-white" onclick={() => moveClip(i, 1)} disabled={disabled || i === joinClips.length - 1} aria-label="Move {clip.file.name} down">↓</button>
+                <button type="button" class="min-h-11 min-w-11 text-white/50 hover:text-red-300" onclick={() => removeClip(i)} {disabled} aria-label="Remove {clip.file.name}">✕</button>
+              </div>
+              {#if openClipId === clip.id}
+                <div class="space-y-3 pb-3 pt-1">
+                  <!-- svelte-ignore a11y_media_has_caption -->
+                  <video
+                    bind:this={clipVideo}
+                    src={clip.previewUrl}
+                    controls
+                    playsinline
+                    preload="metadata"
+                    class="mx-auto max-h-56 w-full rounded-lg bg-black"
+                    aria-label="Preview of {clip.file.name}"
+                  ></video>
+                  <TrimControls
+                    label="Trim clip {i + 2}"
+                    totalMs={clip.durationMs}
+                    bind:startMs={joinClips[i]!.trimStartMs}
+                    bind:endMs={joinClips[i]!.trimEndMs}
+                    {disabled}
+                    onseek={seekClip}
+                  />
+                </div>
+              {/if}
             </li>
           {/each}
         </ol>
         <p class="text-xs text-white/30">
-          Clips play in order, scaled to fit the first clip's size. Crop, rotate and speed apply only without joined clips.
+          Clips play in order, scaled to fit the first clip's size. Speed applies to the whole join; crop and rotate apply only without joined clips.
         </p>
       {/if}
     </div>

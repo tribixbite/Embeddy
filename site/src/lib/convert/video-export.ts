@@ -18,7 +18,7 @@ import { cropRectToPixels } from "./encoder";
 import { planFrame, transformFromOptions, type Rotation } from "./prepare-frame";
 import { clampSpeed, clampTrim } from "./timeline";
 import { throwIfAborted } from "./abort";
-import { WsolaStretcher, type PlanarAudio } from "./time-stretch";
+import { WsolaStretcher, stretchPlanar, type PlanarAudio } from "./time-stretch";
 
 /** Container/codec preferences per output format */
 export const VIDEO_FORMATS = {
@@ -385,18 +385,32 @@ async function renderClipAudio(
   return ctx.startRendering();
 }
 
+/** Re-time a rendered clip's audio by `speed`, keeping pitch */
+function stretchAudioBuffer(buffer: AudioBuffer, speed: number): AudioBuffer {
+  const planes = Array.from({ length: buffer.numberOfChannels }, (_, c) => buffer.getChannelData(c));
+  const stretched = stretchPlanar(planes, speed, buffer.sampleRate);
+  const out = new AudioBuffer({
+    length: Math.max(1, stretched[0]!.length),
+    numberOfChannels: buffer.numberOfChannels,
+    sampleRate: buffer.sampleRate,
+  });
+  stretched.forEach((plane, c) => out.copyToChannel(plane, c));
+  return out;
+}
+
 /**
  * Join several videos end to end into one MP4/WebM. Every clip is scaled to
  * fit (letterboxed) the first clip's size after `maxDimension`, trimmed to
- * its own window, and its audio resampled to 48 kHz stereo. Crop/rotate and
- * speed are not applied to joins.
+ * its own window, and its audio resampled to 48 kHz stereo. `speed` applies
+ * to the whole join (audio pitch kept). Crop/rotate/flip are not applied to
+ * joins — they are defined against one source's frame.
  *
  * @param onProgress - Fraction of total output duration written
  * @param signal - Aborting cancels the output and rejects with AbortError
  */
 export async function joinVideos(
   clips: JoinClip[],
-  opts: Pick<ConvertOptions, "quality" | "maxDimension" | "muted">,
+  opts: Pick<ConvertOptions, "quality" | "maxDimension" | "muted" | "speed">,
   format: VideoOutputFormat,
   onProgress?: (fraction: number) => void,
   signal?: AbortSignal,
@@ -407,6 +421,7 @@ export async function joinVideos(
   const spec = VIDEO_FORMATS[format];
   const notices: string[] = [];
   const quality = new mb.Quality(qualityLevel(opts.quality));
+  const speed = clampSpeed(opts.speed);
 
   // Open every input up front: sizes, durations and audio presence decide
   // the output configuration before anything is written
@@ -456,7 +471,8 @@ export async function joinVideos(
     const audioSource = audioCodec ? new mb.AudioBufferSource({ codec: audioCodec, quality }) : null;
     if (audioSource) output.addAudioTrack(audioSource);
 
-    const totalS = windows.reduce((sum, w) => sum + (w.endS - w.startS), 0);
+    // Output-timeline length: each source window shrinks/grows by 1 / speed
+    const totalS = windows.reduce((sum, w) => sum + (w.endS - w.startS), 0) / speed;
     const onAbort = () => void output.cancel();
     signal?.addEventListener("abort", onAbort, { once: true });
     try {
@@ -466,7 +482,10 @@ export async function joinVideos(
         const { startS, endS } = windows[i]!;
         // Audio first: it is small, so the muxer buffers it while this
         // clip's video streams through
-        if (audioSource) await audioSource.add(await renderClipAudio(mb, inputs[i]!, startS, endS, signal));
+        if (audioSource) {
+          const audio = await renderClipAudio(mb, inputs[i]!, startS, endS, signal);
+          await audioSource.add(speed === 1 ? audio : stretchAudioBuffer(audio, speed));
+        }
 
         const track = (await inputs[i]!.getPrimaryVideoTrack())!;
         const sink = new mb.CanvasSink(track, { width, height, fit: "contain", poolSize: 2 });
@@ -474,14 +493,14 @@ export async function joinVideos(
           throwIfAborted(signal);
           const t = Math.max(0, wrapped.timestamp - startS);
           const sample = new mb.VideoSample(wrapped.canvas, {
-            timestamp: offsetS + t,
-            duration: Math.min(wrapped.duration, endS - startS - t) || wrapped.duration,
+            timestamp: offsetS + t / speed,
+            duration: (Math.min(wrapped.duration, endS - startS - t) || wrapped.duration) / speed,
           });
           await videoSource.add(sample);
           sample.close();
-          onProgress?.(Math.min(1, (offsetS + t) / totalS));
+          onProgress?.(Math.min(1, (offsetS + t / speed) / totalS));
         }
-        offsetS += endS - startS;
+        offsetS += (endS - startS) / speed;
       }
       videoSource.close();
       audioSource?.close();

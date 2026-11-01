@@ -350,4 +350,8 @@ Pushed phase 9 (merged the CI's v0.1.53 pin commit, no rebase). Worker deployed
   between runs; main-thread fallback when module Workers are unavailable. New Cancel button
   terminates the encode. Built-site check in Chromium: 2400x1800 PNG → WebP 445→97 KB in 1.9 s;
   worst main-thread stall during an AVIF encode 4 ms; Cancel → terminate() → next run uses a new Worker.
-- [ ] **10.3** Web join: per-clip trim/crop/rotate for added clips
+- [x] **10.3** Web join: each added clip has its own Trim (preview player + range, `lib/convert/join-clips.ts`),
+  clips are validated on add (no-video files rejected with a message), and speed now applies to the
+  whole join with pitch kept. Crop/rotate stay source-only (defined against one frame). Chromium e2e:
+  3 s source + 4 s clip trimmed to 1–3 s at 2× → 2.52 s WebM, audio 440 Hz then 660 Hz; TrimControls
+  ids unique per instance.

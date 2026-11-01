@@ -13,6 +13,8 @@
     disabled = false,
     /** Called with the time a thumb moved to, so a preview can seek there */
     onseek,
+    /** Visible group label (several trims can share a page, e.g. join clips) */
+    label = "Trim",
   }: {
     totalMs: number;
     startMs: number;
@@ -20,7 +22,11 @@
     endMs: number;
     disabled?: boolean;
     onseek?: (ms: number) => void;
+    label?: string;
   } = $props();
+
+  /** Unique per instance so aria-labelledby never points at another trim */
+  const labelId = $props.id();
 
   /** Step: 10 ms resolution, coarser for long sources so keys move sensibly */
   let step = $derived(totalMs > 60_000 ? 100 : 10);
@@ -54,13 +60,13 @@
 
 <div>
   <div class="mb-2 flex items-center justify-between text-sm">
-    <span class="text-white/60" id="cv-trim-label">Trim</span>
+    <span class="text-white/60" id={labelId}>{label}</span>
     <span class="font-mono text-xs text-white/50">
       {fmt(startMs)} – {fmt(effectiveEnd)}
       <span class="text-white/30">({fmt(effectiveEnd - startMs)})</span>
     </span>
   </div>
-  <div class="trim relative h-11" role="group" aria-labelledby="cv-trim-label">
+  <div class="trim relative h-11" role="group" aria-labelledby={labelId}>
     <div class="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-white/10"></div>
     <div
       class="absolute top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-brand-500"
@@ -74,7 +80,7 @@
       value={startMs}
       {disabled}
       oninput={setStart}
-      aria-label="Trim start"
+      aria-label="{label} start"
       aria-valuetext={fmt(startMs)}
     />
     <input
@@ -85,7 +91,7 @@
       value={effectiveEnd}
       {disabled}
       oninput={setEnd}
-      aria-label="Trim end"
+      aria-label="{label} end"
       aria-valuetext={fmt(effectiveEnd)}
     />
   </div>

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { WsolaStretcher, type PlanarAudio } from "./time-stretch";
+import { WsolaStretcher, stretchPlanar, type PlanarAudio } from "./time-stretch";
 
 const SR = 48_000;
 
@@ -112,5 +112,15 @@ describe("WsolaStretcher", () => {
     s.flush();
     expect(s.flush()[0]!.length).toBe(0);
     expect(() => s.push([new Float32Array(1)])).toThrow();
+  });
+});
+
+describe("stretchPlanar", () => {
+  test("matches streaming output exactly", () => {
+    const input = [sine(440, 0.8), sine(660, 0.8, 0.2)];
+    const whole = stretchPlanar(input, 1.75, SR);
+    const streamed = stretch(input, 1.75, 777);
+    expect(whole[0]!.length).toBe(Math.round(input[0]!.length / 1.75));
+    for (let c = 0; c < 2; c++) expect(Array.from(whole[c]!)).toEqual(Array.from(streamed[c]!));
   });
 });

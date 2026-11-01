@@ -44,6 +44,7 @@
   import { createGenerationGuard } from "./conversion-guard";
   import { recoverFromChunkError } from "../../../lib/pwa/chunk-reload";
   import { BUILD_ID } from "../../../lib/build";
+  import { disposeJoinClips, toJoinClip, type JoinClipItem } from "../../../lib/convert/join-clips";
   import { isVideoFormat } from "../../../lib/convert/types";
   import type {
     ConvertOptions,
@@ -76,8 +77,8 @@
 
   /** Video containers this browser can encode (probed per video file) */
   let videoFormats: Array<"mp4" | "webm"> = $state([]);
-  /** Extra clips appended after the source when exporting video */
-  let joinClips: File[] = $state.raw([]);
+  /** Extra clips appended after the source when exporting video (deep state: each clip's trim is edited in place) */
+  let joinClips: JoinClipItem[] = $state([]);
 
   /** True when video is too large for batch decode — uses streaming pipeline */
   let streamingMode = $state(false);
@@ -468,7 +469,7 @@
             ? await joinVideos(
                 [
                   { file: sourceFile!, trimStartMs: options.trimStartMs, trimEndMs: options.trimEndMs },
-                  ...joinClips.map((file) => ({ file, trimStartMs: 0, trimEndMs: 0 })),
+                  ...joinClips.map(toJoinClip),
                 ],
                 options,
                 format,
@@ -580,6 +581,7 @@
     streamingMode = false;
     streamingFrameCount = 0;
     videoFormats = [];
+    disposeJoinClips(joinClips);
     joinClips = [];
     // Restore per-file defaults — otherwise file B silently inherits file A's
     // crop rect, targetFps, loop seed, etc (M6)

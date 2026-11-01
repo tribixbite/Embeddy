@@ -16,6 +16,7 @@
   import NumberField from "../shared/NumberField.svelte";
   import ToggleGroup from "../shared/ToggleGroup.svelte";
   import { BYTES_PER_MB } from "../shared/format-size";
+  import type { JoinClipItem } from "../../../lib/convert/join-clips";
 
   let {
     options = $bindable(),
@@ -38,7 +39,7 @@
     /** Video containers this browser can encode — offered for video sources only */
     videoFormats?: Array<"mp4" | "webm">;
     /** Extra clips to append (video output) */
-    joinClips?: File[];
+    joinClips?: JoinClipItem[];
     sourceName?: string;
   } = $props();
 
