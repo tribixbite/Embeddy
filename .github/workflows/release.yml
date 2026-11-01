@@ -153,8 +153,13 @@ jobs:
 
           ls -1 final_apks/
 
+          # TODO: sign the bundle with a separate Play upload key (new
+          # UPLOAD_KEYSTORE_* secrets) so a leaked CI secret can be reset in
+          # Play Console without touching the app's identity. Today the release
+          # key doubles as the upload key — see docs/play-store.md step 4.
           # Android App Bundle for Google Play. Play generates per-device APKs
-          # from it, so ABI splits do not apply; it carries the base versionCode.
+          # from it, so ABI splits do not apply; it carries base*10 + 9 (above
+          # every split of this release — see PLAY_BUNDLE_VERSION_SUFFIX).
           # Kept out of final_apks/: an .aab is not installable and does not
           # belong on the public releases page.
           echo "::group::Building Play bundle"
@@ -198,32 +203,40 @@ jobs:
           VERSION_PATCH=${{ steps.version.outputs.patch }}
           EOF
 
-          # Write the F-Droid changelog for THIS versionCode in the same commit.
+          # Write the F-Droid changelog for THIS release in the same commit.
           # F-Droid reads fastlane metadata from the tag it builds, and the
           # version number isn't known until this job runs — so a hand-written
           # changelog could never land in its own tag. Generated from the feat/fix
           # subjects since the last tag, which is what a user cares about.
-          CHANGELOG="fastlane/metadata/android/en-US/changelogs/${{ steps.version.outputs.version_code }}.txt"
-          mkdir -p "$(dirname "$CHANGELOG")"
+          #
+          # fdroidserver looks the file up by the build's exact versionCode, and
+          # F-Droid builds the per-ABI splits (base*10 + 1..3, see abiVersionCodes
+          # in app/build.gradle.kts), so one identical file is written per split.
+          # F-Droid truncates changelogs at 500 characters; cut at a line boundary.
+          CHANGELOG_DIR="fastlane/metadata/android/en-US/changelogs"
+          mkdir -p "$CHANGELOG_DIR"
           PREV=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-          if [ ! -f "$CHANGELOG" ]; then
-            {
-              git log ${PREV:+${PREV}..HEAD} --pretty=format:'%s' --no-merges \
-                | grep -E '^(feat|fix)(\(.+\))?!?: ' \
-                | sed -E 's/^[a-z]+(\(.+\))?!?: //' \
-                | head -12 \
-                | sed 's/^/- /'
-            } > "$CHANGELOG" || true
-            # Never commit an empty changelog — F-Droid renders it verbatim
-            if [ ! -s "$CHANGELOG" ]; then
-              echo "Maintenance release: internal and packaging changes only." > "$CHANGELOG"
-            fi
-            echo "--- generated $CHANGELOG ---"; cat "$CHANGELOG"
-          fi
+          NOTES=$(
+            git log ${PREV:+${PREV}..HEAD} --pretty=format:'%s' --no-merges \
+              | grep -E '^(feat|fix)(\(.+\))?!?: ' \
+              | sed -E 's/^[a-z]+(\(.+\))?!?: //' \
+              | head -12 \
+              | sed 's/^/- /' \
+              | awk '{ n += length($0) + 1; if (n > 500) exit; print }'
+          ) || true
+          # Never commit an empty changelog — F-Droid renders it verbatim
+          [ -n "$NOTES" ] || NOTES="Maintenance release: internal and packaging changes only."
+          CHANGELOGS=()
+          for abi_suffix in 1 2 3; do
+            CHANGELOG="$CHANGELOG_DIR/$(( ${{ steps.version.outputs.version_code }} * 10 + abi_suffix )).txt"
+            [ -f "$CHANGELOG" ] || printf '%s\n' "$NOTES" > "$CHANGELOG"
+            CHANGELOGS+=("$CHANGELOG")
+          done
+          echo "--- changelog (${CHANGELOGS[*]}) ---"; cat "${CHANGELOGS[0]}"
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add version.properties "$CHANGELOG"
+          git add version.properties "${CHANGELOGS[@]}"
           if git diff --cached --quiet; then
             echo "version.properties already correct"
           else

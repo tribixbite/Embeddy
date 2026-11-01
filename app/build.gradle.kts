@@ -17,8 +17,8 @@ val versionMinor = System.getenv("VERSION_MINOR")?.toIntOrNull()
 val versionPatch = buildNumber
     ?: (versionProps["VERSION_PATCH"] as String).toInt()
 
-// Base versionCode = MAJOR*1_000_000 + MINOR*10_000 + PATCH.
-// Per-ABI split APKs get base*10 + abiCode, which is what F-Droid's
+// Base versionCode = MAJOR*1_000_000 + MINOR*10_000 + PATCH; no artifact ships
+// the bare base (see UNIVERSAL_VERSION_SUFFIX). Per-ABI split APKs get base*10 + abiCode, which is what F-Droid's
 // `VercodeOperation: 10 * %c + N` reproduces. The two must agree exactly or
 // F-Droid will look for a versionCode our APKs do not carry.
 //
@@ -43,6 +43,21 @@ val abiVersionCodes = mapOf(
     "arm64-v8a" to 2,
     "x86_64" to 3,
 )
+
+/**
+ * versionCode suffixes outside [abiVersionCodes]: every artifact of a release is
+ * base*10 + suffix, so all channels share one ordering —
+ * universal (0) < armeabi-v7a (1) < arm64-v8a (2) < x86_64 (3) < Play bundle (9)
+ * < the next release's universal.
+ *
+ * Android refuses an update whose versionCode is lower than the installed one.
+ * Under the old bare-base scheme (universal and AAB = 10055, splits = 100551–3)
+ * a user who installed a GitHub/F-Droid split APK could never take a Play or
+ * universal-APK update again. 0.1.55's universal APK was 10055, so the first
+ * release under this scheme (base*10 ≥ 100560) still sorts above it.
+ */
+val UNIVERSAL_VERSION_SUFFIX = 0
+val PLAY_BUNDLE_VERSION_SUFFIX = 9
 
 /** True when any requested task builds an Android App Bundle (bundleRelease etc.). */
 val buildingBundle = gradle.startParameter.taskNames.any {
@@ -86,7 +101,8 @@ android {
         applicationId = "app.embeddy"
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
-        versionCode = baseVersionCode
+        versionCode = baseVersionCode * 10 +
+            if (buildingBundle) PLAY_BUNDLE_VERSION_SUFFIX else UNIVERSAL_VERSION_SUFFIX
         versionName = "$versionMajor.$versionMinor.$versionPatch"
 
         vectorDrawables {
@@ -149,6 +165,9 @@ android {
             // -PabiFilter=<abi> builds exactly one ABI. F-Droid uses this: it
             // publishes one APK per build entry and has to reproduce ours
             // byte-for-byte, so it builds each ABI separately with no universal.
+            // Lint cannot evaluate the spread and reports x86_64 as missing for
+            // ChromeOS; RELEASE_ABIS does include it.
+            //noinspection ChromeOsAbiSupport
             include(*(abiFilter?.let { arrayOf(it) } ?: RELEASE_ABIS))
             isUniversalApk = abiFilter == null
         }
@@ -204,7 +223,7 @@ androidComponents {
                 abiVersionCodes[abi]?.let { impl.versionCode.set(baseVersionCode * 10 + it) }
                 impl.outputFileName.set("Embeddy-v${versionMajor}.${versionMinor}.${versionPatch}-$abi.apk")
             } else if (name.contains("release", ignoreCase = true) || name.contains("debug", ignoreCase = true)) {
-                // Universal (or non-split) output keeps the base versionCode
+                // Universal (or non-split) output keeps defaultConfig's base*10 + 0
                 impl.outputFileName.set(
                     "Embeddy-v${versionMajor}.${versionMinor}.${versionPatch}-universal.apk"
                 )
