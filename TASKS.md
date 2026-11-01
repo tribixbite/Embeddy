@@ -408,3 +408,7 @@ RSA 4096, valid to 2053); all 4 CI secrets set; v0.1.55 APKs and `.aab` both sig
 - [x] **11.11** Crop editor closes on every new input (share intents and Start over too), keyed on the
   Loading/Idle states every input path passes through; was reset only by this screen's pickers.
 - [ ] **11.10** Device re-verification on the test phones (Pixel 8 Pro / Saga / Seeker) after this round.
+  2026-11-01: none reachable from this host 11:10–12:15 EST (host is not on 192.168.0.x). Shipped as
+  v0.1.57 on unit tests + lint only. To check on a phone: Squoosh resize/exact crop, animated WebP and
+  image-sequence input, About → privacy link, crop editor closing on new input / Start over, and the
+  cache-cleanup worker running without a foreground service.
