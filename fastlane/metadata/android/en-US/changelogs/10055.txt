@@ -1,0 +1,4 @@
+- image sequences failing on every image; ungrabbable crop corners
+- upload temp sweep race, plurals and API-level metadata keys
+- trim each joined clip and apply speed to joins
+- keep audio on speed change with pitch-preserving time-stretch
