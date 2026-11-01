@@ -1,0 +1,4 @@
+- percentage + time-remaining on every determinate phase
+- time-remaining estimate on the conversion progress card
+- video stitch export as MP4/original with per-segment volume
+- AbortSignal support for video decoding
