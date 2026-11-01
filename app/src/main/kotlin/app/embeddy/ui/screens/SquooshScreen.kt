@@ -68,6 +68,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
+import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.embeddy.R
@@ -184,7 +185,7 @@ fun SquooshScreen(viewModel: SquooshViewModel = viewModel()) {
             is SquooshState.Done -> {
                 CompressionResultCard(
                     result = s.result,
-                    inputUri = if (s.inputUri.isNotBlank()) Uri.parse(s.inputUri) else null,
+                    inputUri = if (s.inputUri.isNotBlank()) s.inputUri.toUri() else null,
                     onReset = viewModel::reset,
                 )
             }

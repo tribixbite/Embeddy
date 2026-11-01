@@ -3,7 +3,6 @@ package app.embeddy.ui.about
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -40,6 +39,7 @@ import androidx.compose.ui.res.stringArrayResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
 import app.embeddy.BuildConfig
 import app.embeddy.R
 
@@ -167,7 +167,7 @@ private fun NoticeRow(name: String, license: String, onClick: () -> Unit) {
 
 private fun openUrl(context: Context, url: String) {
     try {
-        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()))
     } catch (_: ActivityNotFoundException) {
         Toast.makeText(context, context.getString(R.string.about_no_browser), Toast.LENGTH_SHORT).show()
     }

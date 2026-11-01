@@ -7,6 +7,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.net.Uri
+import androidx.core.graphics.createBitmap
 import app.embeddy.util.BitmapLoader
 import kotlinx.coroutines.ensureActive
 import timber.log.Timber
@@ -37,7 +38,7 @@ class ImageSequenceRenderer(private val context: Context, private val workDir: F
         val first = BitmapLoader.load(context, uris.first(), MAX_CANVAS_EDGE)
             ?: throw IllegalArgumentException("The first image could not be decoded")
         val (canvasW, canvasH) = sequenceCanvas(first.bitmap.width, first.bitmap.height)
-        val canvasBitmap = Bitmap.createBitmap(canvasW, canvasH, Bitmap.Config.ARGB_8888)
+        val canvasBitmap = createBitmap(canvasW, canvasH)
         val canvas = Canvas(canvasBitmap)
         val paint = Paint(Paint.FILTER_BITMAP_FLAG)
         val entries = mutableListOf<ConcatScript.Entry>()

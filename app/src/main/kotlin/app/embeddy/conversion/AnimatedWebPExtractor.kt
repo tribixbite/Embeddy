@@ -8,6 +8,7 @@ import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
 import android.graphics.Paint
 import android.graphics.Rect
+import androidx.core.graphics.createBitmap
 import kotlinx.coroutines.ensureActive
 import timber.log.Timber
 import java.io.File
@@ -59,9 +60,7 @@ class AnimatedWebPExtractor(private val workDir: File) {
     ): Extracted? {
         val frameSet = WebPFrameSplitter.split(source) ?: return null
 
-        val canvas = Bitmap.createBitmap(
-            frameSet.width, frameSet.height, Bitmap.Config.ARGB_8888,
-        )
+        val canvas = createBitmap(frameSet.width, frameSet.height)
         val canvasDraw = Canvas(canvas)
         // Frames marked "replace" overwrite their region rather than blending,
         // which needs SRC rather than the default SRC_OVER.

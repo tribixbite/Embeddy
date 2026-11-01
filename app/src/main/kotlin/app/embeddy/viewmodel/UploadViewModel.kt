@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
+import androidx.core.net.toUri
 import app.embeddy.R
 import app.embeddy.upload.UploadEngine
 import app.embeddy.upload.UploadHost
@@ -92,7 +93,7 @@ class UploadViewModel(
     /** Start the upload process with progress tracking. */
     fun startUpload() {
         val ready = _state.value as? UploadState.Ready ?: return
-        val uri = Uri.parse(ready.uri)
+        val uri = ready.uri.toUri()
         val app = getApplication<Application>()
 
         // Pre-validate file size against host limit

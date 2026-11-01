@@ -45,6 +45,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.embeddy.R
@@ -197,13 +198,13 @@ fun ConvertScreen(
                                 }
                             } else null,
                             onInspect = {
-                                inspectViewModel.inspectFile(Uri.parse(s.inputUri))
+                                inspectViewModel.inspectFile(s.inputUri.toUri())
                                 onNavigateToInspect?.invoke()
                             },
                         )
                         if (s.durationMs > 0) {
                             VideoTrimPlayer(
-                                uri = Uri.parse(s.inputUri),
+                                uri = s.inputUri.toUri(),
                                 durationMs = s.durationMs,
                                 edit = edit,
                                 targetSizeBytes = config.targetSizeBytes,

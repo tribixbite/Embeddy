@@ -28,6 +28,7 @@ import java.util.Locale
 import java.util.UUID
 import kotlin.coroutines.resume
 import android.os.Build
+import androidx.core.net.toUri
 
 /**
  * What the Convert state machine needs from the media layer. An interface so
@@ -79,7 +80,7 @@ class ConversionEngine(private val context: Context) : ConvertEngine {
         get() = File(context.cacheDir, "temp").also { it.mkdirs() }
 
     override suspend fun describe(uri: String): SourceClip = withContext(Dispatchers.IO) {
-        val parsed = Uri.parse(uri)
+        val parsed = uri.toUri()
         // Persistable grants let the URI survive process death. Providers that
         // don't offer one (share-intent grants, GET_CONTENT) throw — non-fatal.
         try {
@@ -100,7 +101,7 @@ class ConversionEngine(private val context: Context) : ConvertEngine {
     }
 
     override suspend fun describeImage(uri: String): SourceClip = withContext(Dispatchers.IO) {
-        val parsed = Uri.parse(uri)
+        val parsed = uri.toUri()
         try {
             context.contentResolver.takePersistableUriPermission(parsed, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         } catch (_: SecurityException) {
@@ -485,13 +486,13 @@ class ConversionEngine(private val context: Context) : ConvertEngine {
     override suspend fun grabFrame(uri: String, positionMs: Long): String = withContext(Dispatchers.IO) {
         val retriever = MediaMetadataRetriever()
         try {
-            retriever.setDataSource(context, Uri.parse(uri))
+            retriever.setDataSource(context, uri.toUri())
             // OPTION_CLOSEST decodes the exact frame (not the nearest keyframe),
             // matching what the paused player shows.
             val frame = retriever.getFrameAtTime(positionMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST)
                 ?: throw IllegalStateException("No frame at ${positionMs}ms")
             val name = FileInfoUtils.sanitizeFileName(
-                FileInfoUtils.queryFileName(context, Uri.parse(uri))?.substringBeforeLast('.') ?: "frame",
+                FileInfoUtils.queryFileName(context, uri.toUri())?.substringBeforeLast('.') ?: "frame",
                 fallback = "frame",
             )
             val out = File(outputDir, "${name}_frame_${positionMs}ms.png")
@@ -520,7 +521,7 @@ class ConversionEngine(private val context: Context) : ConvertEngine {
     private fun PreparedInputs.refreshSaf(): PreparedInputs {
         val fresh = specs.mapIndexed { i, spec ->
             val uri = safClips[i] ?: return@mapIndexed spec
-            safParameter(Uri.parse(uri))?.let { spec.copy(path = it) } ?: spec
+            safParameter(uri.toUri())?.let { spec.copy(path = it) } ?: spec
         }
         return copy(specs = fresh)
     }
@@ -529,7 +530,7 @@ class ConversionEngine(private val context: Context) : ConvertEngine {
     private suspend fun PreparedInputs.copyStaged(workspace: Workspace): PreparedInputs {
         val staged = specs.mapIndexed { i, spec ->
             val uri = safClips[i] ?: return@mapIndexed spec
-            spec.copy(path = workspace.stage(Uri.parse(uri)).absolutePath)
+            spec.copy(path = workspace.stage(uri.toUri()).absolutePath)
         }
         return copy(specs = staged, safClips = emptyMap())
     }
@@ -548,7 +549,7 @@ class ConversionEngine(private val context: Context) : ConvertEngine {
     private suspend fun prepareInputs(job: ConvertJob, workspace: Workspace, previewWindowMs: Long): PreparedInputs {
         if (job.source.kind == SourceKind.IMAGE_SEQUENCE) {
             val rendered = ImageSequenceRenderer(context, workspace.dir("images"))
-                .render(job.source.clips.map { Uri.parse(it.uri) }, job.edit.frameDurationMs)
+                .render(job.source.clips.map { it.uri.toUri() }, job.edit.frameDurationMs)
             return PreparedInputs(
                 listOf(
                     InputSpec(
@@ -566,7 +567,7 @@ class ConversionEngine(private val context: Context) : ConvertEngine {
         val safClips = mutableMapOf<Int, String>()
         var loopCount: Int? = null
         job.source.clips.forEachIndexed { index, clip ->
-            val uri = Uri.parse(clip.uri)
+            val uri = clip.uri.toUri()
             val base = InputSpec(
                 path = "",
                 hasAudio = clip.hasAudio,

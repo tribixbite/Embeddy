@@ -2,12 +2,11 @@ package app.embeddy.squoosh
 
 import android.content.Context
 import android.graphics.Bitmap
-
 import android.graphics.Canvas
-
 import android.graphics.Rect
 import android.net.Uri
 import androidx.exifinterface.media.ExifInterface
+import androidx.core.graphics.scale
 import app.embeddy.util.BitmapLoader
 import app.embeddy.util.FileInfoUtils
 import app.embeddy.util.deleteStaleEntries
@@ -96,7 +95,7 @@ class SquooshEngine(private val context: Context) {
             config.exactWidth > 0 -> {
                 val scale = config.exactWidth.toFloat() / bitmap.width
                 val newH = (bitmap.height * scale).toInt()
-                Bitmap.createScaledBitmap(bitmap, config.exactWidth, newH, true).also {
+                bitmap.scale(config.exactWidth, newH).also {
                     if (it !== bitmap) bitmap.recycle()
                 }
             }
@@ -104,7 +103,7 @@ class SquooshEngine(private val context: Context) {
             config.exactHeight > 0 -> {
                 val scale = config.exactHeight.toFloat() / bitmap.height
                 val newW = (bitmap.width * scale).toInt()
-                Bitmap.createScaledBitmap(bitmap, newW, config.exactHeight, true).also {
+                bitmap.scale(newW, config.exactHeight).also {
                     if (it !== bitmap) bitmap.recycle()
                 }
             }
@@ -117,7 +116,7 @@ class SquooshEngine(private val context: Context) {
                 )
                 val newW = (bitmap.width * scale).toInt()
                 val newH = (bitmap.height * scale).toInt()
-                Bitmap.createScaledBitmap(bitmap, newW, newH, true).also {
+                bitmap.scale(newW, newH).also {
                     if (it !== bitmap) bitmap.recycle()
                 }
             }
@@ -174,7 +173,7 @@ class SquooshEngine(private val context: Context) {
      */
     private fun centerCrop(source: Bitmap, targetW: Int, targetH: Int): Bitmap {
         val g = centerCropGeometry(source.width, source.height, targetW, targetH)
-        val scaled = Bitmap.createScaledBitmap(source, g.scaledWidth, g.scaledHeight, true)
+        val scaled = source.scale(g.scaledWidth, g.scaledHeight)
         if (scaled !== source) source.recycle()
         val cropped = Bitmap.createBitmap(scaled, g.cropX, g.cropY, targetW, targetH)
         if (cropped !== scaled) scaled.recycle()

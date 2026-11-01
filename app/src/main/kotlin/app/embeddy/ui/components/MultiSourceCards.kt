@@ -1,6 +1,5 @@
 package app.embeddy.ui.components
 
-import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -50,6 +49,7 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import kotlin.math.roundToInt
 import androidx.compose.ui.res.pluralStringResource
+import androidx.core.net.toUri
 
 /**
  * Ordered clip list for joining separate videos: each row has a thumbnail,
@@ -210,7 +210,7 @@ private fun ClipRow(
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
         AsyncImage(
             // Coil's VideoFrameDecoder renders a frame for video URIs too.
-            model = ImageRequest.Builder(context).data(Uri.parse(clip.uri)).crossfade(true).build(),
+            model = ImageRequest.Builder(context).data(clip.uri.toUri()).crossfade(true).build(),
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = Modifier

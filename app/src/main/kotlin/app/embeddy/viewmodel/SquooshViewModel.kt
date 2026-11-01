@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
+import androidx.core.net.toUri
 import app.embeddy.squoosh.OutputFormat
 import app.embeddy.squoosh.SquooshConfig
 import app.embeddy.squoosh.SquooshEngine
@@ -62,7 +63,7 @@ class SquooshViewModel(
     /** Start compression — cancels any prior in-flight job. */
     fun compress() {
         val ready = _state.value as? SquooshState.Ready ?: return
-        val uri = Uri.parse(ready.uri)
+        val uri = ready.uri.toUri()
 
         compressionJob?.cancel()
         _state.value = SquooshState.Compressing(ready.fileName)

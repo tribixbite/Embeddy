@@ -36,9 +36,9 @@ import java.util.Locale
 @Composable
 fun ConversionProgressCard(
     state: ConversionState.Converting,
-    targetSizeBytes: Long = 0,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
+    targetSizeBytes: Long = 0,
     /** Optional label override — defaults to "Converting…" string resource. */
     label: String? = null,
 ) {

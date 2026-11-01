@@ -59,6 +59,7 @@ fun SettingsPanel(
     config: ConversionConfig,
     onPresetSelected: (Preset) -> Unit,
     onConfigChanged: (ConversionConfig.() -> ConversionConfig) -> Unit,
+    modifier: Modifier = Modifier,
     onPreview: (() -> Unit)? = null,
     /**
      * Output formats the loaded input can produce; the picker is shown when
@@ -67,7 +68,6 @@ fun SettingsPanel(
     availableFormats: List<OutputMediaFormat> = emptyList(),
     /** False hides the preview button (audio-only output has nothing to preview). */
     previewEnabled: Boolean = true,
-    modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
     var advancedExpanded by remember { mutableStateOf(false) }
