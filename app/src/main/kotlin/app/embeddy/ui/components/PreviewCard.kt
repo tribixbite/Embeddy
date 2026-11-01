@@ -32,6 +32,7 @@ import app.embeddy.R
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import java.io.File
+import java.util.Locale
 
 /** Displays a generated preview clip with animated WebP playback and dismiss button. */
 @Composable
@@ -43,7 +44,7 @@ fun PreviewCard(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    val sizeMb = String.format("%.2f MB", fileSizeBytes / 1_000_000.0)
+    val sizeMb = String.format(Locale.getDefault(), "%.2f MB", fileSizeBytes / 1_000_000.0)
 
     Card(
         modifier = modifier.fillMaxWidth(),

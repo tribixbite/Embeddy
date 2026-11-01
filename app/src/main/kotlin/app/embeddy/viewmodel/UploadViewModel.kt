@@ -41,6 +41,15 @@ class UploadViewModel(
 
     private var uploadJob: Job? = null
 
+    /**
+     * Sweeps temp copies left behind by a process that died mid-upload. Runs
+     * once per ViewModel, and every upload waits for it first: sweeping the
+     * directory while an upload is staging into it would delete that upload's
+     * file mid-transfer. (Normal uploads delete their own temp file, including
+     * on cancel, so nothing else needs sweeping.)
+     */
+    private val leftoverCleanup: Job = viewModelScope.launch(Dispatchers.IO) { engine.cleanup() }
+
     /** The Ready state the current upload started from (Cancel returns to it). */
     private var uploadingFrom: UploadState.Ready? = null
 
@@ -101,6 +110,7 @@ class UploadViewModel(
         _state.value = UploadState.Uploading(ready.fileName, progress = 0f)
         uploadJob = viewModelScope.launch {
             try {
+                leftoverCleanup.join()
                 val result = engine.upload(
                     uri = uri,
                     host = _host.value,
@@ -136,6 +146,5 @@ class UploadViewModel(
         uploadJob = null
         _state.value = UploadState.Idle
         pickedFile.clear()
-        viewModelScope.launch(Dispatchers.IO) { engine.cleanup() }
     }
 }

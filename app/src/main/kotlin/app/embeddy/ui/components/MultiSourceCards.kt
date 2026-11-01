@@ -49,6 +49,7 @@ import app.embeddy.util.formatClipTime
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import kotlin.math.roundToInt
+import androidx.compose.ui.res.pluralStringResource
 
 /**
  * Ordered clip list for joining separate videos: each row has a thumbnail,
@@ -67,7 +68,7 @@ fun JoinClipsCard(
 ) {
     val totalMs = clips.indices.sumOf { edit.clipRange(it, clips[it].durationMs).durationMs }
     SourceListCard(
-        title = stringResource(R.string.join_title, clips.size),
+        title = pluralStringResource(R.plurals.join_title, clips.size, clips.size),
         summary = stringResource(R.string.join_total, formatClipTime(totalMs)),
         addLabel = stringResource(R.string.join_add_clips),
         onAdd = onAddClips,
@@ -124,7 +125,7 @@ fun ImageSequenceCard(
     modifier: Modifier = Modifier,
 ) {
     SourceListCard(
-        title = stringResource(R.string.sequence_title, images.size),
+        title = pluralStringResource(R.plurals.sequence_title, images.size, images.size),
         summary = stringResource(R.string.join_total, formatClipTime(frameDurationMs.toLong() * images.size)),
         addLabel = stringResource(R.string.sequence_add_images),
         onAdd = onAddImages,

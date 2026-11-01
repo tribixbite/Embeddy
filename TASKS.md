@@ -355,3 +355,15 @@ Pushed phase 9 (merged the CI's v0.1.53 pin commit, no rebase). Worker deployed
   whole join with pitch kept. Crop/rotate stay source-only (defined against one frame). Chromium e2e:
   3 s source + 4 s clip trimmed to 1–3 s at 2× → 2.52 s WebM, audio 440 Hz then 660 Hz; TrimControls
   ids unique per instance.
+
+### Android
+- [x] **10.4** Upload: Start over no longer sweeps `upload_temp/` in the background (it could delete
+  the next upload's staged copy mid-transfer). Leftovers from a killed process are swept once per
+  ViewModel, and uploads wait for that sweep.
+- [x] **10.5** Lint follow-ups: plurals for "Joining N clips" / "N images" (read "1 clips");
+  API-28/31 MediaMetadataRetriever keys guarded at their real API levels (sample rate / bit depth
+  were queried on 28-30 where the keys don't exist); display-only String.format calls take the
+  user locale explicitly.
+
+### Store
+- [x] **10.6** Feature graphic set in Inter (site typeface) via a private fontconfig; was DejaVu.

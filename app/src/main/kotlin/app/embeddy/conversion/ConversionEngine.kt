@@ -27,6 +27,7 @@ import java.io.InputStream
 import java.util.Locale
 import java.util.UUID
 import kotlin.coroutines.resume
+import android.os.Build
 
 /**
  * What the Convert state machine needs from the media layer. An interface so
@@ -248,7 +249,10 @@ class ConversionEngine(private val context: Context) : ConvertEngine {
                 bitrate = int(MediaMetadataRetriever.METADATA_KEY_BITRATE),
                 rotation = rotation,
                 mimeType = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_MIMETYPE) ?: "",
-                frameCount = int(MediaMetadataRetriever.METADATA_KEY_VIDEO_FRAME_COUNT),
+                // Key added in API 28; older devices report no count (0 = unknown)
+                frameCount = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    int(MediaMetadataRetriever.METADATA_KEY_VIDEO_FRAME_COUNT)
+                } else 0,
                 hasAudio = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO) == "yes",
             )
         } finally {

@@ -81,6 +81,7 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import java.io.File
 import kotlin.math.roundToInt
+import java.util.Locale
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -649,7 +650,7 @@ private fun CompressionResultCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            val savings = String.format("%.1f%%", result.savingsPercent)
+            val savings = String.format(Locale.getDefault(), "%.1f%%", result.savingsPercent)
             val savingsColor = if (result.savingsPercent > 0) {
                 MaterialTheme.colorScheme.primary
             } else {

@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import app.embeddy.R
 import app.embeddy.conversion.ConversionState
 import kotlinx.coroutines.delay
+import java.util.Locale
 
 @Composable
 fun ConversionProgressCard(
@@ -96,7 +97,7 @@ fun ConversionProgressCard(
             Spacer(Modifier.height(4.dp))
 
             val attemptText = if (targetSizeBytes > 0) {
-                val mb = String.format("%.1f MB", targetSizeBytes / 1_000_000.0)
+                val mb = String.format(Locale.getDefault(), "%.1f MB", targetSizeBytes / 1_000_000.0)
                 stringResource(R.string.attempt_quality_target, state.currentQuality, mb)
             } else {
                 stringResource(R.string.attempt_quality, state.currentQuality)

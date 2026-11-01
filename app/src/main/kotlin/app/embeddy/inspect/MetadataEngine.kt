@@ -87,7 +87,9 @@ class MetadataEngine {
             extract(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH, "Video Width")
             extract(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT, "Video Height")
             extract(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION, "Rotation")
-            extract(MediaMetadataRetriever.METADATA_KEY_VIDEO_FRAME_COUNT, "Frame Count")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                extract(MediaMetadataRetriever.METADATA_KEY_VIDEO_FRAME_COUNT, "Frame Count")
+            }
 
             // Duration
             retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
@@ -121,11 +123,14 @@ class MetadataEngine {
             extract(MediaMetadataRetriever.METADATA_KEY_WRITER, "Writer")
             extract(MediaMetadataRetriever.METADATA_KEY_LOCATION, "Location")
 
-            // Codec info (API 28+)
+            // Image count: API 28+. Sample rate / bit depth keys only exist from
+            // API 31 — on 28-30 they were silently unknown keys.
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                extract(MediaMetadataRetriever.METADATA_KEY_IMAGE_COUNT, "Image Count")
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 extract(MediaMetadataRetriever.METADATA_KEY_SAMPLERATE, "Sample Rate")
                 extract(MediaMetadataRetriever.METADATA_KEY_BITS_PER_SAMPLE, "Bits Per Sample")
-                extract(MediaMetadataRetriever.METADATA_KEY_IMAGE_COUNT, "Image Count")
             }
 
             // Capture framerate

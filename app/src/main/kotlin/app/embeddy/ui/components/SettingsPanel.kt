@@ -51,6 +51,7 @@ import app.embeddy.conversion.DitherMode
 import app.embeddy.conversion.OutputMediaFormat
 import app.embeddy.conversion.Preset
 import kotlin.math.roundToInt
+import java.util.Locale
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -246,7 +247,7 @@ fun SettingsPanel(
                         steps = 0,
                         valueLabel = if (config.targetSizeBytes == 0L) {
                             stringResource(R.string.off_label)
-                        } else String.format("%.1f MB", sizeMb),
+                        } else String.format(Locale.getDefault(), "%.1f MB", sizeMb),
                         onValueChange = { mb ->
                             // Snap values below 0.2 MB to 0 (disabled)
                             val bytes = if (mb < 0.2f) 0L else (mb * 1_000_000).toLong()
