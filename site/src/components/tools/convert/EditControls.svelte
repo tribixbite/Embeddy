@@ -144,7 +144,6 @@
       display={`${options.speed}×`}
       minHint="Slower"
       maxHint="Faster"
-      help={videoOutput && options.speed !== 1 ? "Audio is removed when speed changes" : undefined}
     />
   {/if}
 

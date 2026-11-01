@@ -335,3 +335,16 @@ file + edit after reinstall; About sheet; edge-to-edge sheets.
 Not yet verified on device: image sequence, reverse, crop overlay, Upload cancel (would publish to a
 public host if cancel failed), API 26-28 save path, real share-sheet intents
 from Photos/Files (adb-issued grants do not work without READ_MEDIA_*).
+
+## Phase 10: 2026-11-01 Follow-ups after first push
+
+Pushed phase 9 (merged the CI's v0.1.53 pin commit, no rebase). Worker deployed
+(version be93b934); SSRF probes to 169.254.169.254 and [::ffff:127.0.0.1] → 403.
+
+### Web
+- [x] **10.1** Speed changes keep audio in MP4/WebM export: streaming WSOLA time-stretch
+  (`lib/convert/time-stretch.ts`, pitch preserved like FFmpeg atempo) via Mediabunny's
+  `audio.process`. Verified in headless Chromium: 3 s clip → 1.51 s @2x / 6.01 s @0.5x,
+  440 Hz tone stays 440 Hz, loudness unchanged; trimmed 2 s window → 1.02 s / 4.01 s.
+- [ ] **10.2** Squoosh encode off the main thread (Web Worker)
+- [ ] **10.3** Web join: per-clip trim/crop/rotate for added clips

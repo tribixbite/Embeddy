@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { evenFloor, qualityLevel, toMediabunnyGeometry } from "./video-export";
+import { evenFloor, qualityLevel, speedAudioProcessor, toMediabunnyGeometry } from "./video-export";
 import type { Rotation } from "./prepare-frame";
 
 const W = 640;
@@ -72,5 +72,82 @@ describe("toMediabunnyGeometry — crop and size", () => {
 
   test("qualityLevel maps the slider onto five levels", () => {
     expect([1, 30, 60, 80, 95].map(qualityLevel)).toEqual(["very-low", "low", "medium", "high", "very-high"]);
+  });
+});
+
+/** Minimal stand-in for Mediabunny's AudioSample (planar f32 only) */
+class FakeAudioSample {
+  readonly data: Float32Array;
+  readonly format: string;
+  readonly numberOfChannels: number;
+  readonly sampleRate: number;
+  readonly timestamp: number;
+  readonly numberOfFrames: number;
+  constructor(init: { data: Float32Array; format: string; numberOfChannels: number; sampleRate: number; timestamp: number }) {
+    this.data = init.data;
+    this.format = init.format;
+    this.numberOfChannels = init.numberOfChannels;
+    this.sampleRate = init.sampleRate;
+    this.timestamp = init.timestamp;
+    this.numberOfFrames = init.data.length / init.numberOfChannels;
+  }
+  copyTo(dest: Float32Array, opts: { planeIndex: number; format: string }): void {
+    expect(opts.format).toBe("f32-planar");
+    const n = this.numberOfFrames;
+    dest.set(this.data.subarray(opts.planeIndex * n, (opts.planeIndex + 1) * n));
+  }
+}
+
+describe("speedAudioProcessor", () => {
+  const SR = 48_000;
+  const fakeMb = { AudioSample: FakeAudioSample } as unknown as typeof import("mediabunny");
+
+  /** Feed `seconds` of stereo audio in 1024-frame samples; collect the output */
+  function run(speed: number, seconds: number) {
+    const process = speedAudioProcessor(fakeMb, speed, seconds);
+    const total = Math.round(seconds * SR);
+    const outs: FakeAudioSample[] = [];
+    for (let at = 0; at < total; at += 1024) {
+      const n = Math.min(1024, total - at);
+      const data = new Float32Array(n * 2);
+      for (let i = 0; i < n; i++) {
+        data[i] = Math.sin(((at + i) * 2 * Math.PI * 440) / SR) * 0.5; // left
+        data[n + i] = 0; // right: silence
+      }
+      const sample = new FakeAudioSample({ data, format: "f32-planar", numberOfChannels: 2, sampleRate: SR, timestamp: at / SR });
+      const out = process(sample as never) as unknown as FakeAudioSample | null;
+      if (out) outs.push(out);
+    }
+    return { outs, total };
+  }
+
+  test.each([0.5, 2])("emits round(input / speed) frames with contiguous timestamps at %p×", (speed) => {
+    const { outs, total } = run(speed, 1);
+    const frames = outs.reduce((n, o) => n + o.numberOfFrames, 0);
+    expect(frames).toBe(Math.round(total / speed));
+    let expectedTs = 0;
+    for (const o of outs) {
+      expect(o.timestamp).toBeCloseTo(expectedTs, 9);
+      expect(o.sampleRate).toBe(SR);
+      expectedTs += o.numberOfFrames / SR;
+    }
+  });
+
+  test("keeps channels planar and separate", () => {
+    const { outs } = run(2, 0.5);
+    for (const o of outs) {
+      const n = o.numberOfFrames;
+      expect(o.data.subarray(n).every((v) => v === 0)).toBe(true);
+    }
+    expect(outs.some((o) => o.data.subarray(0, o.numberOfFrames).some((v) => v !== 0))).toBe(true);
+  });
+
+  test("ignores samples after the window has been flushed", () => {
+    const process = speedAudioProcessor(fakeMb, 2, 0.1);
+    const data = new Float32Array(SR * 0.1 * 2);
+    const first = new FakeAudioSample({ data, format: "f32-planar", numberOfChannels: 2, sampleRate: SR, timestamp: 0 });
+    expect(process(first as never)).not.toBeNull();
+    const late = new FakeAudioSample({ data, format: "f32-planar", numberOfChannels: 2, sampleRate: SR, timestamp: 0.1 });
+    expect(process(late as never)).toBeNull();
   });
 });

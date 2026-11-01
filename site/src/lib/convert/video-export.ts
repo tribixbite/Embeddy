@@ -18,6 +18,7 @@ import { cropRectToPixels } from "./encoder";
 import { planFrame, transformFromOptions, type Rotation } from "./prepare-frame";
 import { clampSpeed, clampTrim } from "./timeline";
 import { throwIfAborted } from "./abort";
+import { WsolaStretcher, type PlanarAudio } from "./time-stretch";
 
 /** Container/codec preferences per output format */
 export const VIDEO_FORMATS = {
@@ -175,11 +176,70 @@ export async function canExportVideo(format: VideoOutputFormat, width = 640, hei
   }
 }
 
+type Mediabunny = typeof import("mediabunny");
+type MbAudioSample = InstanceType<Mediabunny["AudioSample"]>;
+
+/**
+ * Build a Conversion `audio.process` hook that changes speed without
+ * changing pitch (WSOLA, see time-stretch.ts) — the audio counterpart of
+ * re-timing video frames by `1 / speed`.
+ *
+ * Mediabunny gives the hook no end-of-stream call, so the stretcher is
+ * flushed when a sample reaches `durationS` (the trimmed window length; the
+ * Conversion rebases timestamps to start at 0). If the audio track ends
+ * before the window does, the last ~20 ms held in the overlap buffer is not
+ * emitted — inaudible next to the video still running on.
+ *
+ * @param durationS - Trimmed input duration in seconds
+ */
+export function speedAudioProcessor(
+  mb: Mediabunny,
+  speed: number,
+  durationS: number,
+): (sample: MbAudioSample) => MbAudioSample | null {
+  let stretcher: WsolaStretcher | null = null;
+  let startS = 0;
+  let emitted = 0;
+  let done = false;
+  return (sample) => {
+    if (done) return null;
+    const { sampleRate, numberOfChannels: channels, numberOfFrames: frames } = sample;
+    if (!stretcher) {
+      stretcher = new WsolaStretcher(speed, sampleRate, channels);
+      startS = sample.timestamp;
+    }
+    const planes: PlanarAudio = [];
+    for (let c = 0; c < channels; c++) {
+      const plane = new Float32Array(frames);
+      sample.copyTo(plane, { planeIndex: c, format: "f32-planar" });
+      planes.push(plane);
+    }
+    let out = stretcher.push(planes);
+    // Half a sample of slack absorbs rounding in the rebased timestamps
+    if (sample.timestamp + frames / sampleRate >= durationS - 0.5 / sampleRate) {
+      const tail = stretcher.flush();
+      out = out.map((plane, c) => {
+        const joined = new Float32Array(plane.length + tail[c]!.length);
+        joined.set(plane);
+        joined.set(tail[c]!, plane.length);
+        return joined;
+      });
+      done = true;
+    }
+    const n = out[0]!.length;
+    if (n === 0) return null;
+    const data = new Float32Array(n * channels);
+    out.forEach((plane, c) => data.set(plane, c * n));
+    const timestamp = startS / speed + emitted / sampleRate;
+    emitted += n;
+    return new mb.AudioSample({ data, format: "f32-planar", numberOfChannels: channels, sampleRate, timestamp });
+  };
+}
+
 /**
  * Re-encode one video with trim, crop, rotate/flip, resize, speed and mute.
- * Audio is dropped when muted, when speed ≠ 1 (re-timing audio needs pitch-
- * corrected resampling — reported as a notice), or when no audio codec is
- * encodable here.
+ * Speed changes keep the audio's pitch ({@link speedAudioProcessor}). Audio
+ * is dropped when muted or when no audio codec is encodable here.
  *
  * @param signal - Aborting cancels the conversion and rejects with AbortError
  */
@@ -209,11 +269,7 @@ export async function exportVideo(
   });
   if (!videoCodec) throw new Error(`This browser can't encode ${format.toUpperCase()} video`);
 
-  let dropAudio = opts.muted;
-  if (!dropAudio && speed !== 1) {
-    dropAudio = true;
-    notices.push("Audio was removed: changing speed doesn't re-time audio yet.");
-  }
+  const dropAudio = opts.muted;
   const audioCodec = dropAudio ? null : await mb.getFirstEncodableAudioCodec([...spec.audioCodecs]);
 
   const input = new mb.Input({ source: new mb.BlobSource(file), formats: mb.ALL_FORMATS });
@@ -246,7 +302,14 @@ export async function exportVideo(
               return sample;
             },
     },
-    audio: dropAudio || !audioCodec ? { discard: true } : { codec: audioCodec, quality },
+    audio:
+      dropAudio || !audioCodec
+        ? { discard: true }
+        : {
+            codec: audioCodec,
+            quality,
+            process: speed === 1 ? undefined : speedAudioProcessor(mb, speed, (trim.endMs - trim.startMs) / 1000),
+          },
   });
 
   if (!dropAudio && !audioCodec && (await input.getPrimaryAudioTrack())) {
