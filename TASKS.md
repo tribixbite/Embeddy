@@ -375,3 +375,34 @@ Pushed phase 9 (merged the CI's v0.1.53 pin commit, no rebase). Worker deployed
 
 ### Store
 - [x] **10.6** Feature graphic set in Inter (site typeface) via a private fontconfig; was DejaVu.
+
+## Phase 11: 2026-11-01 Play submission prep, lint, docs
+
+Pushed phase 10 as v0.1.55. Signing key confirmed: `~/git/embeddy-release.jks` (alias `embeddy`,
+RSA 4096, valid to 2053); all 4 CI secrets set; v0.1.55 APKs and `.aab` both signed with SHA-256
+`612c62…94fe` (= F-Droid `AllowedAPKSigningKeys`).
+
+- [x] **11.1** One versionCode ordering across channels: every artifact is `base*10 + N` — universal 0,
+  armeabi-v7a 1, arm64-v8a 2, x86_64 3, Play bundle 9. Before, the universal APK and the Play bundle
+  carried the bare base (10055) below the split APKs (100551–3), so a GitHub/F-Droid split install
+  could never take a Play update.
+- [x] **11.2** CI writes the F-Droid changelog for each split versionCode (fdroidserver matches the exact
+  code; only a base-code file existed, which no F-Droid build uses), capped at F-Droid's 500 chars.
+- [x] **11.3** WorkManager's unused `SystemForegroundService` + `FOREGROUND_SERVICE` stripped from the
+  merged manifest (one fewer Play policy declaration).
+- [x] **11.4** Lint: KTX `toUri`/`createBitmap`/`scale` (21), Compose modifier parameter order (2),
+  `tools:targetApi` for `enableOnBackInvokedCallback`, configure-flag dashes, ChromeOS ABI false
+  positive (lint can't evaluate the spread). `mipmap-anydpi-v26` kept — merging it breaks the native
+  aapt2's resource linking; ignored in `app/lint.xml`.
+- [x] **11.5** `docs/play-store.md` rewritten as the single owner checklist (key backup, account,
+  PEPK key upload, bundle download, listing, app content, Data safety, closed test, production) with
+  commands. `scripts/play-listing-text.py` prints paste-ready listing text (unwraps the hard-wrapped
+  fastlane file, checks Play limits).
+- [x] **11.6** README rewritten for the editor scope; GitHub repo description, https homepage and
+  topics updated; F-Droid README signing section marked done.
+- [ ] **11.7** Dependency upgrades lint reports (Compose BOM 2024.12→2026.09, Kotlin 2.0→2.4, AGP 8.13→9.5,
+  Media3 1.5→1.11, lifecycle, navigation, work…). Deliberately deferred past the first Play
+  submission: large surface, gradle.lockfile + F-Droid reproducibility churn.
+- [ ] **11.8** Separate Play upload key (TODO in `release.yml`) — optional, owner decision.
+- [ ] **11.9** Point the F-Droid recipe at the first release with per-split changelogs (v0.1.56+).
+- [ ] **11.10** Device re-verification on the test phones (Pixel 8 Pro / Saga / Seeker) after this round.

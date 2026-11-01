@@ -61,8 +61,11 @@ which is exactly what the recipe does. If you change one side, change the other.
 
 ### versionCodes
 
-Base is `MAJOR*1000000 + MINOR*10000 + PATCH`; each split APK gets `base*10 + N`
-where N is 1 (armeabi-v7a), 2 (arm64-v8a), 3 (x86_64). `VercodeOperation` in the
+Base is `MAJOR*1000000 + MINOR*10000 + PATCH`; every artifact gets `base*10 + N`
+where N is 0 (universal APK), 1 (armeabi-v7a), 2 (arm64-v8a), 3 (x86_64) or
+9 (Play bundle), so a user can move between GitHub, F-Droid and Play without
+hitting a lower versionCode. Releases up to 0.1.55 shipped the universal APK and
+Play bundle with the bare base code. `VercodeOperation` in the
 recipe reproduces that arithmetic, so the two must stay in sync. The build fails
 if MINOR reaches 100 or PATCH reaches 10000, because that would collide with the
 next place value and could emit a versionCode below one already published.
@@ -160,8 +163,10 @@ the app is in, deriving each ABI's versionCode via `VercodeOperation`.
 
 Before opening the merge request, set the three `Builds` entries,
 `CurrentVersion` and `CurrentVersionCode` to the newest tag, and make sure
-`fastlane/metadata/android/en-US/changelogs/<versionCode>.txt` exists for it
-(CI generates that file automatically — it uses the *base* versionCode).
+`fastlane/metadata/android/en-US/changelogs/<versionCode>.txt` exists for each
+of its three split versionCodes (CI writes all three, identical, in the version-pin
+commit; fdroidserver matches the build's exact versionCode). Releases up to
+0.1.55 have only a base-code file, so point the recipe at a later tag.
 
 `release.yml` only cuts a release when something affecting the APK changes
 (`app/**`, `gradle/**`, the build scripts, `version.properties`), so tags track
@@ -189,77 +194,16 @@ left as a human step — it posts publicly under your account.
 
 ## Signing
 
-**This does not affect F-Droid** — F-Droid signs with its own key, so its builds
-are self-consistent. It does affect the GitHub releases.
+Done. The release key was created with `scripts/generate-release-key.sh`
+(2026-08-12, kept outside the repo at `../embeddy-release.jks`), the four
+`KEYSTORE_*`/`KEY_*` secrets are set, and `release.yml` decodes and verifies the
+keystore before building. Releases are signed with the certificate pinned
+in `AllowedAPKSigningKeys` (checked on v0.1.55's APKs and bundle, 2026-11-01). The Play bundle is signed with
+the same key; see [`docs/play-store.md`](../docs/play-store.md) for backing it
+up and handing it to Play App Signing.
 
-`app/build.gradle.kts` falls back to the debug signing config when
-`KEYSTORE_PATH` is unset, and `release.yml` sets no keystore secrets. The debug
-keystore is generated per machine, so every CI run signs with a *different* key.
-Confirmed on device: installing `v0.1.44` over `v0.1.40` fails with
-
-```
-INSTALL_FAILED_UPDATE_INCOMPATIBLE: Existing package app.embeddy
-signatures do not match newer version; ignoring!
-```
-
-So nobody can update in place from a GitHub release — they have to uninstall
-first and lose their settings. The build now prints a loud warning when it takes
-this path, but the real fix needs a stable key, which only the maintainer can
-create:
-
-1. Generate a release keystore and keep it somewhere safe and backed up. Losing
-   it means never being able to update the app in place again.
-
-   ```sh
-   scripts/generate-release-key.sh
-   ```
-
-   It writes to `../embeddy-release.jks` (outside the repo, so it cannot be
-   committed), refuses to overwrite an existing keystore, and never takes a
-   password as an argument — `keytool` prompts, so nothing lands in your shell
-   history or the process table. It then prints the exact `gh secret set`
-   commands for step 2.
-
-2. Add repository secrets: `KEYSTORE_BASE64` (`base64 -w0 embeddy-release.jks`),
-   `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`.
-
-   **Run these from a real terminal.** `gh secret set NAME` with no `--body`
-   reads the value from stdin, so running it anywhere without a TTY — a script,
-   a CI step, an editor's shell integration — silently stores an *empty*
-   string. The secret then appears in `gh secret list` and looks fine, but
-   arrives at the workflow blank. In a step's env dump a non-empty secret shows
-   as `***` and an empty one shows as nothing, which is the quickest way to
-   tell them apart.
-
-   To set one non-interactively without putting the value in shell history:
-
-   ```sh
-   read -rs PW && printf '%s' "$PW" | gh secret set KEYSTORE_PASSWORD && unset PW
-   ```
-
-3. In `release.yml`, before the build step, materialise it and point the existing
-   env vars at it:
-
-   ```yaml
-   - name: Decode keystore
-     env:
-       KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-     run: echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
-   ```
-
-   then add to the build step's `env:`
-
-   ```yaml
-   KEYSTORE_PATH: ${{ runner.temp }}/release.jks
-   KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-   KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-   KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-   ```
-
-`build.gradle.kts` already reads all four, so no build-script change is needed.
-
-Note the first properly-signed release will still be uninstall-and-reinstall for
-existing users, since their installed copy carries a throwaway debug key.
+`app/build.gradle.kts` still falls back to the per-machine debug key when
+`KEYSTORE_PATH` is unset (local builds) and prints a warning when it does.
 
 ## Open item for the maintainer
 

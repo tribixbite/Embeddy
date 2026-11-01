@@ -15,9 +15,13 @@
 
 # Embeddy
 
-**The Swiss-army knife for embeddable media on Android.**
+**A quick video editor and embed-media toolkit for Android and the web.**
 
-Convert videos and GIFs to platform-ready animated WebP, compress images to WebP/JPEG/PNG/AVIF, inspect Open Graph and social embed metadata, and upload files to anonymous hosts — all from one app with a clean Material 3 dark-mode UI.
+Trim, join, speed up, crop and convert clips; turn photos into an animation;
+and get images and video into the size and format that chat apps, forums and
+social sites accept. Everything runs on the device — nothing is uploaded unless
+you use the Upload tool. The same tools run in the browser at
+[embeddy.link](https://embeddy.link/).
 
 ## Download
 
@@ -38,23 +42,33 @@ Every push to `main` triggers a CI build that produces split-ABI APKs:
 
 ## Features
 
-### Convert — Animated WebP from video, GIF or animated WebP
+### Edit — trim, join and re-time video
 
-- **Adaptive quality** algorithm — starts at target quality, steps down until file fits the size limit
-- **Platform presets** with tuned parameters:
+- Trim to a range, or cut several segments and stitch them together
+- Join separate videos in any order, each with its own trim
+- Speed 0.25×–4× (audio keeps its pitch), rotate, flip, crop and reverse
+- Per-segment volume, mute, or extract the audio track as M4A
+- Grab a still frame and send it to Squoosh
+- Turn a set of photos into an animation or a video
+- Accepts shared media via Android intent filters (single or multiple files)
+
+### Convert — MP4, WebP or GIF under a size limit
+
+- Export MP4, the original container, animated WebP or GIF
+- **Adaptive quality** for WebP/GIF — starts at target quality, steps down until the file fits;
+  for MP4 the bitrate is computed from the size target
+- **Platform presets**:
   - **Discord** — 10 MB / 720p / 12 fps
   - **Telegram** — 256 KB / 512px / 30 fps (sticker-ready)
   - **Slack** — 5 MB / 640px / 12 fps
   - **Custom** — full manual control
 - **Animated WebP input** — frames are decoded in-app by splitting the RIFF
   container, because the bundled FFmpeg cannot demux the format
-- Trim to a range, or stitch several segments together
 - Lanczos downscaling, optional text sharpening (`unsharp` filter), denoise, dithering
 - Exact output dimensions with centre-crop, or scale to a maximum
 - 3-second preview clip before committing to a full encode
-- Real-time progress with quality-step feedback
+- Location and other metadata removed from exported video
 - Share/Save output directly from the result card
-- Accepts shared media via Android intent filters (video, GIF, animated WebP)
 
 ### Inspect — Social embed metadata viewer
 
@@ -85,24 +99,21 @@ Every push to `main` triggers a CI build that produces split-ABI APKs:
 
 ```
 app.embeddy
-├── conversion/          # FFmpeg-kit animated WebP pipeline
-│   ├── ConversionEngine # Adaptive quality loop with callbackFlow
-│   ├── ConversionConfig # Mutable settings from presets
-│   └── Preset           # Discord, Telegram, Slack, Custom
-├── inspect/
-│   └── MetadataEngine   # Jsoup-based OG/Twitter/meta parser
-├── squoosh/
-│   └── SquooshEngine    # Bitmap.compress + HeifCoder AVIF
-├── upload/
-│   └── UploadEngine     # Multipart POST with ProgressOutputStream
-├── viewmodel/           # AndroidViewModel per tab
-├── navigation/
-│   ├── EmbeddyTab       # Tab enum with Material icons
-│   └── AppScaffold      # Scaffold + NavigationBar + AnimatedContent
+├── conversion/   # ConversionEngine (FFmpeg-kit, adaptive quality), EditSpec, FfmpegCommands,
+│                 # ConcatScript (joins), ImageSequenceRenderer, WebP RIFF frame splitting
+├── inspect/      # MetadataEngine — Jsoup OG/Twitter parser + local EXIF/codec probe
+├── squoosh/      # SquooshEngine — Bitmap.compress + HeifCoder AVIF
+├── upload/       # UploadEngine — streamed multipart POST with progress
+├── util/         # URI staging, settings DataStore, size estimation, temp cleanup worker
+├── viewmodel/    # ConvertController + one ViewModel per tab
+├── navigation/   # EmbeddyTab, AppScaffold
 └── ui/
-    ├── screens/         # ConvertScreen, InspectScreen, UploadScreen, SquooshScreen
-    ├── components/      # MediaPicker, SettingsPanel, ConversionProgress, OutputPreview
-    └── theme/           # Material 3 dark theme
+    ├── screens/     # Convert, Inspect, Squoosh, Upload
+    ├── components/  # VideoTrimPlayer, CropOverlay, EditTools, MultiSourceCards, FrameGrabSheet, ...
+    └── theme/       # Material 3 dark theme
+
+site/     # Astro + Svelte browser versions of the four tools (Mediabunny, jSquash WASM)
+worker/   # Cloudflare Worker (Hono) — Inspect fetch proxy with SSRF guard, upload relay
 ```
 
 ## Tech Stack
@@ -110,9 +121,12 @@ app.embeddy
 | Component | Library |
 |-----------|---------|
 | UI | Jetpack Compose + Material 3 |
-| Video → WebP | [FFmpeg-kit](https://github.com/AdrianAndroid/ffmpeg-kit) (libwebp_anim) |
+| Video editing / encoding | FFmpeg-kit 6.1.1, 16 KB-page build (`com.moizhassan.ffmpeg:ffmpeg-kit-16kb`) |
 | AVIF encoding | [avif-coder](https://github.com/awxkee/avif-coder) (libaom via JNI) |
 | Image loading | [Coil](https://coil-kt.github.io/coil/) (compose, gif, video) |
+| Video preview | AndroidX Media3 ExoPlayer |
+| Settings | AndroidX DataStore |
+| Temp cleanup | AndroidX WorkManager |
 | HTML parsing | [Jsoup](https://jsoup.org/) |
 | EXIF handling | AndroidX ExifInterface |
 | Navigation | Tab-based with `AnimatedContent` |
@@ -123,7 +137,7 @@ app.embeddy
 ### Prerequisites
 
 - JDK 17+
-- Android SDK with `compileSdk 35`
+- Android SDK with `compileSdk 36`
 
 ### Standard build
 
@@ -171,7 +185,8 @@ GitHub Pages. A failing suite blocks the deploy.
 1. Run the Android unit tests — a failure blocks the release
 2. Pin the resolved version into `version.properties` and commit it, with a
    skip-CI marker so the push does not re-trigger the workflow
-3. Build release APKs for the three configured ABIs plus universal
+3. Build release APKs for the three configured ABIs plus universal, and a Play
+   App Bundle (`.aab`, uploaded as the `embeddy-v<ver>-play-bundle` artifact)
 4. Tag the version-pinned commit and publish a GitHub Release with grouped
    release notes, a download table with sizes and SHA-256 prefixes, and
    `SHA256SUMS.txt`
