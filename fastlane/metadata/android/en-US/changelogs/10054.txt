@@ -1,0 +1,12 @@
+- collapse the embed image slot when the image fails
+- issues found in on-device testing of the new editor
+- add clips to a loaded video to start a join
+- disable ABI splits when building an App Bundle
+- About sheet with open-source notices; frame grab hands off to Squoosh
+- Convert state machine rewrite plus quick video editor
+- stop cancelled uploads, budget Squoosh decodes, HTTPS-only Inspect
+- trim, speed, rotate/flip, frame grab, MP4/WebM export and join
+- paste, page-wide drop, share target, share sheet, send to Upload
+- accessible nav/drop zone, 44px targets, shared API + UI pieces
+- upstream deadlines, response caps, inspect extraction tests
+- update prompt instead of mid-session takeover, offline workers/WASM
