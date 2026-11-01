@@ -186,7 +186,7 @@ left as a human step — it posts publicly under your account.
    ```sh
    fdroid lint app.embeddy
    fdroid readmeta
-   fdroid build app.embeddy:140
+   fdroid build app.embeddy:100562   # arm64-v8a of v0.1.56; also 100561, 100563
    ```
 
 4. Expect the reviewer to ask about the FFmpeg artifact. The answer is in
