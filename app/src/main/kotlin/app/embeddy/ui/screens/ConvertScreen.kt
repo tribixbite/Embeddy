@@ -37,6 +37,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -102,16 +103,20 @@ fun ConvertScreen(
     val config by controller.config.collectAsStateWithLifecycle()
     val edit by controller.edit.collectAsStateWithLifecycle()
     val frameGrab by controller.frameGrab.collectAsStateWithLifecycle()
-    // The crop overlay is a transient UI mode, reset per input.
+    // The crop overlay is a transient UI mode, closed for every new input. All
+    // input paths (picker, share intent, join, image sequence) pass through
+    // Loading and Start over goes to Idle, so keying on those covers each one —
+    // including shares, which never go through this screen's pickers.
     var cropEditing by remember { mutableStateOf(false) }
+    val inputChanging = state is ConversionState.Idle || state is ConversionState.Loading
+    LaunchedEffect(inputChanging) {
+        if (inputChanging) cropEditing = false
+    }
 
     val filePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
-        uri?.let {
-            cropEditing = false
-            controller.onFilePicked(it.toString())
-        }
+        uri?.let { controller.onFilePicked(it.toString()) }
     }
     val joinPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         controller.onFilesPicked(uris.map(Uri::toString), SourceKind.JOIN)
@@ -187,12 +192,10 @@ fun ConvertScreen(
                     SourceKind.SINGLE -> {
                         ReadyCard(
                             state = s,
-                            onChangePick = {
-                                cropEditing = false
-                                filePicker.launch(CONVERT_MIME_TYPES)
-                            },
+                            onChangePick = { filePicker.launch(CONVERT_MIME_TYPES) },
                             onAddClips = if (canAddClips(source)) {
                                 {
+                                    // Adding clips goes Ready -> Ready (no Loading), so close it here.
                                     cropEditing = false
                                     addPicker.launch(JOIN_MIME_TYPES)
                                 }

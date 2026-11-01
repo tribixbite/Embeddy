@@ -405,4 +405,6 @@ RSA 4096, valid to 2053); all 4 CI secrets set; v0.1.55 APKs and `.aab` both sig
   submission: large surface, gradle.lockfile + F-Droid reproducibility churn.
 - [ ] **11.8** Separate Play upload key (TODO in `release.yml`) — optional, owner decision.
 - [x] **11.9** F-Droid recipe points at v0.1.56 (100561–3), the first release with per-split changelogs; verified its APKs carry those codes and the pinned signer.
+- [x] **11.11** Crop editor closes on every new input (share intents and Start over too), keyed on the
+  Loading/Idle states every input path passes through; was reset only by this screen's pickers.
 - [ ] **11.10** Device re-verification on the test phones (Pixel 8 Pro / Saga / Seeker) after this round.
