@@ -10,7 +10,12 @@
 #   app/src/main/res/drawable/ic_launcher_background.xml
 # If those change, update FOREGROUND/BACKGROUND here and re-run.
 #
-# Requires: rsvg-convert (librsvg), a "RobotoStatic" (Android system) or "Roboto" font visible to fontconfig.
+# Requires: rsvg-convert (librsvg), curl + unzip (first run only).
+# Text is set in Inter, the site's typeface. The Inter TTFs are cached under
+# $INTER_TTF_DIR (default ~/.cache/embeddy/inter-4.1), downloaded from the
+# official release on first use, and fontconfig is pointed at ONLY that
+# directory — so the result never depends on which fonts the machine has
+# (Android's system Roboto is listed by fc-list but never matched).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -20,6 +25,26 @@ trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$OUT"
 
 command -v rsvg-convert >/dev/null || { echo "rsvg-convert not found (pkg install librsvg)" >&2; exit 1; }
+
+INTER_VERSION="4.1"
+FONT_DIR="${INTER_TTF_DIR:-$HOME/.cache/embeddy/inter-$INTER_VERSION}"
+if [ ! -f "$FONT_DIR/Inter-Bold.ttf" ] || [ ! -f "$FONT_DIR/Inter-Regular.ttf" ]; then
+  echo "Fetching Inter $INTER_VERSION (SIL OFL 1.1)..."
+  mkdir -p "$FONT_DIR"
+  curl -fsSL -o "$WORK/inter.zip" \
+    "https://github.com/rsms/inter/releases/download/v$INTER_VERSION/Inter-$INTER_VERSION.zip"
+  unzip -q -j -o "$WORK/inter.zip" extras/ttf/Inter-Bold.ttf extras/ttf/Inter-Regular.ttf LICENSE.txt -d "$FONT_DIR"
+fi
+# Private fontconfig: Inter only, cache in the scratch dir
+cat > "$WORK/fonts.conf" <<CONF
+<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+<fontconfig>
+  <dir>$FONT_DIR</dir>
+  <cachedir>$WORK/fc-cache</cachedir>
+</fontconfig>
+CONF
+export FONTCONFIG_FILE="$WORK/fonts.conf"
 
 BACKGROUND="#1A1A2E"
 # Film frame with sprocket holes (even-odd) + conversion arrow.
@@ -64,9 +89,9 @@ cat > "$WORK/feature.svg" <<SVG
   <g transform="translate(-55 -30) scale(5.2)">
     $FOREGROUND
   </g>
-  <text x="440" y="225" font-family="RobotoStatic, Roboto" font-weight="700" font-size="84" fill="#FFFFFF">Embeddy</text>
-  <text x="444" y="285" font-family="RobotoStatic, Roboto" font-weight="400" font-size="32" fill="#D7CCFF">Trim, join &amp; convert video</text>
-  <text x="444" y="330" font-family="RobotoStatic, Roboto" font-weight="400" font-size="32" fill="#9E95C7">GIF &#183; WebP &#183; MP4 that fits the limit</text>
+  <text x="440" y="225" font-family="Inter" font-weight="700" font-size="84" fill="#FFFFFF">Embeddy</text>
+  <text x="444" y="285" font-family="Inter" font-weight="400" font-size="32" fill="#D7CCFF">Trim, join &amp; convert video</text>
+  <text x="444" y="330" font-family="Inter" font-weight="400" font-size="32" fill="#9E95C7">GIF &#183; WebP &#183; MP4 that fits the limit</text>
 </svg>
 SVG
 rsvg-convert -w 1024 -h 500 "$WORK/feature.svg" -o "$OUT/featureGraphic.png"
