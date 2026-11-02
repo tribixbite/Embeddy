@@ -427,3 +427,5 @@ RSA 4096, valid to 2053); all 4 CI secrets set; v0.1.55 APKs and `.aab` both sig
   the first upload. Added `play-key-export.yml` (manual CI job: pepk with the secret keystore password,
   cert and pepk.jar hash pinned; dry-run with a throwaway key passed). Needs the console's
   encryption_public_key.pem — steps in docs/play-store.md "Switch Play to our release key".
+  DONE 2026-11-02: export run 41492087463 (zip cert verified 61:2C…94:FE), owner saved Change key; the
+  console now shows 61:2C…94:FE as the app signing key. Remaining: bundle upload + listing (§5–7).
