@@ -423,3 +423,7 @@ RSA 4096, valid to 2053); all 4 CI secrets set; v0.1.55 APKs and `.aab` both sig
   app signing key (not our key), closed-test release started but unconfirmed, no bundle uploaded, and an
   account-inactivity warning. The agent's browser bridge lost its extension connection, so no console
   changes were made. Next steps are in docs/play-store.md §2–4 and §5–7.
+  Play must sign with OUR release key (owner, 2026-11-02): switch via App signing → Change key before
+  the first upload. Added `play-key-export.yml` (manual CI job: pepk with the secret keystore password,
+  cert and pepk.jar hash pinned; dry-run with a throwaway key passed). Needs the console's
+  encryption_public_key.pem — steps in docs/play-store.md "Switch Play to our release key".

@@ -1,0 +1,85 @@
+name: Export release key for Play App Signing
+
+# Run by hand once, to give Google Play our own release key as the app signing
+# key (Play Console → Test and release → App integrity → App signing →
+# Change key → "Export and upload a key from Java keystore"). Play installs are
+# then signed with the same key as the GitHub and F-Droid APKs, so users can
+# move between channels without uninstalling.
+#
+# The keystore password exists only in the repo secrets, so the export has to
+# run here. pepk encrypts the private key with the Play public key you paste in,
+# so the artifact can only be decrypted by Google.
+#
+#   gh workflow run play-key-export.yml --repo tribixbite/Embeddy \
+#     -F encryption_public_key=@encryption_public_key.pem
+on:
+  workflow_dispatch:
+    inputs:
+      encryption_public_key:
+        description: Contents of encryption_public_key.pem from the Change key page
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Export and encrypt the key with pepk
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          ENCRYPTION_PUBLIC_KEY: ${{ inputs.encryption_public_key }}
+          # pepk.jar as downloaded 2026-11-02. It handles the private key, so an
+          # unannounced change fails here instead of running unseen code; if Google
+          # updates it, check the new jar and update this hash.
+          PEPK_SHA256: aaccc0774b240aa5304bdad2a49865e92f229ca73209ecb6eaafe75dc858e24e
+          # SHA-256 of the release certificate; refuse to export any other key.
+          EXPECTED_CERT_SHA256: 61:2C:62:1B:E9:E5:CC:8E:5C:24:FB:BA:11:F5:22:AD:5A:EF:21:EA:20:D0:7C:EB:22:C2:67:1F:DD:2E:94:FE
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+
+          printf '%s\n' "$ENCRYPTION_PUBLIC_KEY" > encryption_public_key.pem
+          if ! openssl pkey -pubin -in encryption_public_key.pem -noout 2>/dev/null; then
+            echo "::error::encryption_public_key is not a PEM public key. Pass the file with -F encryption_public_key=@encryption_public_key.pem"
+            exit 1
+          fi
+
+          curl -sSfL -o pepk.jar https://www.gstatic.com/play-apps-publisher-rapid/signing-tool/prod/pepk.jar
+          echo "$PEPK_SHA256  pepk.jar" | sha256sum -c -
+
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > release.jks
+          cert=$(keytool -list -v -keystore release.jks -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" \
+                 | awk '/SHA256:/ {print $2; exit}')
+          if [ "$cert" != "$EXPECTED_CERT_SHA256" ]; then
+            echo "::error::Keystore certificate is $cert, expected $EXPECTED_CERT_SHA256"
+            exit 1
+          fi
+
+          java -jar pepk.jar \
+            --keystore=release.jks \
+            --alias="$KEY_ALIAS" \
+            --keystore-pass="$KEYSTORE_PASSWORD" \
+            --key-pass="${KEY_PASSWORD:-$KEYSTORE_PASSWORD}" \
+            --output=embeddy-signing-key.zip \
+            --include-cert \
+            --rsa-aes-encryption \
+            --encryption-key-path=encryption_public_key.pem
+          rm release.jks
+          ls -l embeddy-signing-key.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: embeddy-play-signing-key
+          path: ${{ runner.temp }}/embeddy-signing-key.zip
+          retention-days: 1
+          if-no-files-found: error
