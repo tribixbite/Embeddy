@@ -36,9 +36,9 @@ Repo: https://github.com/tribixbite/Embeddy.git
 # one invocation yields a different APK for the same ABI, so both sides must
 # build them separately or verification fails.
 Builds:
-  - versionName: 0.1.57
-    versionCode: 100571
-    commit: v0.1.57
+  - versionName: 0.1.58
+    versionCode: 100581
+    commit: v0.1.58
     subdir: app
     gradle:
       - yes
@@ -46,9 +46,9 @@ Builds:
       - abiFilter=armeabi-v7a
     binary: https://github.com/tribixbite/Embeddy/releases/download/v%v/Embeddy-v%v-armeabi-v7a.apk
 
-  - versionName: 0.1.57
-    versionCode: 100572
-    commit: v0.1.57
+  - versionName: 0.1.58
+    versionCode: 100582
+    commit: v0.1.58
     subdir: app
     gradle:
       - yes
@@ -56,9 +56,9 @@ Builds:
       - abiFilter=arm64-v8a
     binary: https://github.com/tribixbite/Embeddy/releases/download/v%v/Embeddy-v%v-arm64-v8a.apk
 
-  - versionName: 0.1.57
-    versionCode: 100573
-    commit: v0.1.57
+  - versionName: 0.1.58
+    versionCode: 100583
+    commit: v0.1.58
     subdir: app
     gradle:
       - yes
@@ -124,5 +124,5 @@ VercodeOperation:
   - 10 * %c + 3
 UpdateCheckData: https://github.com/tribixbite/Embeddy/releases/latest|VersionCode:\
   (\d+)|.|Version:\ ([\d.]+)
-CurrentVersion: 0.1.57
-CurrentVersionCode: 100573
+CurrentVersion: 0.1.58
+CurrentVersionCode: 100583

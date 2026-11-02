@@ -412,5 +412,14 @@ RSA 4096, valid to 2053); all 4 CI secrets set; v0.1.55 APKs and `.aab` both sig
   Passed: animated WebP opens with preview; crop editor open → new VIEW input closes it; Squoosh exact
   200x100 from 320x240 (scale + center crop); MP4 → MP4 convert completes; About → Privacy policy opens
   embeddy.link/privacy/ in Chrome; CleanupWorker dispatched by SystemJobService (no foreground service)
-  and correctly deferred as not yet due. Not exercised: image-sequence input (needs a real
-  SEND_MULTIPLE share — `am start` can't grant URIs passed in extras), Start over button.
+  and correctly deferred as not yet due. 2026-11-02 on the same Saga: five PNGs pushed by adb, picked in
+  order through Images → animation (documentsui multi-select) → 5 images, 0.5 s each → animated WebP
+  15.5 KB. Start over returns to the empty picker. (`am start` SEND can't grant URIs in extras; use the
+  picker or VIEW.)
+- [x] **11.12** Package ID → `tribixbite.embeddy` (v0.1.58; Kotlin namespace stays `app.embeddy`).
+  Debug build installs as `tribixbite.embeddy.debug`; AAB carries the new ID and the release-key signature.
+  F-Droid recipe renamed to `fdroid/tribixbite.embeddy.yml`.
+- [ ] **11.13** Play Console (owner). Found: app created as tribixbite.embeddy with a Google-generated
+  app signing key (not our key), closed-test release started but unconfirmed, no bundle uploaded, and an
+  account-inactivity warning. The agent's browser bridge lost its extension connection, so no console
+  changes were made. Next steps are in docs/play-store.md §2–4 and §5–7.

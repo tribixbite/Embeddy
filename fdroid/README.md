@@ -186,7 +186,7 @@ left as a human step — it posts publicly under your account.
    ```sh
    fdroid lint tribixbite.embeddy
    fdroid readmeta
-   fdroid build tribixbite.embeddy:100572   # arm64-v8a of v0.1.57; also 100571, 100573
+   fdroid build tribixbite.embeddy:100582   # arm64-v8a of v0.1.58; also 100581, 100583
    ```
 
 4. Expect the reviewer to ask about the FFmpeg artifact. The answer is in
