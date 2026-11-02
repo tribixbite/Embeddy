@@ -61,7 +61,7 @@ Play Console → **Create app**:
 | Free or paid | Free (cannot be changed to paid later) |
 | Declarations | tick Developer Program Policies and US export laws |
 
-The package name `app.embeddy` is set by the first bundle you upload and is
+The package name `tribixbite.embeddy` is set by the first bundle you upload and is
 permanent.
 
 ## 4. App signing — use the existing key

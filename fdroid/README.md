@@ -14,7 +14,7 @@ a manual step against F-Droid's own infrastructure and has not been done — see
 | Reproducible per-ABI builds | CI and recipe both use `-PabiFilter=<abi>` |
 | Published-binary mode | `binary:` + `AllowedAPKSigningKeys` in the recipe |
 | Listing text, changelogs, screenshots | `fastlane/metadata/android/en-US/` |
-| Build recipe | `fdroid/app.embeddy.yml` (draft) |
+| Build recipe | `fdroid/tribixbite.embeddy.yml` (draft) |
 | No Google Play Services / analytics / ads / tracking | Verified — no such dependency |
 
 ## Versioning
@@ -156,7 +156,7 @@ to work it out:
 
 ## Keeping the recipe current
 
-`fdroid/app.embeddy.yml` pins three `Builds` entries (one per ABI) to a specific
+`fdroid/tribixbite.embeddy.yml` pins three `Builds` entries (one per ABI) to a specific
 tag. Those are only the starting point — `UpdateCheckMode: HTTP` plus
 `AutoUpdateMode: Version v%v` let F-Droid pick up later releases on its own once
 the app is in, deriving each ABI's versionCode via `VercodeOperation`.
@@ -179,14 +179,14 @@ left as a human step — it posts publicly under your account.
 
 1. Open a Request For Packaging issue at
    <https://gitlab.com/fdroid/rfp/-/issues> using the "App Inclusion" template.
-2. Fork <https://gitlab.com/fdroid/fdroiddata>, copy `fdroid/app.embeddy.yml` to
-   `metadata/app.embeddy.yml`, and open a merge request referencing the RFP.
+2. Fork <https://gitlab.com/fdroid/fdroiddata>, copy `fdroid/tribixbite.embeddy.yml` to
+   `metadata/tribixbite.embeddy.yml`, and open a merge request referencing the RFP.
 3. Before opening the MR, run F-Droid's own checks locally:
 
    ```sh
-   fdroid lint app.embeddy
+   fdroid lint tribixbite.embeddy
    fdroid readmeta
-   fdroid build app.embeddy:100572   # arm64-v8a of v0.1.57; also 100571, 100573
+   fdroid build tribixbite.embeddy:100572   # arm64-v8a of v0.1.57; also 100571, 100573
    ```
 
 4. Expect the reviewer to ask about the FFmpeg artifact. The answer is in

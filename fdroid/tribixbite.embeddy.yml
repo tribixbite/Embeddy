@@ -2,7 +2,7 @@
 #
 # This file is a *draft of what belongs in fdroiddata*, kept here so it is
 # reviewed alongside the code it builds. To submit, copy it to
-# fdroiddata/metadata/app.embeddy.yml and open a merge request against
+# fdroiddata/metadata/tribixbite.embeddy.yml and open a merge request against
 # https://gitlab.com/fdroid/fdroiddata — F-Droid does not read this copy.
 #
 # Listing text, screenshots and changelogs are NOT duplicated here: F-Droid

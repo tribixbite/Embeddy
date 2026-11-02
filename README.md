@@ -97,6 +97,8 @@ Every push to `main` triggers a CI build that produces split-ABI APKs:
 
 ## Architecture
 
+Package ID `tribixbite.embeddy`; Kotlin sources live under the `app.embeddy` namespace.
+
 ```
 app.embeddy
 ├── conversion/   # ConversionEngine (FFmpeg-kit, adaptive quality), EditSpec, FfmpegCommands,

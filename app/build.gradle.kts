@@ -98,7 +98,11 @@ android {
     compileSdk = libs.versions.compileSdk.get().toInt()
 
     defaultConfig {
-        applicationId = "app.embeddy"
+        // Store/package identity, following the tribixbite.<app> convention. The Kotlin
+        // namespace stays app.embeddy: it only names R/BuildConfig and source packages.
+        // Changed from app.embeddy before the first Play upload (v0.1.58); a sideloaded
+        // app.embeddy install is a different app and is not updated by tribixbite.embeddy.
+        applicationId = "tribixbite.embeddy"
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
         versionCode = baseVersionCode * 10 +

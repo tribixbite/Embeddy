@@ -68,7 +68,7 @@ if [ -n "$APK" ]; then
         echo "Installing via adb..."
         adb install -r "$APK"
         echo "Launching..."
-        adb shell am start -n app.embeddy.debug/app.embeddy.MainActivity
+        adb shell am start -n tribixbite.embeddy.debug/app.embeddy.MainActivity
     fi
 else
     echo "No APK found in $APK_DIR"
