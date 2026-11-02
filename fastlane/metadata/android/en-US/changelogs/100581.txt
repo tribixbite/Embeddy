@@ -1,0 +1,1 @@
+- change the package ID to tribixbite.embeddy
