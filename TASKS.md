@@ -419,7 +419,7 @@ RSA 4096, valid to 2053); all 4 CI secrets set; v0.1.55 APKs and `.aab` both sig
 - [x] **11.12** Package ID → `tribixbite.embeddy` (v0.1.58; Kotlin namespace stays `app.embeddy`).
   Debug build installs as `tribixbite.embeddy.debug`; AAB carries the new ID and the release-key signature.
   F-Droid recipe renamed to `fdroid/tribixbite.embeddy.yml`.
-- [ ] **11.13** Play Console (owner). Found: app created as tribixbite.embeddy with a Google-generated
+- [x] **11.13** Play Console (owner). Found: app created as tribixbite.embeddy with a Google-generated
   app signing key (not our key), closed-test release started but unconfirmed, no bundle uploaded, and an
   account-inactivity warning. The agent's browser bridge lost its extension connection, so no console
   changes were made. Next steps are in docs/play-store.md §2–4 and §5–7.
@@ -429,3 +429,14 @@ RSA 4096, valid to 2053); all 4 CI secrets set; v0.1.55 APKs and `.aab` both sig
   encryption_public_key.pem — steps in docs/play-store.md "Switch Play to our release key".
   DONE 2026-11-02: export run 41492087463 (zip cert verified 61:2C…94:FE), owner saved Change key; the
   console now shows 61:2C…94:FE as the app signing key. Remaining: bundle upload + listing (§5–7).
+  DONE 2026-11-03: content rating (ESRB Everyone, PEGI 3, IARC 3+); Data safety "no data collected or
+  shared" (owner's call: Upload/Inspect are explicit user actions, not collection for our purposes);
+  category Video Players & Editors, contact admin@techneesh.com + https://embeddy.link/; default store
+  listing (text, icon, feature graphic, 6 screenshots, AI-asset label "don't label": SVG art drawn by a
+  script, real screenshots); Alpha closed track: 178 countries, testers = email list "Internal"
+  (bossamberstone, willstone, mknarus), feedback admin@techneesh.com, release 100589 (0.1.58).
+  15 changes sent for review with Managed publishing off, to clear the overdue dormant-account notice
+  (fix = publish an app; email + phone were already verified).
+- [ ] **11.14** After Play approves the Alpha release: confirm the dormant-account banner clears, send
+  testers the opt-in link (Testers tab), and grow the list to ≥ 12 opted-in testers for 14 days
+  before applying for production. Optional: upload native debug symbols (the only release warning).

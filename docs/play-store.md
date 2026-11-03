@@ -53,11 +53,19 @@ Already done in Play Console (account **techneesh**, personal, ID 75784078136130
 - **Upload key**: none registered yet. The first `.aab` you upload registers
   the key that signed it — CI signs with the release key (`61:2C:…:94:FE`),
   so that becomes the upload key.
-- **Closed testing**: testers are selected and a release has been started but
-  not confirmed (dashboard shows *2 of 3 complete*; 0 testers opted in).
 - **Console banner: "Developer account at risk of being closed due to
-  inactivity."** Open *View details* on the home page and act on it first —
-  publishing a release normally clears it.
+  inactivity."** The issue page ("Dormant account", action date Oct 28) lists
+  two fixes: verify email and phone (already verified) and publish an app.
+
+**State on 2026-11-03:** every app-content declaration, the store listing and
+store settings are filled in, and the Alpha closed-testing release 100589
+(0.1.58) was sent for review together with them (15 changes, Managed
+publishing off, so it publishes as soon as it is approved). Alpha targets 178
+countries; testers are the account's email list **Internal**
+(bossamberstone@, willstone@, mknarus@gmail.com); feedback goes to
+admin@techneesh.com. The only release warning is "no native debug symbols".
+After approval, check that the dormant-account banner is gone, then continue
+with step 7.
 
 Personal accounts created after 2023-11-13 must run a closed test with ≥ 12
 opted-in testers for 14 consecutive days before production (step 7).
@@ -141,8 +149,11 @@ To get them onto the phone for the browser upload:
 cp -r ~/git/Embeddy/fastlane/metadata/android/en-US/images ~/storage/downloads/embeddy-store-images
 ```
 
-Store settings: category **Video Players & Editors**; contact email of your
-choice; website `https://embeddy.link/`.
+Store settings: category **Video Players & Editors**; contact email
+`admin@techneesh.com`; website `https://embeddy.link/`. The listing's AI asset
+declaration is "Don't label assets": the icon and feature graphic are SVG drawn
+by `scripts/generate-store-assets.sh`, and the screenshots are real app
+captures.
 
 ### App content (Policy and programs → App content)
 
@@ -162,21 +173,29 @@ choice; website `https://embeddy.link/`.
 
 ### Data safety form
 
-Derived from what the code actually sends (`upload/UploadEngine.kt`,
-`inspect/MetadataEngine.kt`); revisit if either changes.
+Submitted 2026-11-03 as **"Does your app collect or share any of the required
+user data types? No"** — the store shows "No data collected" and "No data
+shared with third parties".
 
-- Does your app collect or share any of the required user data types? **Yes**
-- Is all of the user data collected by your app encrypted in transit? **Yes**
-  (HTTPS only; cleartext is blocked at targetSdk ≥ 28, so an `http://` URL in
-  Inspect fails rather than being sent in cleartext)
-- Do you provide a way for users to request that their data is deleted? **No**
-  — the developer holds no data; uploaded files are governed by the chosen host.
+Owner's reasoning: the developer receives nothing. The app has no analytics,
+crash reporting, ad SDK or backend of ours. The only network traffic is a file
+the user explicitly sends to a host they pick (`upload/UploadEngine.kt`: 0x0.st
+or catbox.moe; any file type via `*/*`, so photos, video, audio and documents)
+and a URL the user typed for Inspect (`inspect/MetadataEngine.kt`, fetched
+directly from the device).
 
-| Data type | Collected | Shared | Details |
-|---|---|---|---|
-| Photos and videos; Files and docs | Yes | Yes — with the user-chosen host (0x0.st or catbox.moe) | Only when the user taps Upload. Not processed ephemerally by you; required for that feature; purpose *App functionality*. |
-| Web browsing history | No | No | Inspect fetches the URL the user typed directly from the device; nothing goes to the developer. |
-| Everything else (location, personal info, app activity, device IDs, crash logs, diagnostics) | No | No | No analytics, crash reporting or ad SDKs. |
+How that maps onto Google's text
+(<https://support.google.com/googleplay/android-developer/answer/10787469>):
+transfers "based on a specific user-initiated action, where the user
+reasonably expects the data to be shared" are exempt from *sharing*. The
+*collection* definition is literal — "transmitting data from your app off a
+user's device … irrespective of whether data is transmitted to you or a
+third-party server" — and its only listed exemptions are on-device processing
+and end-to-end encryption. If a reviewer reads Upload as collection, the
+stricter answer is: Photos, Videos, Music files, Other audio files, Files and
+docs — collected **yes, optional**, shared **no**, not ephemeral, purpose *App
+functionality*, encrypted in transit yes, no deletion request (we hold
+nothing). Revisit if a network feature or SDK is added.
 
 ## 7. Closed test (only if step 2 says it applies)
 
