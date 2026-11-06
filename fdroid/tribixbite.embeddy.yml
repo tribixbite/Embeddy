@@ -1,24 +1,6 @@
-# F-Droid build recipe for Embeddy — reproducible-build / published-binary mode.
-#
-# This file is a *draft of what belongs in fdroiddata*, kept here so it is
-# reviewed alongside the code it builds. To submit, copy it to
-# fdroiddata/metadata/tribixbite.embeddy.yml and open a merge request against
-# https://gitlab.com/fdroid/fdroiddata — F-Droid does not read this copy.
-#
-# Listing text, screenshots and changelogs are NOT duplicated here: F-Droid
-# reads those from fastlane/metadata/android/en-US/ in this repository.
-#
-# `binary:` puts this app in reproducible-build mode: F-Droid builds from source,
-# compares the result to the APK published on GitHub Releases, and — if they
-# match — publishes OUR signed APK rather than signing its own. So the APK from
-# f-droid.org and the one from GitHub Releases are the same file, and users can
-# move between the two without uninstalling.
-#
-# AllowedAPKSigningKeys pins the developer key that must have signed it.
-
 Categories:
-  - Multimedia
   - Graphics
+  - Multimedia
 License: GPL-3.0-only
 AuthorName: tribixbite
 AuthorEmail: willstone@gmail.com
@@ -31,10 +13,6 @@ AutoName: Embeddy
 RepoType: git
 Repo: https://github.com/tribixbite/Embeddy.git
 
-# One entry per ABI. -PabiFilter builds exactly that ABI with no universal APK,
-# which is how the released per-ABI APKs are produced too — building all ABIs in
-# one invocation yields a different APK for the same ABI, so both sides must
-# build them separately or verification fails.
 Builds:
   - versionName: 0.1.58
     versionCode: 100581
@@ -42,9 +20,9 @@ Builds:
     subdir: app
     gradle:
       - yes
+    binary: https://github.com/tribixbite/Embeddy/releases/download/v%v/Embeddy-v%v-armeabi-v7a.apk
     gradleprops:
       - abiFilter=armeabi-v7a
-    binary: https://github.com/tribixbite/Embeddy/releases/download/v%v/Embeddy-v%v-armeabi-v7a.apk
 
   - versionName: 0.1.58
     versionCode: 100582
@@ -52,9 +30,9 @@ Builds:
     subdir: app
     gradle:
       - yes
+    binary: https://github.com/tribixbite/Embeddy/releases/download/v%v/Embeddy-v%v-arm64-v8a.apk
     gradleprops:
       - abiFilter=arm64-v8a
-    binary: https://github.com/tribixbite/Embeddy/releases/download/v%v/Embeddy-v%v-arm64-v8a.apk
 
   - versionName: 0.1.58
     versionCode: 100583
@@ -62,59 +40,55 @@ Builds:
     subdir: app
     gradle:
       - yes
+    binary: https://github.com/tribixbite/Embeddy/releases/download/v%v/Embeddy-v%v-x86_64.apk
     gradleprops:
       - abiFilter=x86_64
-    binary: https://github.com/tribixbite/Embeddy/releases/download/v%v/Embeddy-v%v-x86_64.apk
+
+AllowedAPKSigningKeys: 612c621be9e5cc8e5c24fbba11f522ad5aef21ea20d07ceb22c2671fdd2e94fe
 
 MaintainerNotes: |
-    Reproducible builds. The released APKs are built one ABI at a time with
-    -PabiFilter=<abi>, the same way this recipe builds them, because building
-    every ABI in a single Gradle invocation produces a different APK for the
-    same ABI (measured: identical entry list, one differing dex). Same inputs
-    are otherwise deterministic.
+  Reproducible builds. The released APKs are built one ABI at a time with
+  -PabiFilter=<abi>, the same way this recipe builds them, because building
+  every ABI in a single Gradle invocation produces a different APK for the
+  same ABI (measured: identical entry list, one differing dex). Same inputs
+  are otherwise deterministic.
 
-    Versioning. The release workflow writes the resolved version into
-    version.properties and tags that commit, so a build from the tag reproduces
-    the published versionName/versionCode with no environment variables set.
-    Base versionCode is MAJOR*1000000 + MINOR*10000 + PATCH (widened after
-    0.1.52 from MAJOR*10000 + MINOR*100 + PATCH, which capped the CI run
-    number at 99; every new code still sorts above the old ones). Split APKs
-    use base*10 + {armeabi-v7a:1, arm64-v8a:2, x86_64:3}, which is what
-    VercodeOperation reproduces. The build fails if MINOR reaches 100 or
-    PATCH reaches 10000, since that would collide with the next place value.
+  Versioning. The release workflow writes the resolved version into
+  version.properties and tags that commit, so a build from the tag reproduces
+  the published versionName/versionCode with no environment variables set.
+  Base versionCode is MAJOR*1000000 + MINOR*10000 + PATCH (widened after
+  0.1.52 from MAJOR*10000 + MINOR*100 + PATCH, which capped the CI run
+  number at 99; every new code still sorts above the old ones). Split APKs
+  use base*10 + {armeabi-v7a:1, arm64-v8a:2, x86_64:3}, which is what
+  VercodeOperation reproduces. The build fails if MINOR reaches 100 or
+  PATCH reaches 10000, since that would collide with the next place value.
 
-    Native code. FFmpeg is a prebuilt AAR from Maven Central
-    (com.moizhassan.ffmpeg:ffmpeg-kit-16kb), a community rebuild of
-    arthenica/ffmpeg-kit — retired 2025-01-06, binaries pulled from Maven
-    Central 2025-04-01 — that adds the 16 KB page-size support API 35 requires.
-    AVIF uses com.github.awxkee:avif-coder via JitPack. Both repos are in
-    scanner.py's allowed_repos.
+  Native code. FFmpeg is a prebuilt AAR from Maven Central
+  (com.moizhassan.ffmpeg:ffmpeg-kit-16kb), a community rebuild of
+  arthenica/ffmpeg-kit — retired 2025-01-06, binaries pulled from Maven
+  Central 2025-04-01 — that adds the 16 KB page-size support API 35 requires.
+  AVIF uses com.github.awxkee:avif-coder via JitPack. Both repos are in
+  scanner.py's allowed_repos.
 
-    Compiling FFmpeg from source was implemented and then deliberately reverted:
-    it is incompatible with reproducible builds. Verification requires F-Droid's
-    APK to match ours byte-for-byte, and a cross-compiled FFmpeg is not
-    bit-reproducible across machines — the shipped .so files even embed the
-    builder's absolute paths. Both sides must consume the identical prebuilt
-    artifact for the APKs to match. Precedent for a prebuilt FFmpeg from Maven
-    Central: Seal (com.junkfood.seal) and YTDLnis (com.deniscerri.ytdl).
+  Compiling FFmpeg from source was implemented and then deliberately reverted:
+  it is incompatible with reproducible builds. Verification requires F-Droid's
+  APK to match ours byte-for-byte, and a cross-compiled FFmpeg is not
+  bit-reproducible across machines — the shipped .so files even embed the
+  builder's absolute paths. Both sides must consume the identical prebuilt
+  artifact for the APKs to match. Precedent for a prebuilt FFmpeg from Maven
+  Central: Seal (com.junkfood.seal) and YTDLnis (com.deniscerri.ytdl).
 
-    Note that artifact's POM declares LGPL-3.0 while the binary is built
-    --enable-gpl --enable-version3, i.e. GPL-3.0. Compatible with this app's
-    GPL-3.0-only licence, but the artifact metadata is wrong.
+  Note that artifact's POM declares LGPL-3.0 while the binary is built
+  --enable-gpl --enable-version3, i.e. GPL-3.0. Compatible with this app's
+  GPL-3.0-only licence, but the artifact metadata is wrong.
 
-    The recipe never patches the build script. -PabiFilter and -PsingleApk are
-    supported flags in app/build.gradle.kts, so a reformat cannot silently break
-    this recipe the way a sed patch would.
+  The recipe never patches the build script. -PabiFilter and -PsingleApk are
+  supported flags in app/build.gradle.kts, so a reformat cannot silently break
+  this recipe the way a sed patch would.
 
-    No Google Play Services, no analytics, no ads, no tracking. Network access
-    is limited to URLs the user types (Inspect) and files the user chooses to
-    upload (Upload, to 0x0.st or catbox.moe).
-
-# SHA-256 of the release signing certificate — F-Droid will only publish a
-# binary signed by this key. Taken from a signed release APK with:
-#   apksigner verify --print-certs Embeddy-v<ver>-arm64-v8a.apk
-# DN: CN=tribixbite, OU=arch, O=techneesh, L=Grand Rapids, ST=Michigan, C=US
-AllowedAPKSigningKeys: 612c621be9e5cc8e5c24fbba11f522ad5aef21ea20d07ceb22c2671fdd2e94fe
+  No Google Play Services, no analytics, no ads, no tracking. Network access
+  is limited to URLs the user types (Inspect) and files the user chooses to
+  upload (Upload, to 0x0.st or catbox.moe).
 
 AutoUpdateMode: Version v%v
 UpdateCheckMode: HTTP

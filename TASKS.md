@@ -440,3 +440,10 @@ RSA 4096, valid to 2053); all 4 CI secrets set; v0.1.55 APKs and `.aab` both sig
 - [ ] **11.14** After Play approves the Alpha release: confirm the dormant-account banner clears, send
   testers the opt-in link (Testers tab), and grow the list to ≥ 12 opted-in testers for 14 days
   before applying for production. Optional: upload native debug symbols (the only release warning).
+  2026-11-06: owner switched the Alpha testers from the "Internal" email list to a Google Group.
+- [x] **11.15** F-Droid recheck (2026-11-06): recipe passes `fdroid lint` against fdroiddata's real
+  category list and is now in `fdroid rewritemeta` canonical form (fdroiddata CI rejects anything else;
+  the stripped comments moved to fdroid/README.md); `fdroid scanner` on v0.1.58: 0 errors, 0 warnings.
+- [ ] **11.16** F-Droid (owner): push the recipe to a branch of gitlab.com/tribixbite/fdroiddata so its CI
+  runs the real buildserver build + reproducibility check (not yet verified anywhere outside our CI),
+  then open the fdroiddata MR. Steps: fdroid/README.md "Submitting".

@@ -14,8 +14,33 @@ a manual step against F-Droid's own infrastructure and has not been done — see
 | Reproducible per-ABI builds | CI and recipe both use `-PabiFilter=<abi>` |
 | Published-binary mode | `binary:` + `AllowedAPKSigningKeys` in the recipe |
 | Listing text, changelogs, screenshots | `fastlane/metadata/android/en-US/` |
-| Build recipe | `fdroid/tribixbite.embeddy.yml` (draft) |
+| Build recipe | `fdroid/tribixbite.embeddy.yml` — passes `fdroid lint` and `fdroid rewritemeta` (fdroidserver 2.4.5, fdroiddata categories, 2026-11-06) |
+| Source scanner (`fdroid scanner` on v0.1.58, run by fdroiddata's `check source code` job) | 0 errors, 0 warnings, 2026-11-06 |
+| Builds from source on F-Droid's buildserver and matches our APK | **Not yet verified** — see [Before submitting](#before-submitting) |
 | No Google Play Services / analytics / ads / tracking | Verified — no such dependency |
+
+## Recipe format
+
+`fdroid/tribixbite.embeddy.yml` is a copy of what belongs in fdroiddata at
+`metadata/tribixbite.embeddy.yml`; F-Droid does not read the copy in this repo.
+It is kept in the exact form `fdroid rewritemeta` produces, because fdroiddata's
+CI fails a merge request whose metadata file `rewritemeta` would change. That
+form has no comments and a fixed key order, so the explanations live here
+instead. Recheck after editing (the `fdroid` wrapper in `~/.local/bin` runs
+fdroidserver from the Ubuntu proot):
+
+```sh
+d=$(mktemp -d); mkdir -p $d/metadata $d/config
+cp fdroid/tribixbite.embeddy.yml $d/metadata/
+curl -s -o $d/config/categories.yml https://gitlab.com/fdroid/fdroiddata/-/raw/master/config/categories.yml
+# lint copies each category icon; empty stand-ins are enough
+for f in $(rg -o 'category_[a-z_]+\.png' $d/config/categories.yml | sort -u); do : > $d/config/$f; done
+cd $d && fdroid lint tribixbite.embeddy && fdroid rewritemeta -l tribixbite.embeddy
+```
+
+`rewritemeta -l` prints the file name only when it would rewrite the file.
+Without fdroiddata's `config/categories.yml`, lint reports every category as
+invalid.
 
 ## Versioning
 
@@ -177,20 +202,49 @@ real app changes rather than every documentation push.
 F-Droid submission happens on F-Droid's GitLab, not here. It is deliberately
 left as a human step — it posts publicly under your account.
 
-1. Open a Request For Packaging issue at
-   <https://gitlab.com/fdroid/rfp/-/issues> using the "App Inclusion" template.
-2. Fork <https://gitlab.com/fdroid/fdroiddata>, copy `fdroid/tribixbite.embeddy.yml` to
-   `metadata/tribixbite.embeddy.yml`, and open a merge request referencing the RFP.
-3. Before opening the MR, run F-Droid's own checks locally:
+### Before submitting
 
-   ```sh
-   fdroid lint tribixbite.embeddy
-   fdroid readmeta
-   fdroid build tribixbite.embeddy:100582   # arm64-v8a of v0.1.58; also 100581, 100583
-   ```
+Run the real build on F-Droid's buildserver image first. Nobody has yet built
+this recipe outside our own CI, so whether F-Droid's APK matches the published
+one byte-for-byte (which published-binary mode requires) is still unknown.
 
-4. Expect the reviewer to ask about the FFmpeg artifact. The answer is in
-   [Dependency provenance](#dependency-provenance--the-reviewers-likely-question).
+fdroiddata's `.gitlab-ci.yml` runs its `fdroid build` job (image
+`fdroidserver:buildserver-trixie`, amd64) on **any push to a non-default branch**
+of a fork, with no merge request needed. So:
+
+```sh
+cd ~/git/fdroiddata-fork            # fork: gitlab.com/tribixbite/fdroiddata
+git fetch upstream
+git switch -c embeddy upstream/master
+cp ~/git/Embeddy/fdroid/tribixbite.embeddy.yml metadata/
+git add metadata/tribixbite.embeddy.yml
+git commit -m "New app: Embeddy"
+git push -u origin embeddy           # public branch on your fork; no MR yet
+```
+
+Then read the fork's pipeline. The `fdroid build` job passes only if all three
+ABIs build and each matches its GitHub Releases APK. The `fdroid lint`,
+`fdroid rewritemeta` and `check source code` jobs must pass as well. That
+checkout also has another project's `cleverkeys` branch; switching branches
+leaves it alone, but don't run the commands while that work has uncommitted
+changes.
+
+Don't run `fdroid build` on this phone: it is aarch64 and uses a different
+aapt2, so its APK can never match.
+
+### Opening the request
+
+1. Open a merge request from that branch to
+   <https://gitlab.com/fdroid/fdroiddata>. A Request For Packaging issue
+   (<https://gitlab.com/fdroid/rfp/-/issues>) is for asking someone *else* to
+   package an app, so it is optional when you open the MR yourself.
+2. In the MR description, state the anti-features answer below and the FFmpeg
+   provenance. Reviewers are likely to ask about the FFmpeg artifact; the answer is in
+   [Dependency provenance](#dependency-provenance).
+3. If the reproducibility check fails, fdroiddata accepts the same recipe
+   without `binary:` and `AllowedAPKSigningKeys`, but then F-Droid signs with
+   its own key, so users can't switch between the F-Droid and GitHub/Play
+   installs without uninstalling.
 
 ## Signing
 
@@ -198,7 +252,8 @@ Done. The release key was created with `scripts/generate-release-key.sh`
 (2026-08-12, kept outside the repo at `../embeddy-release.jks`), the four
 `KEYSTORE_*`/`KEY_*` secrets are set, and `release.yml` decodes and verifies the
 keystore before building. Releases are signed with the certificate pinned
-in `AllowedAPKSigningKeys` (checked on v0.1.55's APKs and bundle, 2026-11-01). The Play bundle is signed with
+in `AllowedAPKSigningKeys` (DN `CN=tribixbite, OU=arch, O=techneesh, L=Grand Rapids,
+ST=Michigan, C=US`; read it from a release APK with `apksigner verify --print-certs`) (checked on v0.1.55's APKs and bundle, 2026-11-01). The Play bundle is signed with
 the same key; see [`docs/play-store.md`](../docs/play-store.md) for backing it
 up and handing it to Play App Signing.
 

@@ -64,6 +64,8 @@ publishing off, so it publishes as soon as it is approved). Alpha targets 178
 countries; testers are the account's email list **Internal**
 (bossamberstone@, willstone@, mknarus@gmail.com); feedback goes to
 admin@techneesh.com. The only release warning is "no native debug symbols".
+On 2026-11-06 the owner switched the Alpha testers to a **Google Group**, so
+new testers join the group instead of being added to an email list.
 After approval, check that the dormant-account banner is gone, then continue
 with step 7.
 
