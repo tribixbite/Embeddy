@@ -1,89 +1,135 @@
 <script lang="ts">
   /**
-   * Discord-style embed card rendering for OG metadata preview.
-   * Mimics how Discord renders link embeds: the left strip uses the page's
-   * theme-color when one is declared (falling back to the brand color), and
-   * the footer surfaces the favicon, HTTP status, and Twitter card type.
+   * Discord standard link preview, drawn for the layout Discord would pick
+   * (see discord-unfurl.ts): text with a small thumbnail, a large image, image
+   * only, inline video, a gallery of up to 4, or a rich markdown description.
+   * Colours follow Discord's dark theme so the card reads like the real one.
    */
-  import type { MetadataResult } from "../../../lib/inspect/types";
+  import type { StandardPreview } from "../../../lib/inspect/discord-unfurl";
+  import DiscordMarkdown from "./DiscordMarkdown.svelte";
+  import MediaMosaic from "./MediaMosaic.svelte";
 
-  let { data }: { data: MetadataResult } = $props();
+  let { preview }: { preview: StandardPreview } = $props();
 
-  /** Extract domain for display */
-  let domain = $derived.by(() => {
-    try {
-      return new URL(data.url).hostname;
-    } catch {
-      return data.url;
-    }
+  let firstImage = $derived(preview.images[0]);
+  let bare = $derived(preview.layout === "photo" || preview.layout === "direct-image" || preview.layout === "direct-video");
+  let showThumb = $derived((preview.layout === "thumbnail" || preview.layout === "rich") && !!firstImage);
+
+  /** Footer timestamp in Discord's "Today at 3:04 PM" / date style */
+  let timestampLabel = $derived.by(() => {
+    if (!preview.timestamp) return "";
+    const date = new Date(preview.timestamp);
+    const sameDay = date.toDateString() === new Date().toDateString();
+    const time = date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    return sameDay ? `Today at ${time}` : `${date.toLocaleDateString()} ${time}`;
   });
 
-  let statusOk = $derived(data.status >= 200 && data.status < 300);
+  /** Hide an <img> that fails to load rather than show a broken icon */
+  function hideOnError(e: Event) {
+    (e.currentTarget as HTMLElement).style.display = "none";
+  }
 </script>
 
-<div
-  class="overflow-hidden rounded-lg border-l-4 border-brand-400 bg-dark-800"
-  style:border-left-color={data.themeColor}
->
-  <div class="p-4">
-    <!-- Site name -->
-    {#if data.ogSiteName}
-      <p class="mb-1 text-xs font-medium text-white/40">{data.ogSiteName}</p>
-    {/if}
-
-    <!-- Title -->
-    <a
-      href={data.url}
-      target="_blank"
-      rel="noopener noreferrer"
-      class="mb-1 block text-sm font-semibold text-brand-300 hover:underline"
-    >
-      {data.ogTitle || data.title || domain}
-    </a>
-
-    <!-- Description -->
-    {#if data.ogDescription}
-      <p class="mb-3 text-sm leading-relaxed text-white/50 line-clamp-3">
-        {data.ogDescription}
-      </p>
-    {/if}
-
-    <!-- OG Image -->
-    {#if data.ogImage}
-      <div class="overflow-hidden rounded-lg">
-        <img
-          src={data.ogImage}
-          alt="OG preview"
-          class="max-h-64 w-full object-cover"
-          loading="lazy"
-          onerror={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-        />
+{#if preview.layout === "none"}
+  <p class="rounded-md border border-dashed border-white/10 px-4 py-6 text-center text-sm text-white/40">
+    Discord shows the bare link — no preview.
+  </p>
+{:else if bare}
+  {#if preview.layout === "direct-video" && preview.video}
+    <!-- svelte-ignore a11y_media_has_caption — preview of third-party media -->
+    <video src={preview.video.url} controls preload="metadata" playsinline class="max-h-[350px] max-w-full rounded-lg bg-black"></video>
+  {:else if firstImage}
+    <img
+      src={firstImage.url}
+      alt={firstImage.alt ?? ""}
+      class="max-h-[350px] max-w-full rounded-lg"
+      loading="lazy"
+      onerror={hideOnError}
+    />
+  {/if}
+{:else}
+  <article
+    class="grid max-w-[432px] rounded border-l-4 bg-[#2b2d31] py-2 pr-4 pl-3"
+    style:border-left-color={preview.color ?? "#1e1f22"}
+  >
+    <div class="flex gap-4">
+      <div class="min-w-0 flex-1 space-y-2 pt-1">
+        {#if preview.siteName}
+          <p class="text-xs text-[#dbdee1]">
+            {#if preview.providerUrl}
+              <a href={preview.providerUrl} target="_blank" rel="noopener noreferrer" class="hover:underline">{preview.siteName}</a>
+            {:else}
+              {preview.siteName}
+            {/if}
+          </p>
+        {/if}
+        {#if preview.author}
+          <p class="text-sm font-semibold text-[#f2f3f5]">
+            {#if preview.author.url}
+              <a href={preview.author.url} target="_blank" rel="noopener noreferrer" class="hover:underline">{preview.author.name}</a>
+            {:else}
+              {preview.author.name}
+            {/if}
+          </p>
+        {/if}
+        {#if preview.title}
+          <a
+            href={preview.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            class="block text-base font-semibold whitespace-pre-line text-[#00a8fc] hover:underline"
+            title={preview.title.trimmed ? preview.title.full : undefined}
+          >
+            {preview.title.text}
+          </a>
+        {/if}
+        {#if preview.description}
+          {#if preview.markdown}
+            <DiscordMarkdown text={preview.description.text} compact />
+          {:else}
+            <p class="text-sm leading-[1.375rem] whitespace-pre-line text-[#dbdee1]" style="overflow-wrap:anywhere">
+              {preview.description.text}
+            </p>
+          {/if}
+        {/if}
       </div>
-    {/if}
-  </div>
+      {#if showThumb && firstImage}
+        <img
+          src={firstImage.url}
+          alt={firstImage.alt ?? ""}
+          class="mt-2 h-20 w-20 shrink-0 rounded object-cover"
+          loading="lazy"
+          onerror={hideOnError}
+        />
+      {/if}
+    </div>
 
-  <!-- Footer with favicon, URL, card type, and fetch status -->
-  <div class="flex items-center gap-2 border-t border-white/5 px-4 py-2">
-    {#if data.favicon}
+    {#if preview.layout === "large-image" && firstImage}
       <img
-        src={data.favicon}
-        alt=""
-        class="h-4 w-4 shrink-0 rounded-sm"
+        src={firstImage.url}
+        alt={firstImage.alt ?? ""}
+        class="mt-4 max-h-[300px] w-full rounded object-contain object-left"
         loading="lazy"
-        onerror={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+        onerror={hideOnError}
       />
+    {:else if preview.layout === "gallery"}
+      <div class="mt-4">
+        <MediaMosaic items={preview.images.map((i) => ({ url: i.url, alt: i.alt }))} />
+      </div>
+    {:else if preview.layout === "video" && preview.video}
+      <!-- svelte-ignore a11y_media_has_caption — preview of third-party media -->
+      <video
+        src={preview.video.url}
+        poster={firstImage?.url}
+        controls
+        preload="none"
+        playsinline
+        class="mt-4 max-h-[300px] w-full rounded bg-black"
+      ></video>
     {/if}
-    <p class="min-w-0 flex-1 truncate text-xs text-white/30 font-mono">{data.url}</p>
-    {#if data.twitterCard}
-      <span class="shrink-0 rounded bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-white/40">
-        twitter:{data.twitterCard}
-      </span>
+
+    {#if timestampLabel}
+      <p class="mt-2 text-xs text-[#dbdee1]/70">{timestampLabel}</p>
     {/if}
-    <span
-      class="shrink-0 rounded px-1.5 py-0.5 font-mono text-[10px]
-        {statusOk ? 'bg-emerald-500/10 text-emerald-400/80' : 'bg-red-500/10 text-red-400/80'}"
-    >
-      HTTP {data.status}
-    </span>
-  </div>
-</div>
+  </article>
+{/if}

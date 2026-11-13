@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { fetchMetadata } from "./proxy";
+import { fetchMetadata, inspectEndpoint } from "./proxy";
 
 /**
  * The worker reports failures as `{"error":"..."}` JSON. fetchMetadata must
@@ -65,5 +65,15 @@ describe("fetchMetadata — error surfacing", () => {
     );
     const result = await fetchMetadata("https://example.com/");
     expect(result.title).toBe("t");
+  });
+});
+
+describe("inspectEndpoint", () => {
+  test("encodes the page URL and defaults to the Discord crawler", () => {
+    const endpoint = new URL(inspectEndpoint("https://e.com/a?b=1&c=2"));
+    expect(endpoint.pathname).toBe("/api/inspect");
+    expect(endpoint.searchParams.get("url")).toBe("https://e.com/a?b=1&c=2");
+    expect(endpoint.searchParams.get("ua")).toBe("discord");
+    expect(new URL(inspectEndpoint("https://e.com", "embeddy")).searchParams.get("ua")).toBe("embeddy");
   });
 });
