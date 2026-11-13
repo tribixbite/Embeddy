@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Inspect → Discord link preview: layout names, check copy and component-embed
+  issues. Rules from docs.discord.com/developers/link-previews (overview and
+  component-embeds); the web inspector (site/src/lib/inspect) uses the same wording.
+-->
+<resources>
+    <string name="discord_preview">Discord preview</string>
+    <string name="discord_checks">Discord checks</string>
+    <string name="discord_component_embed">Component embed</string>
+    <string name="discord_show_fallback">Show Open Graph fallback</string>
+    <string name="discord_hide_fallback">Hide Open Graph fallback</string>
+    <string name="discord_fallback_note">Shown when the component embed can\'t be</string>
+    <string name="discord_reading_note">Discord caches previews for about 30 minutes. Layout precedence Discord doesn\'t document is this inspector\'s best reading.</string>
+    <string name="discord_meter_bytes">%1$s / %2$s bytes</string>
+    <string name="discord_meter_components">%1$s / %2$s components</string>
+    <string name="discord_meter_media">%1$s / %2$s media</string>
+    <string name="discord_issues_title">Payload problems</string>
+    <string name="discord_issue_error">Error</string>
+    <string name="discord_issue_warning">Warning</string>
+    <string name="discord_spoiler">Spoiler</string>
+    <string name="discord_play_video">Play video</string>
+    <string name="discord_media_alt">Embed media</string>
+    <string name="discord_thumbnail_alt">Embed thumbnail</string>
+    <string name="discord_status_pass">Passes</string>
+    <string name="discord_status_warn">Warning</string>
+    <string name="discord_status_fail">Fails</string>
+    <string name="discord_status_info">Note</string>
+
+    <!-- Layouts -->
+    <string name="discord_layout_none">No preview</string>
+    <string name="discord_layout_text">Text only</string>
+    <string name="discord_layout_thumbnail">Text with small image</string>
+    <string name="discord_layout_large_image">Text with large image</string>
+    <string name="discord_layout_photo">Image only</string>
+    <string name="discord_layout_video">Inline video</string>
+    <string name="discord_layout_gallery">Image gallery</string>
+    <string name="discord_layout_rich">Rich (markdown description)</string>
+
+    <!-- Checks -->
+    <string name="discord_check_fetched_as_discordbot">Fetched as Discordbot, so sites that vary by crawler serve what Discord gets</string>
+    <string name="discord_check_oembed_unreadable">oEmbed document couldn\'t be read (%1$s): %2$s. Discord ignores oEmbed errors.</string>
+    <string name="discord_check_oembed_not_object">oEmbed document isn\'t a JSON object (%1$s). Discord supports JSON oEmbed only.</string>
+    <string name="discord_check_oembed_read">oEmbed document read: %1$s</string>
+    <string name="discord_check_oembed_ignored_fields">Ignored oEmbed fields: %1$s</string>
+    <string name="discord_check_oembed_multiple">%1$s JSON oEmbed links; Discord uses only the first</string>
+    <string name="discord_check_pair_used">Using &lt;title&gt; and meta description. Discord falls back to this pair only when no Open Graph or Twitter title/description exists.</string>
+    <string name="discord_check_pair_incomplete">&lt;title&gt; / meta description fallback not used: Discord reads them only as a pair</string>
+    <string name="discord_check_title">Title from %1$s</string>
+    <string name="discord_check_title_trimmed">Title trimmed (%1$s bytes, %2$s lines) from %3$s. Limit 70 bytes / 3 lines.</string>
+    <string name="discord_check_no_title">No title. Add og:title.</string>
+    <string name="discord_check_description">Description from %1$s</string>
+    <string name="discord_check_description_trimmed">Description trimmed (%1$s bytes, %2$s lines) from %3$s. Limit 350 bytes / 20 lines.</string>
+    <string name="discord_check_description_markdown">Description rendered as Discord markdown (og:type rich)</string>
+    <string name="discord_check_no_description">No description</string>
+    <string name="discord_check_site_name_too_long">og:site_name is %1$s characters. Over 256 means no preview at all.</string>
+    <string name="discord_check_oembed_provider">oEmbed provider_name overrides og:site_name</string>
+    <string name="discord_check_oembed_author">Author line from oEmbed (the only way to put an author on a preview)</string>
+    <string name="discord_check_og_type_no_effect">og:type \"%1$s\" doesn\'t change the layout. Only rich, video, video.* and instapp:photo do.</string>
+    <string name="discord_check_twitter_card_no_effect">twitter:card \"%1$s\" doesn\'t change the layout. Only player, summary_large_image and photo do.</string>
+    <string name="discord_check_accent_color">Accent colour %1$s</string>
+    <string name="discord_check_theme_color_ignored">theme-color \"%1$s\" is ignored. Discord accepts #RRGGBB or #RRGGBBAA only.</string>
+    <string name="discord_check_timestamp">Timestamp from %1$s</string>
+    <string name="discord_check_date_ignored">%1$s \"%2$s\" is ignored. Use a full RFC 3339 timestamp with a time and an offset.</string>
+    <string name="discord_check_published_time">article:published_time isn\'t read. Discord reads og:pubdate, pubdate or iso-8601-publish-date.</string>
+    <string name="discord_check_oembed_thumbnail_ignored">oEmbed thumbnail ignored: thumbnail_url needs thumbnail_width and thumbnail_height</string>
+    <string name="discord_check_relative_image">Relative image URL not read (%1$s). Relative URLs must start with \"/\".</string>
+    <string name="discord_check_orphan_image_meta">An image size/type/alt tag comes before any og:image, so it attaches to nothing</string>
+    <string name="discord_check_variant_image_meta">Image dimensions follow og:image:url / secure_url / twitter:image:src. They only attach to plain og:image and twitter:image.</string>
+    <string name="discord_check_image_url_too_long">Image URL over 2,048 characters: %1$s</string>
+    <string name="discord_check_image_alt_too_long">Image alt text is %1$s characters. Over 4,096 means no preview at all.</string>
+    <string name="discord_check_image_type_unsupported">og:image:type %1$s isn\'t supported (png, gif, jpg, webp, avif)</string>
+    <string name="discord_check_image_extension">.%1$s image (%2$s). Discord supports png, gif, jpg, webp and avif.</string>
+    <string name="discord_check_image_no_size">Image has no declared width/height (%1$s). Discord fetches it to measure, which spends the 10 s budget.</string>
+    <string name="discord_check_too_many_og_images">%1$s og:image tags, only 4 are shown. A component embed gallery can show 10.</string>
+    <string name="discord_check_relative_video">Relative video URL not read (%1$s). Relative URLs must start with \"/\".</string>
+    <string name="discord_check_twitter_player_page">twitter:player is a player page, not a video file. Discord plays a file from og:video or twitter:player:stream.</string>
+    <string name="discord_check_video_player_page">og:video is a player page (%1$s), not a video file, so the preview has no inline player</string>
+    <string name="discord_check_video_ok">Inline video: %1$s</string>
+    <string name="discord_check_video_needs_type">Video won\'t play inline: set og:type to video.other (or video), or twitter:card to player</string>
+    <string name="discord_check_video_needs_https">Video won\'t play inline: serve the file over https</string>
+    <string name="discord_check_video_needs_image">Video won\'t play inline: add og:image, which is required and becomes the preview frame</string>
+    <string name="discord_check_video_type_unsupported">Video won\'t play inline: %1$s isn\'t supported (video/mp4, video/webm, video/quicktime)</string>
+    <string name="discord_check_video_extension">Video won\'t play inline: .%1$s isn\'t a supported format (mp4, webm, mov)</string>
+    <string name="discord_check_video_url_too_long">Video URL is over 2,048 characters</string>
+    <string name="discord_check_video_layout_no_file">Video layout requested but no video file. Point og:video at an .mp4, .webm or .mov file.</string>
+    <string name="discord_check_oembed_url_too_long">oEmbed %1$s is over 2,048 characters</string>
+    <string name="discord_check_no_preview_blocked">No preview: a rule above means Discord shows nothing for this page</string>
+    <string name="discord_check_nothing_to_preview">Nothing to preview: no title, description, image or video in the server-rendered HTML</string>
+    <string name="discord_check_element_bad_type">%1$s has type=\"%2$s\". Use application/json or application/vnd.discord.component-embed+json.</string>
+    <string name="discord_check_element_not_in_head">The component-embed script must be inside &lt;head&gt;</string>
+    <string name="discord_check_element_no_href">The component-embed link has no href</string>
+    <string name="discord_check_element_host">Linked component embed %1$s must be on this page\'s host, a subdomain of it, or its parent domain</string>
+    <string name="discord_check_element_fetch_failed">Fetching %1$s failed: %2$s</string>
+    <string name="discord_check_element_too_large">%1$s payload is far over 3,000 bytes</string>
+    <string name="discord_check_component_valid">%1$s component embed is valid: %2$s / 3,000 bytes, %3$s / 40 components, %4$s / 10 media</string>
+    <string name="discord_check_component_warnings">%1$s component embed has %2$s warnings: %3$s / 3,000 bytes, %4$s / 40 components, %5$s / 10 media</string>
+    <string name="discord_check_component_invalid">%1$s component embed has %2$s errors, so Discord uses the Open Graph preview: %3$s / 3,000 bytes, %4$s / 40 components, %5$s / 10 media</string>
+    <string name="discord_check_component_multiple">%1$s component-embed elements. Discord doesn\'t document which wins; the first usable one is shown.</string>
+    <string name="discord_check_og_fallback_present">Open Graph fallback present (og:title, og:description, og:image)</string>
+    <string name="discord_check_og_fallback_incomplete">Open Graph fallback incomplete: Discord falls back to og:title, og:description and og:image when a component embed can\'t be shown</string>
+
+    <!-- Component-embed payload issues -->
+    <string name="discord_issue_payload_too_large">Payload is %1$s bytes; the limit is 3,000 (escape sequences count at their written length)</string>
+    <string name="discord_issue_not_json">Not valid JSON: %1$s</string>
+    <string name="discord_issue_not_object">The payload must be a JSON object: { \"component\": { \"type\": 17, … } }</string>
+    <string name="discord_issue_unknown_key">Unknown top-level key \"%1$s\"; the document holds only \"component\"</string>
+    <string name="discord_issue_missing_component">Missing \"component\": the payload needs one parent Container (type 17)</string>
+    <string name="discord_issue_root_not_container">The top-level component must be a Container (type 17), not %1$s</string>
+    <string name="discord_issue_bad_accent">accent_color is an integer RGB value from 0 to 16777215</string>
+    <string name="discord_issue_no_components_array">The Container needs a components array</string>
+    <string name="discord_issue_empty_container">The Container is empty</string>
+    <string name="discord_issue_too_many_components">%1$s components; the limit is 40, the Container included</string>
+    <string name="discord_issue_too_many_gallery_items">%1$s Media Gallery items in total; the limit is 10 across the whole embed</string>
+    <string name="discord_issue_child_not_object">Each component must be an object with a numeric type</string>
+    <string name="discord_issue_nested_container">A Container cannot contain another Container</string>
+    <string name="discord_issue_file_unsupported">File components need an uploaded attachment and aren\'t supported in component embeds</string>
+    <string name="discord_issue_button_outside_row">%1$s can\'t sit directly in the Container; put it in an Action Row or a Section accessory</string>
+    <string name="discord_issue_thumbnail_outside_section">%1$s can\'t sit directly in the Container; put it in a Section accessory</string>
+    <string name="discord_issue_unsupported_type">%1$s isn\'t supported in component embeds (allowed: 1, 2, 9, 10, 11, 12, 14, 17)</string>
+    <string name="discord_issue_bad_id">id must be an integer</string>
+    <string name="discord_issue_bad_boolean">%1$s must be true or false</string>
+    <string name="discord_issue_bad_description">description must be a string</string>
+    <string name="discord_issue_alt_too_long">Alt text is %1$s characters; the limit is 1,024</string>
+    <string name="discord_issue_media_missing">media must be an object with a url</string>
+    <string name="discord_issue_media_attachment">attachment:// only works for bot messages; a web page must use an http(s) URL</string>
+    <string name="discord_issue_media_not_http">Media URLs must use http or https</string>
+    <string name="discord_issue_media_url_too_long">URL is %1$s characters; the limit is 2,048</string>
+    <string name="discord_issue_thumbnail_video">Thumbnails are images; put video in a Media Gallery</string>
+    <string name="discord_issue_media_extension">No recognised extension: make sure the server returns png, gif, jpg, webp or avif images, or mp4, webm or mov video</string>
+    <string name="discord_issue_media_extra_key">%1$s is filled in by Discord after it fetches the asset; leave it out</string>
+    <string name="discord_issue_button_extra_key">Buttons may only use id, type, url, style, label, emoji and disabled. \"%1$s\" invalidates the whole payload</string>
+    <string name="discord_issue_button_not_link">Buttons must be link buttons (style 5)</string>
+    <string name="discord_issue_button_no_url">A link button needs a url</string>
+    <string name="discord_issue_button_url_not_http">Use an http(s) URL</string>
+    <string name="discord_issue_button_url_too_long">Button URL is %1$s characters; the limit is 512</string>
+    <string name="discord_issue_button_no_label">A button needs a label, an emoji, or both</string>
+    <string name="discord_issue_label_too_long">Label is %1$s characters; the limit is 80</string>
+    <string name="discord_issue_bad_emoji">emoji must be an object like { \"name\": \"🔥\" }</string>
+    <string name="discord_issue_text_empty">Text Display needs non-empty content</string>
+    <string name="discord_issue_gallery_item_count">A Media Gallery needs 1 to 10 items</string>
+    <string name="discord_issue_gallery_over_ten">%1$s items; a gallery holds at most 10</string>
+    <string name="discord_issue_gallery_item_not_object">Gallery items must be objects with a media field</string>
+    <string name="discord_issue_bad_spacing">spacing is 1 (small) or 2 (large)</string>
+    <string name="discord_issue_section_text_count">A Section holds one to three Text Display components</string>
+    <string name="discord_issue_section_child_not_text">A Section can only contain Text Display components, not %1$s</string>
+    <string name="discord_issue_section_no_accessory">A Section needs an accessory: a Thumbnail or a link Button</string>
+    <string name="discord_issue_section_bad_accessory">A Section accessory must be a Thumbnail or Button, not %1$s</string>
+    <string name="discord_issue_row_button_count">An Action Row holds one to five link Buttons</string>
+    <string name="discord_issue_row_child_not_button">Only link Buttons work in a component embed\'s Action Row, not %1$s</string>
+</resources>

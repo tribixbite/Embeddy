@@ -224,8 +224,12 @@ fun InspectScreen(viewModel: InspectViewModel = viewModel()) {
 
 @Composable
 private fun MetadataResults(result: MetadataResult) {
-    // Social preview card (Discord-style embed) — only for URL inspections
-    if (result.title != null || result.imageUrl != null) {
+    // URL inspections: the preview Discord would build, its component embed and
+    // every documented rule; the generic card remains for anything without a report
+    val discord = result.discord
+    if (discord != null) {
+        DiscordSection(discord)
+    } else if (result.title != null || result.imageUrl != null) {
         SocialPreviewCard(result)
     }
 

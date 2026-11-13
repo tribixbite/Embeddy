@@ -6,6 +6,17 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
 import androidx.exifinterface.media.ExifInterface
+import app.embeddy.inspect.discord.ComponentEmbedRules
+import app.embeddy.inspect.discord.ComponentEmbedSource
+import app.embeddy.inspect.discord.DiscordReport
+import app.embeddy.inspect.discord.DiscordUserAgents
+import app.embeddy.inspect.discord.EmbedSourceKind
+import app.embeddy.inspect.discord.MetaTag
+import app.embeddy.inspect.discord.OEmbedSource
+import app.embeddy.inspect.discord.PageFacts
+import app.embeddy.inspect.discord.analyzeUnfurl
+import app.embeddy.inspect.discord.isLinkedEmbedHostAllowed
+import app.embeddy.inspect.discord.utf8Length
 import app.embeddy.util.FileInfoUtils
 import app.embeddy.util.UriStaging
 import app.embeddy.viewmodel.rethrowIfCancellation
@@ -16,6 +27,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
+import org.jsoup.nodes.Element
 import timber.log.Timber
 import java.io.File
 import java.util.Locale
@@ -31,6 +43,10 @@ class MetadataEngine {
     /**
      * Fetch and parse metadata from the given URL.
      *
+     * The page is fetched with Discord's crawler user agent, so sites that vary
+     * by crawler serve what Discord gets, and the result carries a
+     * [DiscordReport] (layout, checks, component embeds).
+     *
      * The URL is always fetched over HTTPS ([normalizeInspectUrl]): cleartext
      * HTTP is blocked for apps targeting API 28+, so a typed `http://` link
      * used to fail with a raw "Cleartext HTTP traffic … not permitted"
@@ -41,13 +57,14 @@ class MetadataEngine {
 
         try {
             val doc: Document = Jsoup.connect(normalizedUrl)
-                .userAgent(USER_AGENT)
+                .userAgent(DiscordUserAgents.PAGE)
                 .timeout(15_000)
                 .followRedirects(true)
-                .maxBodySize(256_000) // Only parse first 256KB
+                .maxBodySize(MAX_PAGE_BYTES)
                 .get()
 
-            parseDocument(normalizedUrl, doc)
+            // Redirects change the page URL that relative tags resolve against
+            parseDocument(doc.location().ifBlank { normalizedUrl }, doc)
         } catch (e: Exception) {
             e.rethrowIfCancellation()
             Timber.w(e, "Fetch failed for %s", normalizedUrl)
@@ -245,9 +262,10 @@ class MetadataEngine {
 
     /** Parse a Jsoup Document for meta tags, title, and link elements. */
     private fun parseDocument(url: String, doc: Document): MetadataResult {
-        val ogTags = mutableMapOf<String, String>()
-        val twitterTags = mutableMapOf<String, String>()
-        val generalTags = mutableMapOf<String, String>()
+        val ogTags = linkedMapOf<String, String>()
+        val twitterTags = linkedMapOf<String, String>()
+        val generalTags = linkedMapOf<String, String>()
+        val metaTags = collectMetaTags(doc)
 
         // Page title
         doc.title().takeIf { it.isNotBlank() }?.let { generalTags["title"] = it }
@@ -267,20 +285,16 @@ class MetadataEngine {
         doc.selectFirst("meta[charset]")?.attr("charset")
             ?.takeIf { it.isNotBlank() }?.let { generalTags["charset"] = it }
 
-        // All <meta> tags with property or name attributes
-        doc.select("meta[property], meta[name]").forEach { meta ->
-            val property = meta.attr("property").ifBlank { meta.attr("name") }
-            val content = meta.attr("content")
-            if (property.isBlank() || content.isBlank()) return@forEach
-
+        // Meta tags keyed as Discord keys them; the first non-empty value of a
+        // key is the one shown (Discord's rule for title/description/site name)
+        for (tag in metaTags) {
+            val key = tag.key
+            val content = tag.value
+            if (key.isBlank() || content.isBlank()) continue
             when {
-                property.startsWith("og:") -> ogTags[property] = content
-                property.startsWith("twitter:") -> twitterTags[property] = content
-                property == "description" -> generalTags["description"] = content
-                property == "author" -> generalTags["author"] = content
-                property == "theme-color" -> generalTags["theme-color"] = content
-                property == "robots" -> generalTags["robots"] = content
-                property == "generator" -> generalTags["generator"] = content
+                key.startsWith("og:") -> ogTags.putIfAbsent(key, content)
+                key.startsWith("twitter:") -> twitterTags.putIfAbsent(key, content)
+                key in GENERAL_META_KEYS -> generalTags.putIfAbsent(key, content)
             }
         }
 
@@ -298,13 +312,115 @@ class MetadataEngine {
             }
         }
 
+        val discord = analyzeUnfurl(
+            PageFacts(
+                url = url,
+                htmlTitle = doc.selectFirst("title")?.text().orEmpty(),
+                tags = metaTags,
+                componentEmbeds = collectComponentEmbeds(url, doc),
+                oembed = fetchOEmbed(doc),
+            ),
+        )
+
         return MetadataResult(
             url = url,
             ogTags = ogTags,
             twitterTags = twitterTags,
             generalTags = generalTags,
+            discord = discord,
         )
     }
+
+    /**
+     * Every `<meta>` in document order, keyed the way Discord reads them: the
+     * key is `name` when present, else `property`; the value is `content`
+     * when present, else `value`. Keys stay case-sensitive.
+     */
+    private fun collectMetaTags(doc: Document): List<MetaTag> = doc.select("meta").mapNotNull { meta ->
+        val (key, attr) = when {
+            meta.hasAttr("name") -> meta.attr("name") to "name"
+            meta.hasAttr("property") -> meta.attr("property") to "property"
+            else -> return@mapNotNull null
+        }
+        val value = if (meta.hasAttr("content")) meta.attr("content") else meta.attr("value")
+        MetaTag(key = key, value = value, attr = attr)
+    }
+
+    /**
+     * Inline `<script id="discord:component-embed">` payloads (raw text, as
+     * written) and `<link rel="discord:component-embed">` documents, fetched
+     * as Discord does when the href is on an allowed host.
+     */
+    private fun collectComponentEmbeds(pageUrl: String, doc: Document): List<ComponentEmbedSource> {
+        val inline = doc.select("script").filter { it.id() == ComponentEmbedRules.ELEMENT_ID }.map { script ->
+            val raw = script.data()
+            ComponentEmbedSource(
+                source = EmbedSourceKind.INLINE,
+                type = script.attr("type").takeIf { script.hasAttr("type") },
+                raw = raw,
+                bytes = utf8Length(raw),
+                inHead = script.parents().any { it.normalName() == "head" },
+            )
+        }
+        val linked = doc.select("link[rel]")
+            .filter { link -> link.attr("rel").split(Regex("\\s+")).any { it == ComponentEmbedRules.ELEMENT_ID } }
+            .take(MAX_LINKED_EMBEDS)
+            .map { link -> fetchLinkedEmbed(pageUrl, link) }
+        return inline + linked
+    }
+
+    /** Fetch one linked component embed with Discord's JSON user agent. */
+    private fun fetchLinkedEmbed(pageUrl: String, link: Element): ComponentEmbedSource {
+        val href = link.attr("href").trim()
+        val type = link.attr("type").takeIf { link.hasAttr("type") }
+        val allowed = href.isNotEmpty() && isLinkedEmbedHostAllowed(href, pageUrl)
+        if (!allowed) {
+            // An empty href is reported as missing, not as a host problem
+            return ComponentEmbedSource(
+                EmbedSourceKind.LINKED, type, raw = null, bytes = 0,
+                href = href, hostAllowed = if (href.isEmpty()) null else false,
+            )
+        }
+        return try {
+            val body = fetchJsonDocument(href, MAX_EMBED_JSON_BYTES)
+            val bytes = utf8Length(body)
+            ComponentEmbedSource(
+                source = EmbedSourceKind.LINKED,
+                type = type,
+                raw = body,
+                bytes = bytes,
+                href = href,
+                hostAllowed = true,
+                truncated = bytes >= MAX_EMBED_JSON_BYTES,
+            )
+        } catch (e: Exception) {
+            e.rethrowIfCancellation()
+            ComponentEmbedSource(EmbedSourceKind.LINKED, type, raw = null, bytes = 0, href = href, hostAllowed = true, error = e.message ?: e.javaClass.simpleName)
+        }
+    }
+
+    /** The first JSON oEmbed discovery link, fetched (Discord ignores XML oEmbed and later links). */
+    private fun fetchOEmbed(doc: Document): OEmbedSource? {
+        val links = doc.select("link[type]").filter { it.attr("type").equals("application/json+oembed", ignoreCase = true) }
+        val first = links.firstOrNull() ?: return null
+        val href = first.attr("abs:href").ifBlank { first.attr("href") }
+        return try {
+            OEmbedSource(href, fetchJsonDocument(href, MAX_OEMBED_BYTES), error = null, count = links.size)
+        } catch (e: Exception) {
+            e.rethrowIfCancellation()
+            OEmbedSource(href, raw = null, error = e.message ?: e.javaClass.simpleName, count = links.size)
+        }
+    }
+
+    /** GET a JSON document as Discordbot/2.0, reading at most [maxBytes]. */
+    private fun fetchJsonDocument(url: String, maxBytes: Int): String =
+        Jsoup.connect(normalizeInspectUrl(url))
+            .userAgent(DiscordUserAgents.JSON)
+            .ignoreContentType(true)
+            .timeout(SUBFETCH_TIMEOUT_MS)
+            .maxBodySize(maxBytes)
+            .execute()
+            .body()
 
     /**
      * Use FFprobeKit to extract detailed stream info not available from MediaMetadataRetriever:
@@ -474,7 +590,16 @@ class MetadataEngine {
     }
 
     companion object {
-        private const val USER_AGENT = "Embeddy/1.0 (Link Preview Bot)"
+        /** Bytes of the page that are parsed (Discord reads up to 50 MB; tags live near the top) */
+        private const val MAX_PAGE_BYTES = 2 * 1024 * 1024
+
+        /** Linked component-embed documents; anything this big is far past the 3,000-byte limit */
+        private const val MAX_EMBED_JSON_BYTES = 16 * 1024
+        private const val MAX_OEMBED_BYTES = 32 * 1024
+        private const val MAX_LINKED_EMBEDS = 3
+        private const val SUBFETCH_TIMEOUT_MS = 5_000
+
+        private val GENERAL_META_KEYS = setOf("description", "author", "theme-color", "robots", "generator")
 
         /** How much of the video to walk when sampling keyframe cadence. */
         private const val KEYFRAME_SAMPLE_SECONDS = 30
@@ -491,6 +616,8 @@ data class MetadataResult(
     val twitterTags: Map<String, String> = emptyMap(),
     val generalTags: Map<String, String> = emptyMap(),
     val mediaTags: Map<String, String> = emptyMap(),
+    /** Discord link-preview analysis (URL inspections only) */
+    val discord: DiscordReport? = null,
     /** Raw failure detail (logged/secondary); [fetchError] drives the UI copy. */
     val error: String? = null,
     val fetchError: FetchError? = null,
