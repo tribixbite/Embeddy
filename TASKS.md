@@ -447,3 +447,36 @@ RSA 4096, valid to 2053); all 4 CI secrets set; v0.1.55 APKs and `.aab` both sig
 - [ ] **11.16** F-Droid (owner): push the recipe to a branch of gitlab.com/tribixbite/fdroiddata so its CI
   runs the real buildserver build + reproducibility check (not yet verified anywhere outside our CI),
   then open the fdroiddata MR. Steps: fdroid/README.md "Submitting".
+
+## Phase 12: 2026-11-13 Discord link previews and component embeds (web Inspect)
+
+Discord published link-preview docs and component embeds on 2026-10-05
+(docs.discord.com/developers/link-previews/overview and /component-embeds).
+
+- [x] **12.1** Worker `/api/inspect` reads pages the way Discord does: `ua=discord` (default,
+  Discordbot UA) or `ua=embeddy`; meta key = `name` ?? `property`, value = `content` ?? `value`,
+  document order kept; first JSON oEmbed link fetched; inline `<script id="discord:component-embed">`
+  (raw text, byte size, `<head>` placement) and linked JSON (same-site rule, `Discordbot/2.0`) captured;
+  JSON-LD blocks; redirect chain, timing, Content-Disposition. Direct image/video URLs are results, not 422.
+- [x] **12.2** Fixed while testing on real pages: HTML entities were never decoded (HTMLRewriter returns
+  attributes/text raw — titles showed `&amp;`, YouTube's oEmbed href 404'd); `<title>` picked up inline
+  SVG titles from `<body>` ("GitHubLinkedIn").
+- [x] **12.3** Site libs (tested): `discord-unfurl.ts` (layout, fields, limits, checks),
+  `component-embed.ts` (validator), `discord-markdown.ts` (escaped renderer), `gallery-layout.ts`.
+- [x] **12.4** Inspect UI: Discord-accurate preview in a message mock, component-embed renderer with
+  OG-fallback toggle, grouped checks, cache-busted URL, Embed Debugger link; new Component JSON mode
+  (templates, meters, validation, preview, inline/linked markup).
+- [x] **12.5** embeddy.link pages ship their own component embed (`lib/site-embed.ts`, Layout.astro).
+- [x] **12.6** Verified: worker 81 tests, site 363 tests, astro check 0 errors, build OK; headless
+  Chromium E2E at 412 px and 1280 px (real YouTube/GitHub/embeddy.link + fixture pages): no console
+  errors, no horizontal overflow.
+- [ ] **12.7** Deploy (owner approval): `wrangler deploy` the worker, then the site. Until the worker is
+  deployed the live site's Inspect gets the old response shape (old fields still render).
+- [ ] **12.8** Check a real component-embed page in Discord's Embed Debugger against the inspector's
+  reading, especially the layout precedence Discord doesn't document (conflicting layout tags,
+  JSON-LD vs Open Graph, inline vs linked embed).
+- [ ] **12.9** Android Inspect parity (Jsoup MetadataEngine): component-embed detection/validation and
+  Discord layout rules.
+- [ ] **12.10** Named HTML entities: worker decodes numeric refs and a common subset of names; vendor the
+  full WHATWG table if rarer names matter (TODO in worker/src/html-entities.ts).
+

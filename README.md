@@ -78,6 +78,23 @@ Every push to `main` triggers a CI build that produces split-ABI APKs:
 - Extracts favicon, canonical URL, charset, theme-color, robots, generator
 - Powered by Jsoup for robust HTML parsing
 
+On the web ([embeddy.link/tools/inspect](https://embeddy.link/tools/inspect/)) the
+inspector follows Discord's [link-preview rules](https://docs.discord.com/developers/link-previews/overview):
+
+- Fetches as Discordbot (or as Embeddy) and reads tags the way Discord does — `name`
+  before `property`, first-wins text, last-wins layout/color/date tags
+- Draws the layout Discord picks: small or large image, image only, inline video,
+  4-image gallery, or rich markdown; with oEmbed author/provider and JSON-LD `VideoObject`
+- Renders [component embeds](https://docs.discord.com/developers/link-previews/component-embeds)
+  (inline or linked `discord:component-embed` JSON) and shows the Open Graph fallback
+- Checks every documented limit: 3,000-byte payload, 40 components, 10 gallery items,
+  title/description byte trims, 2,048-char URLs, image formats and dimensions, video
+  requirements, redirects, `Content-Disposition`, the 10 s budget
+- **Component JSON** builder: templates, live validation, preview, and copy-ready
+  `<script>` / `<link>` markup
+- Cache-busted share URL (Discord caches previews ~30 min) and a link to Discord's
+  Embed Debugger
+
 ### Upload — Anonymous file hosting
 
 - Upload to **0x0.st** (512 MB) or **catbox.moe** (200 MB)
