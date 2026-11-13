@@ -6,12 +6,13 @@
   let {
     disabled = false,
     onfetch,
+    url = $bindable(""),
   }: {
     disabled?: boolean;
     onfetch: (url: string) => void;
+    /** The field's text; bind it to prefill from outside (e.g. ?url=) */
+    url?: string;
   } = $props();
-
-  let url = $state("");
 
   function handleSubmit(e: Event) {
     e.preventDefault();

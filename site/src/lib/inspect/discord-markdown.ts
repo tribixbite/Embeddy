@@ -9,6 +9,7 @@
  * Supported (Discord's message-formatting subset):
  *   blocks — `# / ## / ###` headings, `-# ` subtext, `> ` and `>>> ` quotes,
  *            `- ` / `* ` / `1. ` lists (indent = nesting), ``` code fences
+ *            (```ansi blocks get Discord's colour palette)
  *   inline — ***bold italic***, **bold**, __underline__, *italic*, _italic_,
  *            ~~strike~~, ||spoiler||, `code`, [masked](https://links),
  *            bare / <angle-bracketed> URLs, <t:unix:style> timestamps,
@@ -256,6 +257,77 @@ function renderBlocks(lines: string[], now: number): string {
 }
 
 /**
+ * Discord's ```ansi palette (Solarized-based), indexed by SGR code. Discord
+ * honours only these: 0 reset, 1 bold, 4 underline, 30–37 foreground and
+ * 40–47 background; anything else is ignored.
+ */
+export const ANSI_FOREGROUND: Record<number, string> = {
+  30: "#4f545c",
+  31: "#dc322f",
+  32: "#859900",
+  33: "#b58900",
+  34: "#268bd2",
+  35: "#d33682",
+  36: "#2aa198",
+  37: "#ffffff",
+};
+export const ANSI_BACKGROUND: Record<number, string> = {
+  40: "#002b36",
+  41: "#cb4b16",
+  42: "#586e75",
+  43: "#657b83",
+  44: "#839496",
+  45: "#6c71c4",
+  46: "#93a1a1",
+  47: "#fdf6e3",
+};
+
+/**
+ * Render the body of an ```ansi block: SGR escapes (`ESC[1;35m`) become
+ * styled spans and are removed from the text. Text is HTML-escaped and
+ * styles only ever come from the fixed palettes above, so the output stays
+ * safe for {@html}.
+ */
+export function renderAnsi(code: string): string {
+  let bold = false;
+  let underline = false;
+  let fg: string | undefined;
+  let bg: string | undefined;
+  let out = "";
+  const sgr = /\u001b\[([\d;]*)m/g;
+  let last = 0;
+  const emit = (text: string) => {
+    if (!text) return;
+    const style = [
+      fg ? `color:${fg}` : "",
+      bg ? `background-color:${bg}` : "",
+      bold ? "font-weight:700" : "",
+      underline ? "text-decoration:underline" : "",
+    ].filter(Boolean);
+    const escaped = escapeHtml(text);
+    out += style.length ? `<span style="${style.join(";")}">${escaped}</span>` : escaped;
+  };
+  for (let m = sgr.exec(code); m; m = sgr.exec(code)) {
+    emit(code.slice(last, m.index));
+    last = m.index + m[0].length;
+    // An empty parameter list means reset, as in ESC[m
+    for (const part of (m[1] || "0").split(";")) {
+      const n = Number(part || "0");
+      if (n === 0) {
+        bold = underline = false;
+        fg = bg = undefined;
+      } else if (n === 1) bold = true;
+      else if (n === 4) underline = true;
+      else if (ANSI_FOREGROUND[n]) fg = ANSI_FOREGROUND[n];
+      else if (ANSI_BACKGROUND[n]) bg = ANSI_BACKGROUND[n];
+    }
+  }
+  emit(code.slice(last));
+  // A stray ESC without a complete sequence is not printed by Discord either
+  return out.replace(/\u001b/g, "");
+}
+
+/**
  * Render Discord markdown to safe HTML.
  * @param src Raw markdown as Discord would receive it
  * @param now Clock for relative timestamps (injectable for tests)
@@ -268,7 +340,8 @@ export function renderDiscordMarkdown(src: string, now = Date.now()): string {
   for (let m = fence.exec(text); m; m = fence.exec(text)) {
     html += renderBlocks(text.slice(last, m.index).replace(/\n$/, "").split("\n"), now);
     const lang = m[1] ? ` data-lang="${escapeHtml(m[1])}"` : "";
-    html += `<pre${lang}><code>${escapeHtml(m[2]!.replace(/\n$/, ""))}</code></pre>`;
+    const code = m[2]!.replace(/\n$/, "");
+    html += `<pre${lang}><code>${m[1]?.toLowerCase() === "ansi" ? renderAnsi(code) : escapeHtml(code)}</code></pre>`;
     last = m.index + m[0].length;
   }
   const tail = text.slice(last).replace(/^\n/, "");

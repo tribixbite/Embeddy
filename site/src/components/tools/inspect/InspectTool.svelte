@@ -9,6 +9,7 @@
    *   File EXIF      read metadata from a local image (exifr / RIFF parser)
    * States: idle → fetching → done / exif / error
    */
+  import { onMount } from "svelte";
   import FileDropZone from "../shared/FileDropZone.svelte";
   import GlobalFileIntake from "../shared/GlobalFileIntake.svelte";
   import Spinner from "../shared/Spinner.svelte";
@@ -48,6 +49,17 @@
   /** Payload handed to the builder; changing it remounts the builder */
   let builderSeed: string | undefined = $state(undefined);
   let showFallback = $state(false);
+  /** Text in the URL field (bound so ?url= can prefill it) */
+  let urlText = $state("");
+
+  // /tools/inspect/?url=… inspects that URL straight away (the showcase links here)
+  onMount(() => {
+    const requested = new URLSearchParams(window.location.search).get("url");
+    if (requested && /^https?:\/\//i.test(requested)) {
+      urlText = requested;
+      void handleFetch(requested);
+    }
+  });
 
   let report = $derived(metadata ? analyzeUnfurl(metadata) : null);
   let active = $derived(report?.activeComponentEmbed);
@@ -198,7 +210,7 @@
   {:else}
     {#if mode === "url"}
       <div class="space-y-3">
-        <UrlInput disabled={state === "fetching"} onfetch={handleFetch} />
+        <UrlInput disabled={state === "fetching"} onfetch={handleFetch} bind:url={urlText} />
         <ToggleGroup
           label="Fetch as"
           bind:value={crawler}

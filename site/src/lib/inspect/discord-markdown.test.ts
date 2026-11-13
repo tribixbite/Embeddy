@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { formatDiscordTimestamp, renderDiscordMarkdown, renderInline } from "./discord-markdown";
+import { formatDiscordTimestamp, renderAnsi, renderDiscordMarkdown, renderInline } from "./discord-markdown";
 
 describe("renderInline — safety", () => {
   test("escapes raw HTML instead of emitting it", () => {
@@ -94,5 +94,31 @@ describe("formatDiscordTimestamp", () => {
   });
   test("invalid input falls back to the number", () => {
     expect(formatDiscordTimestamp(Number.NaN, "f")).toBe("NaN");
+  });
+});
+
+describe("ansi code blocks", () => {
+  const ESC = "\u001b";
+
+  test("colours, bold and reset become styled spans with the escapes removed", () => {
+    const html = renderAnsi(`${ESC}[1;35m3000${ESC}[0m bytes`);
+    expect(html).toBe('<span style="color:#d33682;font-weight:700">3000</span> bytes');
+  });
+
+  test("background and underline combine; ESC[m resets", () => {
+    const html = renderAnsi(`${ESC}[4;41mhot${ESC}[m cold`);
+    expect(html).toBe('<span style="background-color:#cb4b16;text-decoration:underline">hot</span> cold');
+  });
+
+  test("text inside spans is escaped and unknown codes are ignored", () => {
+    const html = renderAnsi(`${ESC}[38;31m<img src=x>`);
+    expect(html).toBe('<span style="color:#dc322f">&lt;img src=x&gt;</span>');
+    expect(renderAnsi(`a${ESC}b`)).toBe("ab");
+  });
+
+  test("only ```ansi fences are coloured", () => {
+    const md = "```ansi\n" + ESC + "[32mok\n```";
+    expect(renderDiscordMarkdown(md)).toBe('<pre data-lang="ansi"><code><span style="color:#859900">ok</span></code></pre>');
+    expect(renderDiscordMarkdown("```js\n" + ESC + "[32mok\n```")).toContain(ESC);
   });
 });
