@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import app from "./index";
+import { isLinkedEmbedHostAllowed } from "./discord-sources";
+import { decodeHtmlEntities } from "./html-entities";
 import {
+  MAX_EMBED_JSON_BYTES,
   MAX_ERROR_TEXT_CHARS,
   MAX_TAGS,
   MAX_TAG_CONTENT_CHARS,
@@ -76,6 +79,35 @@ describe("GET /api/inspect — meta extraction", () => {
     });
   });
 
+  test("decodes HTML entities in values, titles and hrefs (HTMLRewriter returns them raw)", async () => {
+    const seen: string[] = [];
+    installFetch((url) => {
+      seen.push(url);
+      if (url.includes("oembed")) return new Response("{}");
+      return html(`<head><title>Video &amp; GIF</title>
+        <meta property="og:title" content="Tom &amp; Jerry&#39;s &quot;Show&quot; &mdash; &#x1F600; &unknown;">
+        <link type="application/json+oembed" href="/oembed?format=json&amp;url=x"></head>`);
+    });
+    const { body } = await inspect("https://example.com/");
+    expect(body.title).toBe("Video & GIF");
+    expect((body.tags as Array<{ content: string }>)[0]!.content).toBe('Tom & Jerry\'s "Show" — 😀 &unknown;');
+    expect(seen[1]).toBe("https://example.com/oembed?format=json&url=x");
+  });
+
+  test("reports the upstream HTML size it read", async () => {
+    installFetch(() => html(`<head><title>x</title></head>${"a".repeat(5000)}`));
+    const { body } = await inspect("https://example.com/");
+    expect((body.fetch as { bytesRead: number }).bytesRead).toBe(5000 + "<head><title>x</title></head>".length);
+  });
+
+  test("only the first <title> counts — inline SVG titles in <body> are ignored", async () => {
+    installFetch(() =>
+      html(`<head><title>Profile · GitHub</title></head><body><svg><title>LinkedIn</title></svg></body>`),
+    );
+    const { body } = await inspect("https://example.com/");
+    expect(body.title).toBe("Profile · GitHub");
+  });
+
   test("falls back to <meta name=description> when og:description is absent", async () => {
     installFetch(() => html(`<head><meta name="description" content="Plain desc"></head>`));
     const { body } = await inspect("https://example.com/");
@@ -96,7 +128,7 @@ describe("GET /api/inspect — meta extraction", () => {
     expect(body.favicon).toBe("https://www.example.com/fav.png");
   });
 
-  test("non-HTML content is 422 and its body is released", async () => {
+  test("a direct image URL is a media result (Discord previews it bare) and its body is released", async () => {
     let cancelled = false;
     installFetch(
       () =>
@@ -113,9 +145,17 @@ describe("GET /api/inspect — meta extraction", () => {
         ),
     );
     const { status, body } = await inspect("https://example.com/a.png");
+    expect(status).toBe(200);
+    expect(body.direct).toEqual({ kind: "image" });
+    expect(body.tags).toEqual([]);
+    expect(cancelled).toBe(true);
+  });
+
+  test("non-HTML, non-media content is 422", async () => {
+    installFetch(() => new Response("%PDF", { headers: { "content-type": "application/pdf" } }));
+    const { status, body } = await inspect("https://example.com/a.pdf");
     expect(status).toBe(422);
     expect(String(body.error)).toContain("HTML");
-    expect(cancelled).toBe(true);
   });
 
   test("upstream error status is 502", async () => {
@@ -123,6 +163,155 @@ describe("GET /api/inspect — meta extraction", () => {
     const { status, body } = await inspect("https://example.com/");
     expect(status).toBe(502);
     expect(String(body.error)).toContain("500");
+  });
+});
+
+describe("GET /api/inspect — Discord sources", () => {
+  test("keys tags Discord's way: name before property, content before value, document order kept", async () => {
+    installFetch(() =>
+      html(`<head>
+        <meta name="twitter:title" property="og:title" content="Both">
+        <meta property="og:image" value="https://cdn.example.com/v.png">
+        <meta property="OG:Title" content="Case kept">
+      </head>`),
+    );
+    const { body } = await inspect("https://example.com/");
+    expect(body.tags).toEqual([
+      { property: "twitter:title", content: "Both", attr: "name" },
+      { property: "og:image", content: "https://cdn.example.com/v.png", attr: "property" },
+      { property: "OG:Title", content: "Case kept", attr: "property" },
+    ]);
+  });
+
+  test("sends Discord's crawler user agent by default and ours on ua=embeddy", async () => {
+    const seen: string[] = [];
+    installFetch((_url, init) => {
+      seen.push(new Headers(init?.headers).get("user-agent") ?? "");
+      return html("<title>x</title>");
+    });
+    await inspect("https://example.com/");
+    await app.request(`/api/inspect?url=${encodeURIComponent("https://example.com/")}&ua=embeddy`);
+    expect(seen[0]).toContain("Discordbot/2.0");
+    expect(seen[1]).toContain("Embeddy/1.0");
+  });
+
+  test("captures an inline component embed raw, with its byte size and <head> placement", async () => {
+    const payload = '{"component":{"type":17,"components":[{"type":10,"content":"héllo \\u003c"}]}}';
+    installFetch(() =>
+      html(`<html><head><script id="discord:component-embed" type="application/json">${payload}</script></head>
+        <body><script id="discord:component-embed" type="application/json">{}</script></body></html>`),
+    );
+    const { body } = await inspect("https://example.com/");
+    const embeds = body.componentEmbeds as Array<Record<string, unknown>>;
+    expect(embeds).toHaveLength(2);
+    expect(embeds[0]).toMatchObject({ source: "inline", type: "application/json", inHead: true, raw: payload, truncated: false });
+    expect(embeds[0]!.bytes).toBe(new TextEncoder().encode(payload).byteLength);
+    expect(embeds[1]).toMatchObject({ source: "inline", inHead: false, raw: "{}" });
+  });
+
+  test("fetches a same-site linked component embed with Discord's JSON user agent", async () => {
+    let jsonUa = "";
+    installFetch((url, init) => {
+      if (url === "https://cdn.example.com/embed.json") {
+        jsonUa = new Headers(init?.headers).get("user-agent") ?? "";
+        return new Response('{"component":{"type":17,"components":[]}}');
+      }
+      return html(`<head><link rel="discord:component-embed" type="application/json" href="https://cdn.example.com/embed.json"></head>`);
+    });
+    const { body } = await inspect("https://example.com/post");
+    const [linked] = body.componentEmbeds as Array<Record<string, unknown>>;
+    expect(linked).toMatchObject({
+      source: "linked",
+      hostAllowed: true,
+      fetchStatus: 200,
+      raw: '{"component":{"type":17,"components":[]}}',
+    });
+    expect(jsonUa).toBe("Discordbot/2.0");
+  });
+
+  test("does not fetch a linked component embed on another site", async () => {
+    const fetched: string[] = [];
+    installFetch((url) => {
+      fetched.push(url);
+      return html(`<head><link rel="discord:component-embed" type="application/json" href="https://evil.example.net/e.json"></head>`);
+    });
+    const { body } = await inspect("https://example.com/");
+    const [linked] = body.componentEmbeds as Array<Record<string, unknown>>;
+    expect(linked).toMatchObject({ hostAllowed: false });
+    expect(linked!.raw).toBeUndefined();
+    expect(fetched).toEqual(["https://example.com/"]);
+  });
+
+  test("reads the first JSON oEmbed link, counts the rest, and survives a failing oEmbed", async () => {
+    installFetch((url) => {
+      if (url === "https://example.com/oembed?u=1") return new Response('{"type":"link","author_name":"Ann"}');
+      if (url === "https://example.com/oembed?u=2") return new Response("x", { status: 500 });
+      return html(`<head>
+        <link rel="alternate" type="application/json+oembed" href="/oembed?u=1">
+        <link rel="alternate" type="application/json+oembed" href="/oembed?u=2">
+      </head>`);
+    });
+    const { status, body } = await inspect("https://example.com/");
+    expect(status).toBe(200);
+    expect(body.oembed).toMatchObject({
+      href: "https://example.com/oembed?u=1",
+      count: 2,
+      status: 200,
+      raw: '{"type":"link","author_name":"Ann"}',
+    });
+
+    installFetch((url) =>
+      url.includes("oembed")
+        ? new Response("x", { status: 500 })
+        : html(`<head><link type="application/json+oembed" href="/oembed"></head>`),
+    );
+    const failed = await inspect("https://example.com/");
+    expect(failed.status).toBe(200);
+    expect(failed.body.oembed).toMatchObject({ status: 500, error: "HTTP 500" });
+  });
+
+  test("collects JSON-LD blocks and fetch facts (redirect chain, disposition)", async () => {
+    installFetch((url) => {
+      if (url === "https://example.com/a") {
+        return new Response(null, { status: 302, headers: { location: "/b" } });
+      }
+      return new Response(
+        `<head><script type="application/ld+json">{"@type":"VideoObject","name":"V"}</script></head>`,
+        { headers: { "content-type": "text/html", "content-disposition": "attachment" } },
+      );
+    });
+    const { body } = await inspect("https://example.com/a");
+    expect(body.jsonLd).toEqual([{ raw: '{"@type":"VideoObject","name":"V"}', bytes: 34, truncated: false }]);
+    expect(body.fetch).toMatchObject({
+      requestedUrl: "https://example.com/a",
+      redirects: ["https://example.com/a"],
+      userAgent: "discord",
+      contentDisposition: "attachment",
+      readCapped: false,
+    });
+  });
+
+  test("an oversized inline payload is cut at the cap and flagged", async () => {
+    const big = `{"component":{"type":17,"components":[{"type":10,"content":"${"a".repeat(MAX_EMBED_JSON_BYTES)}"}]}}`;
+    installFetch(() => html(`<head><script id="discord:component-embed" type="application/json">${big}</script></head>`));
+    const { body } = await inspect("https://example.com/");
+    const [inline] = body.componentEmbeds as Array<{ raw: string; bytes: number; truncated: boolean }>;
+    expect(inline!.truncated).toBe(true);
+    expect(inline!.bytes).toBeGreaterThan(MAX_EMBED_JSON_BYTES);
+    expect(inline!.raw.length).toBeLessThanOrEqual(MAX_EMBED_JSON_BYTES);
+  });
+});
+
+describe("isLinkedEmbedHostAllowed", () => {
+  test("same host, subdomain and parent domain pass; siblings, relative and other sites fail", () => {
+    const page = "https://www.example.com/post";
+    expect(isLinkedEmbedHostAllowed("https://www.example.com/e.json", page)).toBe(true);
+    expect(isLinkedEmbedHostAllowed("https://cdn.www.example.com/e.json", page)).toBe(true);
+    expect(isLinkedEmbedHostAllowed("https://example.com/e.json", page)).toBe(true);
+    expect(isLinkedEmbedHostAllowed("https://cdn.example.com/e.json", page)).toBe(false);
+    expect(isLinkedEmbedHostAllowed("/e.json", page)).toBe(false);
+    expect(isLinkedEmbedHostAllowed("https://notexample.com/e.json", "https://example.com/")).toBe(false);
+    expect(isLinkedEmbedHostAllowed("ftp://example.com/e.json", "https://example.com/")).toBe(false);
   });
 });
 
@@ -219,5 +408,14 @@ describe("truncate / isTimeoutError", () => {
     expect(isTimeoutError(new DOMException("t", "TimeoutError"))).toBe(true);
     expect(isTimeoutError(new DOMException("a", "AbortError"))).toBe(true);
     expect(isTimeoutError(new Error("x"))).toBe(false);
+  });
+});
+
+describe("decodeHtmlEntities", () => {
+  test("numeric, hex and named references; invalid code points become U+FFFD", () => {
+    expect(decodeHtmlEntities("&#65;&#x42;&eacute;&nbsp;")).toBe("ABé ");
+    expect(decodeHtmlEntities("&#0;&#xD800;")).toBe("��");
+    expect(decodeHtmlEntities("a & b &amp c")).toBe("a & b &amp c");
+    expect(decodeHtmlEntities("plain")).toBe("plain");
   });
 });

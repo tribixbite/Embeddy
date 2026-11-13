@@ -142,8 +142,9 @@ describe("safeFetch — redirects", () => {
       ),
     );
 
-    const { response, finalUrl } = await safeFetch("https://a.example/", {});
+    const { response, finalUrl, redirects } = await safeFetch("https://a.example/", {});
     expect(finalUrl).toBe("https://b.example/final");
+    expect(redirects).toEqual(["https://a.example/"]);
     expect(await response.text()).toBe("final");
     expect(cancelled).toBe(true);
   });

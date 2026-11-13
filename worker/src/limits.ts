@@ -18,7 +18,24 @@ export const UPLOAD_TIMEOUT_MS = 120_000;
  */
 export const MAX_TAGS = 200;
 export const MAX_TAG_NAME_CHARS = 256;
-export const MAX_TAG_CONTENT_CHARS = 2_048;
+/**
+ * Kept just above Discord's largest per-field limit (4,096-char image alt
+ * text; URLs cap at 2,048) so the client can still tell when a value is OVER
+ * a limit — a cap at or below it would make every long value look compliant.
+ */
+export const MAX_TAG_CONTENT_CHARS = 4_200;
+
+/**
+ * Discord-source caps. A component embed must be ≤ 3,000 bytes, so storing up
+ * to 16 KB is enough to show (and measure) an oversized payload. oEmbed and
+ * JSON-LD documents are only read for a handful of short fields.
+ */
+export const MAX_EMBED_JSON_BYTES = 16 * 1024;
+export const MAX_OEMBED_BYTES = 32 * 1024;
+export const MAX_JSONLD_BLOCKS = 5;
+export const MAX_JSONLD_BYTES = 32 * 1024;
+/** Deadline for each secondary fetch (oEmbed / linked component embed). */
+export const SUBFETCH_TIMEOUT_MS = 5_000;
 /** Upstream error text echoed back to the client is cut to this length (L1). */
 export const MAX_ERROR_TEXT_CHARS = 300;
 

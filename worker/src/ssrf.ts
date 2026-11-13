@@ -225,13 +225,16 @@ async function resolvesToPublicAddresses(hostname: string): Promise<boolean> {
  * With `redirect: "follow"` an allowed public URL can 302 straight to
  * `http://169.254.169.254/` and the initial isAllowedUrl() check buys nothing.
  *
+ * @returns The final response, its URL, and every URL that answered with a
+ *   redirect on the way there (in order; empty when there was no redirect)
  * @throws {BlockedRequestError} when a hop is refused by SSRF policy
  */
 export async function safeFetch(
   startUrl: string,
   init: RequestInit,
-): Promise<{ response: Response; finalUrl: string }> {
+): Promise<{ response: Response; finalUrl: string; redirects: string[] }> {
   let currentUrl = startUrl;
+  const redirects: string[] = [];
 
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     if (!(await resolvesToPublicAddresses(new URL(currentUrl).hostname))) {
@@ -245,7 +248,7 @@ export async function safeFetch(
     const isRedirect = response.status >= 300 && response.status < 400;
     const location = response.headers.get("location");
     if (!isRedirect || !location) {
-      return { response, finalUrl: currentUrl };
+      return { response, finalUrl: currentUrl, redirects };
     }
 
     // The interstitial body is never read — cancel it so the connection is
@@ -258,6 +261,7 @@ export async function safeFetch(
         "Redirect target not allowed (private/reserved address)",
       );
     }
+    redirects.push(currentUrl);
     currentUrl = next;
   }
 
