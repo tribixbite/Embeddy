@@ -11,6 +11,7 @@ import "@fontsource/jetbrains-mono/500.css";
 import "../styles/global.css";
 import SiteFooter from "../components/SiteFooter.astro";
 import { APP_VERSION } from "../lib/build";
+import { siteEmbedJson } from "../lib/site-embed";
 
 interface Props {
   /** Full document title (used verbatim). */
@@ -29,6 +30,15 @@ const {
 const canonicalURL = new URL(Astro.url.pathname, Astro.site);
 const ogImage = new URL(`${import.meta.env.BASE_URL}og-preview.webp`, Astro.site);
 const ogAlt = `${title} — ${description}`;
+// Discord component embed for this page; the OG/Twitter tags above stay as its fallback
+const discordEmbed = siteEmbedJson({
+  title,
+  description,
+  url: canonicalURL.toString(),
+  siteUrl: new URL(import.meta.env.BASE_URL, Astro.site).toString(),
+  imageUrl: ogImage.toString(),
+  imageAlt: ogAlt,
+});
 ---
 
 <!doctype html>
@@ -64,6 +74,9 @@ const ogAlt = `${title} — ${description}`;
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={ogImage} />
     <meta name="twitter:image:alt" content={ogAlt} />
+
+    <!-- Discord component embed (https://docs.discord.com/developers/link-previews/component-embeds) -->
+    <script is:inline id="discord:component-embed" type="application/json" set:html={discordEmbed} />
 
     {structuredData && (
       <script
