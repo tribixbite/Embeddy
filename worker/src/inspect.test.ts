@@ -418,4 +418,17 @@ describe("decodeHtmlEntities", () => {
     expect(decodeHtmlEntities("a & b &amp c")).toBe("a & b &amp c");
     expect(decodeHtmlEntities("plain")).toBe("plain");
   });
+
+  test("the full WHATWG table, including multi-code-point names", () => {
+    expect(decodeHtmlEntities("&NotNestedGreaterGreater;")).toBe("\u2aa2\u0338");
+    expect(decodeHtmlEntities("&CounterClockwiseContourIntegral;")).toBe("\u2233");
+    expect(decodeHtmlEntities("&fjlig;&bne;")).toBe("fj=\u20e5");
+    expect(decodeHtmlEntities("&nosuchname; &constructor; &toString;")).toBe("&nosuchname; &constructor; &toString;");
+  });
+
+  test("numeric references in 0x80-0x9F use the Windows-1252 mapping", () => {
+    expect(decodeHtmlEntities("&#150;&#151;&#x80;&#153;")).toBe("\u2013\u2014\u20ac\u2122");
+    // Unmapped C1 controls stay as themselves
+    expect(decodeHtmlEntities("&#x81;")).toBe("\u0081");
+  });
 });
