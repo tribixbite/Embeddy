@@ -1,0 +1,287 @@
+---
+/**
+ * /showcase — a page whose Discord component embed sits exactly at every
+ * documented limit (see lib/showcase-embed.ts). Pasted into Discord, the link
+ * unfurls into that embed; opened in a browser, the page shows the same
+ * preview, the numbers behind it, the media, and the payload itself.
+ */
+import Layout from "../layouts/Layout.astro";
+import ShowcasePreview from "../components/showcase/ShowcasePreview.svelte";
+import CopyButton from "../components/tools/shared/CopyButton.svelte";
+import {
+  COMPONENT_EMBED_MAX_BYTES,
+  COMPONENT_EMBED_MAX_COMPONENTS,
+  COMPONENT_EMBED_MAX_GALLERY_ITEMS,
+  validateComponentEmbed,
+} from "../lib/inspect/component-embed";
+import { SHOWCASE_MEDIA, showcaseEmbedJson } from "../lib/showcase-embed";
+
+const base = import.meta.env.BASE_URL;
+const siteUrl = new URL(base, Astro.site).toString();
+const pageUrl = new URL(Astro.url.pathname, Astro.site).toString();
+const builtAt = Math.floor(Date.now() / 1000);
+const embedJson = showcaseEmbedJson({ siteUrl, builtAt });
+const validation = validateComponentEmbed(embedJson);
+// The build must never ship a showcase that Discord would reject
+if (!validation.ok || !validation.root) {
+  throw new Error(`Showcase embed is invalid: ${validation.issues.map((i) => i.message).join("; ")}`);
+}
+const prettyJson = JSON.stringify(JSON.parse(embedJson), null, 2);
+const inspectHref = `${base}tools/inspect/?url=${encodeURIComponent(pageUrl)}`;
+
+const meters = [
+  { label: "bytes", value: validation.bytes, max: COMPONENT_EMBED_MAX_BYTES, color: "from-[#ff3d9a] to-[#ffb000]" },
+  { label: "components", value: validation.componentCount, max: COMPONENT_EMBED_MAX_COMPONENTS, color: "from-brand-400 to-[#00a3ff]" },
+  { label: "media", value: validation.galleryItemCount, max: COMPONENT_EMBED_MAX_GALLERY_ITEMS, color: "from-[#00e0b8] to-accent" },
+];
+
+/** What the one payload exercises, for the checklist */
+const features = [
+  ["Container", "accent colour strip"],
+  ["Section × 4", "1–3 Text Displays beside an accessory"],
+  ["Thumbnail", "animated, and one spoilered"],
+  ["Media Gallery", "10 items: 9 animated WebP + 1 MP4"],
+  ["Separator × 6", "with and without divider, both spacings"],
+  ["Action Row × 2", "emoji-only, labelled and disabled link buttons"],
+  ["Markdown", "headings, subtext, quote, lists, bold, italic, underline, strike, code, spoiler"],
+  ["```ansi", "Discord's colour palette inside a code block"],
+  ["<t:…:R>", "a timestamp each viewer sees live, in their own timezone"],
+];
+---
+
+<Layout
+  title="Showcase — one Discord link, every limit · Embeddy"
+  description="Paste this link into Discord: a component embed at exactly 3,000 bytes, 40 components and 10 animated media items — no bot, just HTML."
+  componentEmbed={embedJson}
+  ogImage={{ path: "s/0.webp", type: "image/webp", width: 640, height: 360, alt: "Animated Mandelbrot zoom" }}
+>
+  <main class="showcase relative overflow-hidden">
+    <!-- Drifting colour fields behind everything -->
+    <div class="pointer-events-none absolute inset-0 -z-0" aria-hidden="true">
+      <div class="blob blob-a"></div>
+      <div class="blob blob-b"></div>
+      <div class="blob blob-c"></div>
+    </div>
+
+    <div class="relative mx-auto max-w-5xl px-4 pt-10 pb-20 sm:px-6 lg:pt-16">
+      <a href={base} class="text-sm text-white/40 transition-colors hover:text-white/70">← Embeddy</a>
+
+      <!-- Hero -->
+      <header class="mt-6 text-center">
+        <p class="text-xs font-semibold tracking-[0.3em] text-[#ff3d9a] uppercase">Discord component embeds</p>
+        <h1 class="mt-3 text-4xl font-extrabold tracking-tight text-white sm:text-6xl">
+          One link.<br class="sm:hidden" />
+          <span class="shimmer bg-clip-text text-transparent">Every limit.</span>
+        </h1>
+        <p class="mx-auto mt-4 max-w-xl text-base text-white/60">
+          Paste this page into any Discord channel. It unfurls into a full Components V2 layout read straight from the
+          page's HTML — no bot, no webhook.
+        </p>
+        <div class="mt-6 flex flex-wrap items-center justify-center gap-3">
+          <div class="cta"><CopyButton text={pageUrl} label="Copy link for Discord" client:load /></div>
+          <a
+            href={inspectHref}
+            class="inline-flex min-h-11 items-center rounded-xl border border-white/10 bg-white/5 px-4 text-sm font-medium text-white/70 transition-colors hover:bg-white/10"
+          >
+            Inspect this page →
+          </a>
+        </div>
+      </header>
+
+      <!-- Limits, measured from the payload this page actually ships -->
+      <section class="mt-12 grid gap-3 sm:grid-cols-3" aria-label="Limits used">
+        {
+          meters.map((m) => (
+            <div class="rounded-2xl border border-white/10 bg-white/[0.03] p-4 backdrop-blur">
+              <p class="font-mono text-3xl font-bold text-white tabular-nums">
+                {m.value.toLocaleString("en-US")}
+                <span class="text-base font-medium text-white/40">/&nbsp;{m.max.toLocaleString("en-US")}</span>
+              </p>
+              <p class="mt-1 text-xs tracking-wider text-white/50 uppercase">{m.label}</p>
+              <div
+                class="mt-3 h-2 overflow-hidden rounded-full bg-white/10"
+                role="meter"
+                aria-label={m.label}
+                aria-valuemin="0"
+                aria-valuemax={m.max}
+                aria-valuenow={m.value}
+              >
+                <div class={`meter-fill h-full rounded-full bg-gradient-to-r ${m.color}`} style={`--fill:${(m.value / m.max) * 100}%`} />
+              </div>
+            </div>
+          ))
+        }
+      </section>
+
+      <!-- The preview, as Discord draws it -->
+      <section class="mt-12 grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]">
+        <div class="glow-frame rounded-2xl p-[2px]">
+          <div class="rounded-[14px] bg-[#2b2d31] p-2 sm:p-3">
+            <ShowcasePreview root={validation.root} url={pageUrl} client:visible />
+          </div>
+        </div>
+
+        <div>
+          <h2 class="text-lg font-semibold text-white">What's in the payload</h2>
+          <ul class="mt-4 space-y-3">
+            {
+              features.map(([name, detail]) => (
+                <li class="flex gap-3">
+                  <span class="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[#ff3d9a]" aria-hidden="true" />
+                  <span class="text-sm text-white/70">
+                    <code class="font-mono text-white">{name}</code> — {detail}
+                  </span>
+                </li>
+              ))
+            }
+          </ul>
+          <p class="mt-6 text-xs text-white/40">
+            The preview here is Embeddy's renderer. Discord caches a link for about 30 minutes, and its own client may
+            differ in small details.
+          </p>
+        </div>
+      </section>
+
+      <!-- Every tile, full size -->
+      <section class="mt-16">
+        <h2 class="text-lg font-semibold text-white">The gallery</h2>
+        <p class="mt-1 text-sm text-white/50">
+          Rendered with ffmpeg's own generators and encoded as animated WebP, the format Discord plays inline.
+        </p>
+        <div class="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
+          {
+            SHOWCASE_MEDIA.map((m, i) => (
+              <figure class={`group overflow-hidden rounded-xl border border-white/10 bg-black ${i === 0 ? "col-span-2 sm:col-span-3" : ""}`}>
+                {m.file.endsWith(".mp4") ? (
+                  <video src={`${base}s/${m.file}`} controls loop playsinline preload="metadata" class="aspect-square w-full object-cover" />
+                ) : (
+                  <img
+                    src={`${base}s/${m.file}`}
+                    alt={m.title}
+                    loading="lazy"
+                    decoding="async"
+                    class={`w-full object-cover transition-transform duration-500 group-hover:scale-105 ${i === 0 ? "aspect-video" : "aspect-square"}`}
+                  />
+                )}
+                <figcaption class="px-3 py-2 text-xs text-white/60">{m.title}</figcaption>
+              </figure>
+            ))
+          }
+        </div>
+      </section>
+
+      <!-- The payload -->
+      <section class="mt-16">
+        <div class="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 class="text-lg font-semibold text-white">The JSON</h2>
+            <p class="mt-1 text-sm text-white/50">
+              Inside <code class="font-mono text-white/70">&lt;script id="discord:component-embed" type="application/json"&gt;</code> in this
+              page's <code class="font-mono text-white/70">&lt;head&gt;</code>. Minified, it is {validation.bytes.toLocaleString("en-US")} bytes.
+            </p>
+          </div>
+          <CopyButton text={prettyJson} label="Copy JSON" client:visible />
+        </div>
+        <pre class="mt-4 max-h-[28rem] overflow-auto rounded-xl border border-white/10 bg-black/60 p-4 font-mono text-xs leading-relaxed text-white/70"><code>{prettyJson}</code></pre>
+        <p class="mt-4 text-sm text-white/50">
+          Want your own? The <a href={`${base}tools/inspect/`} class="text-[#00a8fc] hover:underline">Inspect tool</a> has a component-embed builder
+          with live validation, and it checks any URL the way Discord's crawler reads it.
+        </p>
+      </section>
+    </div>
+  </main>
+</Layout>
+
+<style>
+  .blob {
+    position: absolute;
+    width: 42rem;
+    height: 42rem;
+    border-radius: 9999px;
+    filter: blur(110px);
+    opacity: 0.35;
+    animation: drift 18s ease-in-out infinite alternate;
+  }
+  .blob-a {
+    top: -14rem;
+    left: -12rem;
+    background: #ff3d9a;
+  }
+  .blob-b {
+    top: 18rem;
+    right: -16rem;
+    background: #555de3;
+    animation-delay: -6s;
+  }
+  .blob-c {
+    bottom: -16rem;
+    left: 20%;
+    background: #00e0b8;
+    opacity: 0.2;
+    animation-delay: -12s;
+  }
+  @keyframes drift {
+    to {
+      transform: translate3d(6rem, 4rem, 0) scale(1.15);
+    }
+  }
+
+  /* Gradient text that sweeps across the headline */
+  .shimmer {
+    background-image: linear-gradient(90deg, #ff3d9a, #ffb000, #00e0b8, #555de3, #ff3d9a);
+    background-size: 200% 100%;
+    animation: sweep 6s linear infinite;
+  }
+  @keyframes sweep {
+    to {
+      background-position: -200% 0;
+    }
+  }
+
+  /* Rotating conic border around the Discord preview */
+  @property --angle {
+    syntax: "<angle>";
+    initial-value: 0deg;
+    inherits: false;
+  }
+  .glow-frame {
+    background: conic-gradient(from var(--angle), #ff3d9a, #ffb000, #00e0b8, #555de3, #ff3d9a);
+    box-shadow: 0 0 60px -10px rgb(255 61 154 / 0.45);
+    animation: spin 8s linear infinite;
+  }
+  @keyframes spin {
+    to {
+      --angle: 360deg;
+    }
+  }
+
+  /* Meters fill from zero on load */
+  .meter-fill {
+    width: var(--fill);
+    animation: fill 1.6s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  @keyframes fill {
+    from {
+      width: 0;
+    }
+  }
+
+  .cta :global(button) {
+    min-height: 2.75rem;
+    border-radius: 0.75rem;
+    background: linear-gradient(90deg, #ff3d9a, #555de3);
+    padding-inline: 1.25rem;
+    color: white;
+    font-size: 0.875rem;
+    font-weight: 600;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .blob,
+    .shimmer,
+    .glow-frame,
+    .meter-fill {
+      animation: none;
+    }
+  }
+</style>

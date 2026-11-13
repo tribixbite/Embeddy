@@ -94,6 +94,11 @@ inspector follows Discord's [link-preview rules](https://docs.discord.com/develo
   `<script>` / `<link>` markup
 - Cache-busted share URL (Discord caches previews ~30 min) and a link to Discord's
   Embed Debugger
+- `?url=` deep links (`/tools/inspect/?url=https://…` inspects on load)
+
+[embeddy.link/showcase](https://embeddy.link/showcase/) is a component embed at every limit at
+once — 3,000 bytes, 40 components, 10 animated media — to paste into Discord and compare.
+Its media is regenerated with `scripts/generate-showcase-media.sh`.
 
 ### Upload — Anonymous file hosting
 
