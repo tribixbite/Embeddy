@@ -4,7 +4,7 @@
 # items). Every clip is rendered from ffmpeg's own generators, so the set is
 # reproducible and carries no third-party footage.
 #
-#   site/public/s/0.webp  640x360  Mandelbrot deep zoom      (gallery hero, full width)
+#   site/public/s/0.webp  640x360  Mandelbrot zoom in and back out (gallery hero, full width)
 #   site/public/s/1.webp  320x320  Game of Life with decaying trails
 #   site/public/s/2.webp  320x320  Rule 30 cellular automaton masking a moving rainbow
 #   site/public/s/3.webp  320x320  Metaballs (three orbiting charges, looping)
@@ -20,6 +20,7 @@
 # that is Embeddy's own output format. Item 9 is an MP4 so the gallery also
 # shows a video tile (Discord draws a play button and plays it with audio).
 #
+# Usage: generate-showcase-media.sh [file...]   e.g. `… 0.webp 9.mp4`; no args renders all.
 # Requires: ffmpeg with libwebp_anim, libx264 and aac.
 set -euo pipefail
 
@@ -35,15 +36,42 @@ SECS=3
 # Lossy animated WebP: quality, effort, loop forever
 WEBP=(-c:v libwebp_anim -lossless 0 -quality 60 -compression_level 6 -loop 0 -an)
 
-# render <name> <filtergraph producing [v]> [extra input args...]
+ONLY=("$@")
+# want <file> — true when no files were named, or <file> was
+want() {
+  [[ ${#ONLY[@]} -eq 0 ]] || [[ " ${ONLY[*]} " == *" $1 "* ]]
+}
+
+# render_webp <file> <filtergraph producing [v]>
 render_webp() {
   local name="$1" graph="$2"
+  want "$name" || return 0
   echo "→ $name"
   ffmpeg -hide_banner -loglevel error -y -filter_complex "$graph" -map "[v]" "${WEBP[@]}" "$OUT/$name"
 }
 
-# 0 — Mandelbrot zoom into a seahorse-valley spiral (scale 3 → 0.002), the full-width hero tile
-render_webp 0.webp "mandelbrot=s=640x360:rate=$FPS:start_x=-0.77568377:start_y=0.13646737:start_scale=3:end_scale=0.002:end_pts=4:bailout=10:maxiter=2048:outer=normalized_iteration_count:inner=black,trim=duration=4,format=yuv420p[v]"
+# 0 — Mandelbrot zoom into a seahorse-valley spiral and back out, the full-width hero tile.
+# Each frame is rendered on its own: in one animated run the filter reuses the previous
+# frame's points, and on a fast zoom that smears the detail into flat colour. Scales step
+# geometrically from 1.5 to 0.003; playing the frames forward then backward makes the
+# loop seamless.
+if want 0.webp; then
+  echo "→ 0.webp"
+  FRAMES="$(mktemp -d "${TMPDIR:-$PREFIX/tmp}/embeddy-mandel.XXXXXX")"
+  trap 'rm -rf "$FRAMES"' EXIT
+  ZOOM_FRAMES=50
+  for ((i = 0; i < ZOOM_FRAMES; i++)); do
+    scale="$(awk -v i="$i" -v n="$ZOOM_FRAMES" 'BEGIN { printf "%.9f", 1.5 * (0.003 / 1.5) ^ (i / (n - 1)) }')"
+    ffmpeg -hide_banner -loglevel error -y -filter_complex \
+      "mandelbrot=s=640x360:rate=1:start_x=-0.77568377:start_y=0.13646737:start_scale=$scale:end_scale=$scale:end_pts=1:bailout=10:maxiter=2048:outer=normalized_iteration_count:inner=black[v]" \
+      -map "[v]" -frames:v 1 "$FRAMES/$(printf %03d "$i").png"
+    # Mirror: frame i also plays at position 2n-2-i (the end frames aren't doubled)
+    if ((i > 0 && i < ZOOM_FRAMES - 1)); then
+      cp "$FRAMES/$(printf %03d "$i").png" "$FRAMES/$(printf %03d $((2 * ZOOM_FRAMES - 2 - i))).png"
+    fi
+  done
+  ffmpeg -hide_banner -loglevel error -y -framerate "$FPS" -i "$FRAMES/%03d.png" -vf format=yuv420p "${WEBP[@]}" "$OUT/0.webp"
+fi
 
 # 1 — Game of Life; lagfun leaves fading trails, pseudocolor maps them to a heat palette
 render_webp 1.webp "life=s=80x80:rate=$FPS:ratio=0.2:seed=7:life_color=#ffffff:death_color=#000000,format=gray,lagfun=decay=0.85,format=yuv444p,pseudocolor=preset=turbo,scale=320:320:flags=neighbor,trim=duration=$SECS,format=yuv420p[v]"
@@ -75,6 +103,7 @@ render_webp 8.webp "sierpinski=s=320x320:rate=$FPS:type=triangle:jump=1,format=g
 render_webp t.webp "nullsrc=s=160x160:rate=$FPS,format=gbrp,geq=r='128+127*sin(X/9+$P)':g='128+127*sin(Y/11-$P)':b='128+127*sin((X+Y)/13+$P)',trim=duration=$SECS,format=yuv420p[v]"
 
 # 9 — MP4 with sound: an arpeggio (A minor, 4 notes per second) seen through showcqt
+if want 9.mp4; then
 echo "→ 9.mp4"
 NOTE='floor(mod(t*4,4))'
 FREQ="220*pow(2,if(eq($NOTE,0),0,if(eq($NOTE,1),3,if(eq($NOTE,2),7,12)))/12)"
@@ -83,5 +112,6 @@ ffmpeg -hide_banner -loglevel error -y \
   -filter_complex "aevalsrc=exprs='0.5*$ENV*(sin(2*PI*$FREQ*t)+0.4*sin(4*PI*$FREQ*t))|0.5*$ENV*(sin(2*PI*$FREQ*1.002*t)+0.4*sin(4*PI*$FREQ*t))':s=44100:d=8,asplit[a][s];[s]showcqt=s=640x360:fps=30:bar_g=2:sono_g=4:count=4:axis=0:sono_v=17:bar_v=12[v]" \
   -map "[v]" -map "[a]" -c:v libx264 -preset slow -crf 26 -pix_fmt yuv420p -movflags +faststart \
   -c:a aac -b:a 96k -shortest "$OUT/9.mp4"
+fi
 
 ls -l "$OUT"
