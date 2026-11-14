@@ -55,6 +55,9 @@ val ANSI_BACKGROUND = mapOf(
 
 private val FENCE = Regex("```([\\w+-]*)\\n?([\\s\\S]*?)```")
 private val ORDERED = Regex("""^(\s*)(\d{1,9})\.\s+(.*)$""")
+// TODO: Discord mobile (2026-11-14) drew "1. a\n2. b\n - c" as an ordered list 1–3: a bullet
+// indented one space under ordered items continued the numbering instead of nesting. The exact
+// indent rule (and whether desktop agrees) is unconfirmed, so it is not modelled yet.
 private val BULLET = Regex("""^(\s*)[-*]\s+(.*)$""")
 
 /** Parse a markdown document into blocks. */
