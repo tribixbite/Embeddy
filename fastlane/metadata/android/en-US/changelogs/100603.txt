@@ -1,0 +1,8 @@
+- Discord link-preview analysis and component embeds in Inspect
+- render the showcase Mandelbrot hero frame by frame
+- decode every WHATWG named character reference
+- /showcase, a component embed at every Discord limit
+- render ```ansi code blocks and accept ?url= deep links
+- ship a Discord component embed on every page
+- Discord link-preview simulator and component-embed builder
+- read pages the way Discord's unfurler does
