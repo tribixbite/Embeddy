@@ -485,6 +485,9 @@ Discord published link-preview docs and component embeds on 2026-10-05
     frame in the screenshot, likely mid-download.
   - [ ] Embed Debugger comparison of the undocumented layout precedence still needs a browser signed in
     to discord.com that adb can drive.
+- [x] **12.12** Release race (2026-11-14): a site push during the v0.1.61 build made the version-pin push
+  fail, so nothing was released. The pin step now rebases onto main when the new commits leave the APK
+  alone, and stops with an error when they don't (that push's own run releases them). Simulated both cases.
 - [x] **12.9** Android Inspect parity: Discordbot fetch, Discord tag keying, layout/image/video/oEmbed/
   colour/date checks, inline + linked component embeds with a Kotlin validator (shares the showcase
   payload fixture with the web tests), Compose renderer for component embeds and the OG preview, all copy

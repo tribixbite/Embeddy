@@ -241,6 +241,21 @@ jobs:
             echo "version.properties already correct"
           else
             git commit -m "chore(release): pin version to v${{ steps.version.outputs.version_name }} and add changelog [skip ci]"
+            # Someone may have pushed to main while this job built. Rebase onto it only
+            # when those commits leave the APK untouched (site, worker, docs); otherwise
+            # the tag would point at app code this build never compiled — that newer
+            # push starts its own release, so stop here instead.
+            git fetch origin main
+            BUILT="$(git rev-parse HEAD~1)"
+            if [ "$(git rev-parse origin/main)" != "$BUILT" ]; then
+              if git diff --name-only "$BUILT" origin/main -- \
+                  app gradle gradle.properties version.properties settings.gradle.kts \
+                  build.gradle.kts .github/workflows/release.yml | awk 'NF{found=1} END{exit !found}'; then
+                echo "::error::main gained APK changes during this build; the run for that push releases them"
+                exit 1
+              fi
+              git rebase origin/main
+            fi
             git push origin HEAD:main
           fi
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
