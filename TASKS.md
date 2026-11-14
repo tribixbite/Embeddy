@@ -481,7 +481,10 @@ Discord published link-preview docs and component embeds on 2026-10-05
   colour/date checks, inline + linked component embeds with a Kotlin validator (shares the showcase
   payload fixture with the web tests), Compose renderer for component embeds and the OG preview, all copy
   in `strings_discord.xml`. 323 unit tests pass; debug 0.1.58 installed on the S25U.
-  - [ ] On-device visual check of the Inspect tab (phone was locked during the session).
+  - [x] On-device visual check (2026-11-14, S25U): showcase component embed, OG fallback, meters, checks and
+    a plain OG site (github.com) render. Fixed two issues found there: markdown blocks inherited the 24sp
+    body line height (double-spaced subtext), and metadata values were cut at 3 lines with no ellipsis.
+  - [ ] Inline `||spoiler||` text is drawn hidden but cannot be tapped to reveal (spoilered media can).
   - [ ] JSON-LD VideoObject and fetch-level checks (redirects, timing, Content-Disposition) are web-only
     (TODO in `inspect/discord/DiscordUnfurl.kt`).
 - [x] **12.10** Named HTML entities: full WHATWG table (2,125 semicolon names) vendored as

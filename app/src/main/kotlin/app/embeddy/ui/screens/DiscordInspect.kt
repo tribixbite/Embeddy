@@ -483,6 +483,9 @@ private fun MarkdownBlock(block: MdBlock) {
         MdBlockKind.SUBTEXT -> Triple(12.sp, FontWeight.Normal, DiscordColors.muted)
         else -> Triple(14.sp, FontWeight.Normal, DiscordColors.text)
     }
+    // Without an explicit line height, Text inherits the theme's bodyLarge 24sp,
+    // which double-spaces the 12–14sp sizes used here.
+    val lineHeight = size * 1.375f
     when (block.kind) {
         MdBlockKind.QUOTE -> Row(Modifier.height(IntrinsicSize.Min)) {
             Box(
@@ -493,24 +496,25 @@ private fun MarkdownBlock(block: MdBlock) {
                     .background(DiscordColors.muted.copy(alpha = 0.5f)),
             )
             Spacer(Modifier.width(8.dp))
-            Text(text, color = color, fontSize = size)
+            Text(text, color = color, fontSize = size, lineHeight = lineHeight)
         }
         MdBlockKind.LIST_ITEM -> Row(Modifier.padding(start = (8 + 16 * block.indent).dp)) {
-            Text("${block.marker} ", color = color, fontSize = size)
-            Text(text, color = color, fontSize = size)
+            Text("${block.marker} ", color = color, fontSize = size, lineHeight = lineHeight)
+            Text(text, color = color, fontSize = size, lineHeight = lineHeight)
         }
         MdBlockKind.CODE_BLOCK -> Text(
             text = text,
             color = DiscordColors.text,
             fontFamily = FontFamily.Monospace,
             fontSize = 12.sp,
+            lineHeight = 16.sp,
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(6.dp))
                 .background(DiscordColors.code)
                 .padding(8.dp),
         )
-        else -> Text(text, color = color, fontSize = size, fontWeight = weight)
+        else -> Text(text, color = color, fontSize = size, fontWeight = weight, lineHeight = lineHeight)
     }
 }
 
