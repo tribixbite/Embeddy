@@ -105,7 +105,7 @@ export function buildShowcaseEmbed(input: ShowcaseInput): { component: Container
           ],
           accessory: { type: 11, media: media(SHOWCASE_THUMB), spoiler: true },
         },
-        { type: 10, content: "1. Paste the link\n2. Discord reads the JSON\n - from `<head>`" },
+        { type: 10, content: "1. Paste the link\n2. Discord reads the JSON\n3. from `<head>`" },
         { type: 14 },
         { type: 10, content: "### Link buttons" },
         { type: 14 },

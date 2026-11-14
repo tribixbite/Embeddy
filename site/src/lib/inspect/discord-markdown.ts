@@ -232,6 +232,9 @@ function renderBlocks(lines: string[], now: number): string {
       html += `<p class="dmd-subtext">${renderInline(sub[1]!, now)}</p>`;
       continue;
     }
+    // TODO: Discord mobile (2026-11-14) drew "1. a\n2. b\n - c" as an ordered list 1–3: a bullet
+    // indented one space under ordered items continued the numbering instead of nesting. The
+    // exact indent rule (and whether desktop agrees) is unconfirmed, so it is not modelled yet.
     const bullet = /^( *)[-*] +(.+)$/.exec(line);
     const numbered = /^( *)(\d{1,9})\. +(.+)$/.exec(line);
     if (bullet || numbered) {

@@ -477,6 +477,14 @@ Discord published link-preview docs and component embeds on 2026-10-05
   JSON-LD vs Open Graph, inline vs linked embed). **Blocked on a Discord login (owner):** the debugger
   page loads anonymously but `/api/v9/unfurler/unfurl` answers 401. Run it on
   https://embeddy.link/showcase/ (inline, 3,000 bytes / 40 / 10) while signed in, and compare.
+  - [x] Real Discord (Android app, 2026-11-14): the showcase renders in full — all 40 components, 10 media,
+    spoilered thumbnail, disabled + emoji-only buttons, live timestamp. Differences from Embeddy's preview:
+    (1) mobile draws ```ansi uncoloured; (2) mobile stacks a section's button accessory under its text
+    (thumbnails stay beside it); (3) " - item" under an ordered list was numbered "3." — the showcase now
+    writes "3." (same bytes); parser TODO in both markdown modules; (4) large animated tiles showed a torn
+    frame in the screenshot, likely mid-download.
+  - [ ] Embed Debugger comparison of the undocumented layout precedence still needs a browser signed in
+    to discord.com that adb can drive.
 - [x] **12.9** Android Inspect parity: Discordbot fetch, Discord tag keying, layout/image/video/oEmbed/
   colour/date checks, inline + linked component embeds with a Kotlin validator (shares the showcase
   payload fixture with the web tests), Compose renderer for component embeds and the OG preview, all copy
