@@ -1,0 +1,2 @@
+- match the showcase list to what Discord renders
+- readable line height in Discord markdown and full metadata values
