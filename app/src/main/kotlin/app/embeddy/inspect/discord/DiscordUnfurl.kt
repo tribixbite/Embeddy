@@ -14,7 +14,8 @@ import java.time.format.DateTimeParseException
  * Source of truth: https://docs.discord.com/developers/link-previews/overview
  * and https://docs.discord.com/developers/link-previews/component-embeds.
  * Where Discord leaves precedence open (conflicting layout tags, several
- * component-embed elements) the choice is commented where it is made.
+ * component-embed elements) the rule used was checked in Discord's Embed
+ * Debugger on 2026-11-15 and is commented where it is applied.
  *
  * Not ported from the web version: fetch-level checks (redirect count, timing,
  * Content-Disposition — Jsoup doesn't expose them) and JSON-LD VideoObject.
@@ -133,6 +134,7 @@ enum class CheckKind {
     OEMBED_AUTHOR,
     OG_TYPE_NO_EFFECT, // value
     TWITTER_CARD_NO_EFFECT, // value
+    LAYOUT_TAGS_CONFLICT, // count, winning key=value
     ACCENT_COLOR, // value
     THEME_COLOR_IGNORED, // value
     TIMESTAMP, // source key
@@ -153,6 +155,7 @@ enum class CheckKind {
     VIDEO_PLAYER_PAGE, // type
     VIDEO_OK, // url
     VIDEO_NEEDS_TYPE,
+    VIDEO_LAYOUT_OVERRIDDEN, // last layout key=value
     VIDEO_NEEDS_HTTPS,
     VIDEO_NEEDS_IMAGE,
     VIDEO_TYPE_UNSUPPORTED, // type
@@ -172,6 +175,7 @@ enum class CheckKind {
     COMPONENT_WARNINGS, // where, warnings, bytes, components, gallery items
     COMPONENT_INVALID, // where, errors, bytes, components, gallery items
     COMPONENT_MULTIPLE, // count
+    COMPONENT_IGNORED, // where, chosen where
     OG_FALLBACK_PRESENT,
     OG_FALLBACK_INCOMPLETE,
 }
@@ -181,11 +185,14 @@ data class DiscordCheck(val group: CheckGroup, val status: CheckStatus, val kind
 data class ComponentEmbedReport(
     val element: ComponentEmbedSource,
     val validation: ComponentEmbedValidation?,
-    /** Element-level problems (placement, type attribute, fetch) as checks */
+    /** Element-level problems (type attribute, host, fetch, size) and notes (placement) as checks */
     val elementProblems: List<DiscordCheck>,
     /** True when Discord should render this payload */
     val usable: Boolean,
 ) {
+    /** Only elements with an accepted type attribute are candidates; Discord passes over the rest */
+    val hasEmbedType: Boolean get() = element.type?.trim()?.lowercase() in ComponentEmbedRules.MIME_TYPES
+
     /** "inline" or the linked href — an argument for check strings */
     val where: String get() = if (element.source == EmbedSourceKind.INLINE) "<script>" else element.href.orEmpty()
 }
@@ -193,6 +200,8 @@ data class ComponentEmbedReport(
 data class DiscordReport(
     val preview: StandardPreview,
     val componentEmbeds: List<ComponentEmbedReport>,
+    /** The one element Discord reads, valid or not */
+    val chosenComponentEmbed: ComponentEmbedReport? = null,
     /** The component embed Discord should render instead of [preview], if any */
     val activeComponentEmbed: ComponentEmbedReport?,
     val checks: List<DiscordCheck>,
@@ -276,6 +285,38 @@ private fun toDimension(value: String?): Int? = value?.trim()?.toIntOrNull()?.ta
 
 private fun List<MetaTag>.firstNonEmpty(vararg keys: String) = firstOrNull { it.key in keys && it.value.isNotBlank() }
 private fun List<MetaTag>.lastNonEmpty(vararg keys: String) = lastOrNull { it.key in keys && it.value.isNotBlank() }
+
+/** The layout an og:type / twitter:card value asks for */
+enum class LayoutSignal { RICH, VIDEO, PHOTO, LARGE_IMAGE }
+
+private fun layoutSignalOf(tag: MetaTag): LayoutSignal? {
+    val value = tag.value.trim()
+    return when (tag.key) {
+        "og:type" -> when {
+            value == "rich" -> LayoutSignal.RICH
+            value == "video" || value.startsWith("video.") -> LayoutSignal.VIDEO
+            value == "instapp:photo" -> LayoutSignal.PHOTO
+            else -> null
+        }
+        "twitter:card" -> when (value) {
+            "summary_large_image" -> LayoutSignal.LARGE_IMAGE
+            "photo" -> LayoutSignal.PHOTO
+            "player" -> LayoutSignal.VIDEO
+            else -> null
+        }
+        else -> null
+    }
+}
+
+/**
+ * Discord reads a single layout signal: the last og:type or twitter:card in
+ * document order whose value changes the layout. Values that don't (summary,
+ * website…) are skipped, so summary_large_image followed by summary is still a
+ * large image. Checked in Discord's Embed Debugger (2026-11-15) for every
+ * ordering of rich, video, photo and large-image.
+ */
+private fun List<MetaTag>.lastLayoutSignal(): Pair<LayoutSignal, MetaTag>? =
+    asReversed().firstNotNullOfOrNull { tag -> layoutSignalOf(tag)?.let { it to tag } }
 
 private fun label(url: String) = if (url.length > 80) url.take(77) + "…" else url
 
@@ -381,7 +422,9 @@ fun analyzeUnfurl(page: PageFacts): DiscordReport {
 
     val ogType = tags.lastNonEmpty("og:type")?.value?.trim()
     val twitterCard = tags.lastNonEmpty("twitter:card")?.value?.trim()
-    val isRich = ogType == "rich"
+    val layoutSignal = tags.lastLayoutSignal()
+    val layoutTagLabel = layoutSignal?.let { (_, tag) -> "${tag.key}=\"${tag.value.trim()}\"" }
+    val isRich = layoutSignal?.first == LayoutSignal.RICH
 
     val title = titleValue?.let { trimForDiscord(it, DiscordLimits.TITLE_BYTES, DiscordLimits.TITLE_LINES) }
     val description = descValue?.let { trimForDiscord(it, DiscordLimits.DESCRIPTION_BYTES, DiscordLimits.DESCRIPTION_LINES) }
@@ -414,12 +457,16 @@ fun analyzeUnfurl(page: PageFacts): DiscordReport {
     val authorName = oe?.authorName
     if (authorName != null) check(CheckGroup.OEMBED, CheckStatus.PASS, CheckKind.OEMBED_AUTHOR)
 
-    // Layout tags: last one in the document wins
+    // Layout tags: the last one that changes the layout wins (see lastLayoutSignal)
     if (ogType != null && !(ogType == "rich" || ogType == "video" || ogType.startsWith("video.") || ogType == "instapp:photo")) {
         check(CheckGroup.TEXT, CheckStatus.INFO, CheckKind.OG_TYPE_NO_EFFECT, ogType)
     }
     if (twitterCard != null && twitterCard !in listOf("player", "summary_large_image", "photo")) {
         check(CheckGroup.TEXT, CheckStatus.INFO, CheckKind.TWITTER_CARD_NO_EFFECT, twitterCard)
+    }
+    val layoutTags = tags.filter { layoutSignalOf(it) != null }
+    if (layoutTagLabel != null && layoutTags.map { "${it.key}=${it.value.trim()}" }.toSet().size > 1) {
+        check(CheckGroup.TEXT, CheckStatus.INFO, CheckKind.LAYOUT_TAGS_CONFLICT, layoutTags.size.toString(), layoutTagLabel)
     }
 
     // Accent colour (last wins)
@@ -564,8 +611,11 @@ fun analyzeUnfurl(page: PageFacts): DiscordReport {
         check(CheckGroup.MEDIA, CheckStatus.INFO, CheckKind.TWITTER_PLAYER_PAGE)
     }
 
-    val wantsVideo = ogType == "video" || ogType?.startsWith("video.") == true || twitterCard == "player" ||
+    // og:type rich plays an og:video too (Embed Debugger, 2026-11-15: rich + og:video drew a
+    // player); summary_large_image keeps the video in the embed but draws only the still.
+    val videoSignal = layoutSignal?.first == LayoutSignal.VIDEO ||
         (ogType == null && twitterCard == null && oe?.type == "video")
+    val wantsVideo = videoSignal || isRich
     var videoOk = false
     val playerPage = video?.type?.lowercase() in listOf("text/html", "application/x-shockwave-flash")
     if (video != null && playerPage) {
@@ -575,7 +625,9 @@ fun analyzeUnfurl(page: PageFacts): DiscordReport {
         fun problem(kind: CheckKind, vararg args: String) {
             problems += DiscordCheck(CheckGroup.MEDIA, CheckStatus.FAIL, kind, args.toList())
         }
-        if (!wantsVideo) problem(CheckKind.VIDEO_NEEDS_TYPE)
+        if (!wantsVideo) {
+            if (layoutTagLabel != null) problem(CheckKind.VIDEO_LAYOUT_OVERRIDDEN, layoutTagLabel) else problem(CheckKind.VIDEO_NEEDS_TYPE)
+        }
         if (!video.url.startsWith("https://")) problem(CheckKind.VIDEO_NEEDS_HTTPS)
         if (allImages.isEmpty()) problem(CheckKind.VIDEO_NEEDS_IMAGE)
         val type = video.type
@@ -591,7 +643,7 @@ fun analyzeUnfurl(page: PageFacts): DiscordReport {
         }
         videoOk = problems.isEmpty()
         if (videoOk) check(CheckGroup.MEDIA, CheckStatus.PASS, CheckKind.VIDEO_OK, video.url) else checks += problems
-    } else if (wantsVideo) {
+    } else if (videoSignal) {
         check(CheckGroup.MEDIA, CheckStatus.WARN, CheckKind.VIDEO_LAYOUT_NO_FILE)
     }
 
@@ -602,16 +654,21 @@ fun analyzeUnfurl(page: PageFacts): DiscordReport {
         }
     }
 
-    // ── Layout (precedence between conflicting layout tags is the inspector's reading) ──
-    val isPhoto = twitterCard == "photo" || ogType == "instapp:photo" ||
+    // ── Layout ──
+    // One layout signal (lastLayoutSignal), checked in Discord's Embed Debugger. Two or more
+    // og:image tags come back as a gallery even with a photo card, so the gallery goes first.
+    // TODO: a playable video plus a second og:image comes back as a video embed followed by an
+    // image embed; the Embed Debugger's preview draws only the first, so whether the client shows
+    // the video, a gallery or both is unconfirmed. The video is kept here.
+    val isPhoto = layoutSignal?.first == LayoutSignal.PHOTO ||
         (ogType == null && twitterCard == null && oe?.type == "photo")
     val oembedRich = ogType == null && twitterCard == null && oe?.type == "rich"
     var layout = when {
         videoOk -> PreviewLayout.VIDEO
-        isPhoto && allImages.isNotEmpty() -> PreviewLayout.PHOTO
         isGallery -> PreviewLayout.GALLERY
+        isPhoto && allImages.isNotEmpty() -> PreviewLayout.PHOTO
         isRich || oembedRich -> PreviewLayout.RICH
-        twitterCard == "summary_large_image" && allImages.isNotEmpty() -> PreviewLayout.LARGE_IMAGE
+        layoutSignal?.first == LayoutSignal.LARGE_IMAGE && allImages.isNotEmpty() -> PreviewLayout.LARGE_IMAGE
         allImages.isNotEmpty() -> PreviewLayout.THUMBNAIL
         title != null || description != null -> PreviewLayout.TEXT
         else -> PreviewLayout.NONE
@@ -631,10 +688,18 @@ fun analyzeUnfurl(page: PageFacts): DiscordReport {
     val ogFallback = tags.firstNonEmpty("og:title") != null && tags.firstNonEmpty("og:description") != null &&
         tags.firstNonEmpty("og:image") != null
     val componentEmbeds = page.componentEmbeds.map(::assessComponentEmbed)
-    // Discord doesn't say which of several elements wins; use the first usable one
-    val active = componentEmbeds.firstOrNull { it.usable }
+    // Discord reads one element: the first inline <script> with an accepted type, else the
+    // first such <link>, wherever they sit in the page. If that one fails, it shows the Open
+    // Graph preview rather than trying the next (Embed Debugger, 2026-11-15).
+    val chosen = componentEmbeds.firstOrNull { it.element.source == EmbedSourceKind.INLINE && it.hasEmbedType }
+        ?: componentEmbeds.firstOrNull { it.element.source == EmbedSourceKind.LINKED && it.hasEmbedType }
+    val active = chosen?.takeIf { it.usable }
     if (componentEmbeds.isNotEmpty()) {
         for (report in componentEmbeds) {
+            if (chosen != null && report !== chosen) {
+                check(CheckGroup.COMPONENT, CheckStatus.INFO, CheckKind.COMPONENT_IGNORED, report.where, chosen.where)
+                continue
+            }
             checks += report.elementProblems
             val v = report.validation ?: continue
             val errors = v.issues.count { it.severity == IssueSeverity.ERROR }
@@ -672,6 +737,7 @@ fun analyzeUnfurl(page: PageFacts): DiscordReport {
             timestamp = timestamp,
         ),
         componentEmbeds = componentEmbeds,
+        chosenComponentEmbed = chosen,
         activeComponentEmbed = active,
         checks = checks,
     )
@@ -686,7 +752,11 @@ fun assessComponentEmbed(element: ComponentEmbedSource): ComponentEmbedReport {
     val where = if (element.source == EmbedSourceKind.INLINE) "<script>" else element.href.orEmpty()
     val type = element.type?.trim()?.lowercase().orEmpty()
     if (type !in ComponentEmbedRules.MIME_TYPES) problem(CheckKind.ELEMENT_BAD_TYPE, where, element.type.orEmpty())
-    if (element.source == EmbedSourceKind.INLINE && element.inHead == false) problem(CheckKind.ELEMENT_NOT_IN_HEAD)
+    // Discord's docs say <head>, but the Embed Debugger (2026-11-15) used a script in <body>, so this only warns
+    val notes = mutableListOf<DiscordCheck>()
+    if (element.source == EmbedSourceKind.INLINE && element.inHead == false) {
+        notes += DiscordCheck(CheckGroup.COMPONENT, CheckStatus.WARN, CheckKind.ELEMENT_NOT_IN_HEAD)
+    }
     if (element.source == EmbedSourceKind.LINKED) {
         if (element.href.isNullOrEmpty()) {
             problem(CheckKind.ELEMENT_NO_HREF)
@@ -700,7 +770,7 @@ fun assessComponentEmbed(element: ComponentEmbedSource): ComponentEmbedReport {
     return ComponentEmbedReport(
         element = element,
         validation = validation,
-        elementProblems = problems,
+        elementProblems = problems + notes,
         usable = problems.isEmpty() && validation?.ok == true,
     )
 }

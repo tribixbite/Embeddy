@@ -700,6 +700,7 @@ private fun CheckKind.res(): Int = when (this) {
     CheckKind.OEMBED_AUTHOR -> R.string.discord_check_oembed_author
     CheckKind.OG_TYPE_NO_EFFECT -> R.string.discord_check_og_type_no_effect
     CheckKind.TWITTER_CARD_NO_EFFECT -> R.string.discord_check_twitter_card_no_effect
+    CheckKind.LAYOUT_TAGS_CONFLICT -> R.string.discord_check_layout_tags_conflict
     CheckKind.ACCENT_COLOR -> R.string.discord_check_accent_color
     CheckKind.THEME_COLOR_IGNORED -> R.string.discord_check_theme_color_ignored
     CheckKind.TIMESTAMP -> R.string.discord_check_timestamp
@@ -720,6 +721,7 @@ private fun CheckKind.res(): Int = when (this) {
     CheckKind.VIDEO_PLAYER_PAGE -> R.string.discord_check_video_player_page
     CheckKind.VIDEO_OK -> R.string.discord_check_video_ok
     CheckKind.VIDEO_NEEDS_TYPE -> R.string.discord_check_video_needs_type
+    CheckKind.VIDEO_LAYOUT_OVERRIDDEN -> R.string.discord_check_video_layout_overridden
     CheckKind.VIDEO_NEEDS_HTTPS -> R.string.discord_check_video_needs_https
     CheckKind.VIDEO_NEEDS_IMAGE -> R.string.discord_check_video_needs_image
     CheckKind.VIDEO_TYPE_UNSUPPORTED -> R.string.discord_check_video_type_unsupported
@@ -739,6 +741,7 @@ private fun CheckKind.res(): Int = when (this) {
     CheckKind.COMPONENT_WARNINGS -> R.string.discord_check_component_warnings
     CheckKind.COMPONENT_INVALID -> R.string.discord_check_component_invalid
     CheckKind.COMPONENT_MULTIPLE -> R.string.discord_check_component_multiple
+    CheckKind.COMPONENT_IGNORED -> R.string.discord_check_component_ignored
     CheckKind.OG_FALLBACK_PRESENT -> R.string.discord_check_og_fallback_present
     CheckKind.OG_FALLBACK_INCOMPLETE -> R.string.discord_check_og_fallback_incomplete
 }

@@ -472,19 +472,36 @@ Discord published link-preview docs and component embeds on 2026-10-05
   errors, no horizontal overflow.
 - [x] **12.7** Deployed 2026-11-13: worker version a6f29ca2 (`wrangler deploy`), site via the Pages workflow.
   Live `/api/inspect` returns `fetch`, `oembed`, `componentEmbeds`, `jsonLd`.
-- [ ] **12.8** Check a real component-embed page in Discord's Embed Debugger against the inspector's
+- [x] **12.8** Check a real component-embed page in Discord's Embed Debugger against the inspector's
   reading, especially the layout precedence Discord doesn't document (conflicting layout tags,
-  JSON-LD vs Open Graph, inline vs linked embed). **Blocked on a Discord login (owner):** the debugger
-  page loads anonymously but `/api/v9/unfurler/unfurl` answers 401. Run it on
-  https://embeddy.link/showcase/ (inline, 3,000 bytes / 40 / 10) while signed in, and compare.
+  JSON-LD vs Open Graph, inline vs linked embed). The debugger's `/api/v9/unfurler/unfurl` answers 401
+  without a Discord login; done from the owner's signed-in Pixel.
   - [x] Real Discord (Android app, 2026-11-14): the showcase renders in full — all 40 components, 10 media,
     spoilered thumbnail, disabled + emoji-only buttons, live timestamp. Differences from Embeddy's preview:
     (1) mobile draws ```ansi uncoloured; (2) mobile stacks a section's button accessory under its text
     (thumbnails stay beside it); (3) " - item" under an ordered list was numbered "3." — the showcase now
     writes "3." (same bytes); parser TODO in both markdown modules; (4) large animated tiles showed a torn
     frame in the screenshot, likely mid-download.
-  - [ ] Embed Debugger comparison of the undocumented layout precedence still needs a browser signed in
-    to discord.com that adb can drive.
+  - [x] Embed Debugger (2026-11-15, signed-in Chrome on the Pixel 8 Pro driven over CDP; 48 fixture pages
+    from `scripts/discord-precedence-fixtures.py` served through a cloudflared quick tunnel). The showcase
+    parses as written: 40 component ids, 10 media (9 `image/webp` flagged animated + `video/mp4`), no
+    context errors. Rules found and now applied in both inspectors, with tests:
+    - Layout: the **last** og:type/twitter:card whose value changes the layout wins, across both keys;
+      `summary`/`website` are skipped (so large-image then summary stays large). Was: last value per key.
+    - og:type rich + og:video plays the video; summary_large_image keeps the video in the embed JSON but
+      draws only the still; a photo card drops it.
+    - Two og:image tags give a gallery even with a photo card (gallery now ranks above photo).
+    - JSON-LD VideoObject name/description fill empty title/description and beat the `<title>` pair;
+      Open Graph beats JSON-LD; uploadDate becomes the timestamp even with Open Graph present.
+    - Component embeds: the first inline script with an accepted type wins, else the first linked one,
+      regardless of order; if it fails Discord shows the OG preview and does not try the next
+      (was: first usable). A wrong-type script isn't a candidate. A script in `<body>` is read (docs say
+      `<head>`; now a warning, not an error). 3,001 bytes and a cross-site link are rejected as modelled.
+    - Comparison through the live worker: 47/48 fixtures match Discord.
+  - [ ] Video + a second og:image comes back as a video embed followed by an image embed; the Debugger
+    preview draws only the first, so the client's rendering is unconfirmed (TODO in both inspectors).
+  - [ ] Untested orderings: oEmbed title vs JSON-LD name; og:pubdate vs JSON-LD uploadDate; JSON-LD
+    filling only one of title/description.
 - [x] **12.12** Release race (2026-11-14): a site push during the v0.1.61 build made the version-pin push
   fail, so nothing was released. The pin step now rebases onto main when the new commits leave the APK
   alone, and stops with an error when they don't (that push's own run releases them). Simulated both cases.

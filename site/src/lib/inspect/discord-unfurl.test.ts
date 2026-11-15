@@ -67,7 +67,7 @@ describe("analyzeUnfurl — the docs' Quick Start", () => {
 });
 
 describe("analyzeUnfurl — tag rules", () => {
-  test("first non-empty wins for title; last wins for layout and color", () => {
+  test("first non-empty wins for title; last wins for color; summary doesn't override a layout", () => {
     const { preview } = analyzeUnfurl(
       page([
         ["og:title", ""],
@@ -81,7 +81,8 @@ describe("analyzeUnfurl — tag rules", () => {
       ]),
     );
     expect(preview.title?.text).toBe("Twitter wins");
-    expect(preview.layout).toBe("thumbnail");
+    // Embed Debugger: summary_large_image then summary is still a large image
+    expect(preview.layout).toBe("large-image");
     expect(preview.color).toBe("#222222");
   });
 
@@ -300,10 +301,11 @@ describe("analyzeUnfurl — component embeds", () => {
     expect(r.checks.find((c) => c.title === "Open Graph fallback present")?.status).toBe("pass");
   });
 
-  test("element rules: <head> placement, type attribute, same-site link", () => {
-    expect(assessComponentEmbed({ source: "inline", type: "application/json", inHead: false, raw: valid, bytes: 1, truncated: false }).elementErrors).toEqual([
-      "The script must be inside <head>.",
-    ]);
+  test("element rules: <head> placement warns only, type attribute, same-site link", () => {
+    const inBody = assessComponentEmbed({ source: "inline", type: "application/json", inHead: false, raw: valid, bytes: 1, truncated: false });
+    expect(inBody.elementErrors).toEqual([]);
+    expect(inBody.elementWarnings[0]).toContain("<head>");
+    expect(inBody.usable).toBe(true);
     expect(assessComponentEmbed({ source: "inline", type: "text/plain", inHead: true, raw: valid, bytes: 1, truncated: false }).usable).toBe(false);
     expect(
       assessComponentEmbed({ source: "inline", type: "application/vnd.discord.component-embed+json", inHead: true, raw: valid, bytes: 1, truncated: false }).usable,
@@ -364,5 +366,134 @@ describe("analyzeUnfurl — player pages", () => {
     expect(failing(r)).toEqual([]);
     expect(r.checks.find((c) => c.title === "og:video is a player page, not a video file")?.status).toBe("warn");
     expect(r.preview.layout).toBe("thumbnail");
+  });
+});
+
+/** Each case below is a page run through Discord's Embed Debugger on 2026-11-15 */
+describe("analyzeUnfurl — precedence checked in Discord's Embed Debugger", () => {
+  const og: Array<[string, string]> = [
+    ["og:title", "t"],
+    ["og:description", "d"],
+    ["og:image", "https://e.com/0.webp"],
+  ];
+  const video: Array<[string, string]> = [
+    ["og:video", "https://e.com/v.mp4"],
+    ["og:video:type", "video/mp4"],
+    ["og:video:width", "640"],
+    ["og:video:height", "360"],
+  ];
+  const layoutOf = (...pairs: Array<[string, string]>) => analyzeUnfurl(page([...og, ...pairs])).preview.layout;
+
+  test("the last layout-changing og:type or twitter:card wins, across both keys", () => {
+    expect(layoutOf(["twitter:card", "summary"], ["twitter:card", "summary_large_image"])).toBe("large-image");
+    expect(layoutOf(["twitter:card", "summary_large_image"], ["twitter:card", "photo"])).toBe("photo");
+    expect(layoutOf(["twitter:card", "photo"], ["twitter:card", "summary_large_image"])).toBe("large-image");
+    expect(layoutOf(["og:type", "rich"], ["twitter:card", "summary_large_image"])).toBe("large-image");
+    expect(layoutOf(["twitter:card", "summary_large_image"], ["og:type", "rich"])).toBe("rich");
+    expect(layoutOf(["og:type", "rich"], ["twitter:card", "photo"])).toBe("photo");
+    expect(layoutOf(["twitter:card", "photo"], ["og:type", "rich"])).toBe("rich");
+    expect(layoutOf(["og:type", "rich"], ["og:type", "website"])).toBe("rich");
+  });
+
+  test("a conflict is named in the checks", () => {
+    const { checks } = analyzeUnfurl(page([...og, ["og:type", "rich"], ["twitter:card", "summary_large_image"]]));
+    const note = checks.find((c) => c.title === "2 layout tags — the last one wins");
+    expect(note?.detail).toContain('twitter:card="summary_large_image"');
+  });
+
+  test("video plays only when a video or rich signal is the last layout tag", () => {
+    expect(layoutOf(...video, ["og:type", "video.other"], ["twitter:card", "summary_large_image"])).toBe("large-image");
+    expect(layoutOf(...video, ["twitter:card", "summary_large_image"], ["og:type", "video.other"])).toBe("video");
+    expect(layoutOf(...video, ["twitter:card", "player"])).toBe("video");
+    expect(layoutOf(...video, ["og:type", "rich"])).toBe("video");
+    expect(layoutOf(...video, ["twitter:card", "summary"])).toBe("thumbnail");
+    expect(layoutOf(...video, ["og:type", "video.other"], ["twitter:card", "photo"])).toBe("photo");
+    const blocked = analyzeUnfurl(page([...og, ...video, ["og:type", "video.other"], ["twitter:card", "photo"]]));
+    expect(blocked.checks.find((c) => c.title === "Video won't play inline")?.detail).toContain('twitter:card="photo"');
+  });
+
+  test("a plain rich page doesn't ask for a video", () => {
+    const { checks } = analyzeUnfurl(page([...og, ["og:type", "rich"]]));
+    expect(checks.find((c) => c.title === "Video layout requested but no video file")).toBeUndefined();
+  });
+
+  test("two og:image tags are a gallery even with a photo card", () => {
+    expect(layoutOf(["og:image", "https://e.com/1.webp"], ["twitter:card", "photo"])).toBe("gallery");
+  });
+
+  const ld = (extra: Record<string, unknown> = {}) => ({
+    raw: JSON.stringify({
+      "@type": "VideoObject",
+      name: "LD name",
+      description: "LD description",
+      thumbnailUrl: "https://e.com/1.webp",
+      uploadDate: "2026-01-02T03:04:05Z",
+      ...extra,
+    }),
+    bytes: 0,
+    truncated: false,
+  });
+
+  test("JSON-LD name and description fill empty text and beat the <title> pair", () => {
+    const r = analyzeUnfurl({ ...page([["description", "PAIR description"]], { jsonLd: [ld()] }), title: "PAIR title" });
+    expect(r.preview.title?.text).toBe("LD name");
+    expect(r.preview.description?.text).toBe("LD description");
+    expect(r.preview.images[0]?.url).toBe("https://e.com/1.webp");
+    expect(r.preview.timestamp).toBe("2026-01-02T03:04:05.000Z");
+  });
+
+  test("Open Graph text and image beat JSON-LD; the upload date still applies", () => {
+    const r = analyzeUnfurl(page(og, { jsonLd: [ld()] }));
+    expect(r.preview.title?.text).toBe("t");
+    expect(r.preview.description?.text).toBe("d");
+    expect(r.preview.images[0]?.url).toBe("https://e.com/0.webp");
+    expect(r.preview.timestamp).toBe("2026-01-02T03:04:05.000Z");
+  });
+
+  const payload = (text: string) => JSON.stringify({ component: { type: 17, components: [{ type: 10, content: text }] } });
+  const inline = (text: string, extra: Record<string, unknown> = {}) => ({
+    source: "inline" as const,
+    type: "application/json",
+    inHead: true,
+    raw: payload(text),
+    bytes: 0,
+    truncated: false,
+    ...extra,
+  });
+  const linked = (text: string) => ({
+    source: "linked" as const,
+    type: "application/json",
+    href: "https://example.com/e.json",
+    hostAllowed: true,
+    raw: payload(text),
+    bytes: 0,
+    truncated: false,
+  });
+  const activeText = (embeds: MetadataResult["componentEmbeds"]) => {
+    const r = analyzeUnfurl(page(og, { componentEmbeds: embeds }));
+    const first = r.activeComponentEmbed?.validation?.root?.components[0];
+    return first && "content" in first ? first.content : null;
+  };
+
+  test("an inline script beats a linked one, in either order", () => {
+    expect(activeText([inline("INLINE"), linked("LINKED")])).toBe("INLINE");
+    expect(activeText([linked("LINKED"), inline("INLINE")])).toBe("INLINE");
+  });
+
+  test("the first inline script wins, and a failing first one isn't skipped", () => {
+    expect(activeText([inline("FIRST"), inline("SECOND")])).toBe("FIRST");
+    const bad = { ...inline("x"), raw: '{"component":{"type":17,"components":[{"type":99}]}}' };
+    const r = analyzeUnfurl(page(og, { componentEmbeds: [bad, inline("VALID second")] }));
+    expect(r.activeComponentEmbed).toBeUndefined();
+    expect(r.preview.layout).toBe("thumbnail");
+    expect(r.checks.some((c) => c.title === "Inline <script> is ignored")).toBe(true);
+  });
+
+  test("a script with another type isn't a candidate, so the link is used", () => {
+    expect(activeText([inline("BADTYPE", { type: "text/plain" }), linked("LINKED")])).toBe("LINKED");
+  });
+
+  test("a script in <body> still renders", () => {
+    expect(activeText([inline("BODY", { inHead: false })])).toBe("BODY");
   });
 });

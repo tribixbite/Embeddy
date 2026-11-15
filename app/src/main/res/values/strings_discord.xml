@@ -11,7 +11,7 @@
     <string name="discord_show_fallback">Show Open Graph fallback</string>
     <string name="discord_hide_fallback">Hide Open Graph fallback</string>
     <string name="discord_fallback_note">Shown when the component embed can\'t be</string>
-    <string name="discord_reading_note">Discord caches previews for about 30 minutes. Layout precedence Discord doesn\'t document is this inspector\'s best reading.</string>
+    <string name="discord_reading_note">Discord caches previews for about 30 minutes. Precedence Discord doesn\'t document follows what its Embed Debugger showed in November 2026.</string>
     <string name="discord_meter_bytes">%1$s / %2$s bytes</string>
     <string name="discord_meter_components">%1$s / %2$s components</string>
     <string name="discord_meter_media">%1$s / %2$s media</string>
@@ -58,6 +58,7 @@
     <string name="discord_check_oembed_author">Author line from oEmbed (the only way to put an author on a preview)</string>
     <string name="discord_check_og_type_no_effect">og:type \"%1$s\" doesn\'t change the layout. Only rich, video, video.* and instapp:photo do.</string>
     <string name="discord_check_twitter_card_no_effect">twitter:card \"%1$s\" doesn\'t change the layout. Only player, summary_large_image and photo do.</string>
+    <string name="discord_check_layout_tags_conflict">%1$s layout tags; the last one wins: %2$s sets the layout. Discord skips values that don\'t change the layout, like summary.</string>
     <string name="discord_check_accent_color">Accent colour %1$s</string>
     <string name="discord_check_theme_color_ignored">theme-color \"%1$s\" is ignored. Discord accepts #RRGGBB or #RRGGBBAA only.</string>
     <string name="discord_check_timestamp">Timestamp from %1$s</string>
@@ -78,6 +79,7 @@
     <string name="discord_check_video_player_page">og:video is a player page (%1$s), not a video file, so the preview has no inline player</string>
     <string name="discord_check_video_ok">Inline video: %1$s</string>
     <string name="discord_check_video_needs_type">Video won\'t play inline: set og:type to video.other (or video), or twitter:card to player</string>
+    <string name="discord_check_video_layout_overridden">Video won\'t play inline: the last layout tag is %1$s. Make og:type video.other or twitter:card player the last one.</string>
     <string name="discord_check_video_needs_https">Video won\'t play inline: serve the file over https</string>
     <string name="discord_check_video_needs_image">Video won\'t play inline: add og:image, which is required and becomes the preview frame</string>
     <string name="discord_check_video_type_unsupported">Video won\'t play inline: %1$s isn\'t supported (video/mp4, video/webm, video/quicktime)</string>
@@ -88,7 +90,7 @@
     <string name="discord_check_no_preview_blocked">No preview: a rule above means Discord shows nothing for this page</string>
     <string name="discord_check_nothing_to_preview">Nothing to preview: no title, description, image or video in the server-rendered HTML</string>
     <string name="discord_check_element_bad_type">%1$s has type=\"%2$s\". Use application/json or application/vnd.discord.component-embed+json.</string>
-    <string name="discord_check_element_not_in_head">The component-embed script must be inside &lt;head&gt;</string>
+    <string name="discord_check_element_not_in_head">Discord\'s docs ask for the component-embed script inside &lt;head&gt;; Discord currently reads it from &lt;body&gt; too.</string>
     <string name="discord_check_element_no_href">The component-embed link has no href</string>
     <string name="discord_check_element_host">Linked component embed %1$s must be on this page\'s host, a subdomain of it, or its parent domain</string>
     <string name="discord_check_element_fetch_failed">Fetching %1$s failed: %2$s</string>
@@ -96,7 +98,8 @@
     <string name="discord_check_component_valid">%1$s component embed is valid: %2$s / 3,000 bytes, %3$s / 40 components, %4$s / 10 media</string>
     <string name="discord_check_component_warnings">%1$s component embed has %2$s warnings: %3$s / 3,000 bytes, %4$s / 40 components, %5$s / 10 media</string>
     <string name="discord_check_component_invalid">%1$s component embed has %2$s errors, so Discord uses the Open Graph preview: %3$s / 3,000 bytes, %4$s / 40 components, %5$s / 10 media</string>
-    <string name="discord_check_component_multiple">%1$s component-embed elements. Discord doesn\'t document which wins; the first usable one is shown.</string>
+    <string name="discord_check_component_multiple">%1$s component-embed elements. Discord reads the first inline &lt;script&gt; with an accepted type, otherwise the first &lt;link&gt;. If that one fails it shows the Open Graph preview; it doesn\'t try the next.</string>
+    <string name="discord_check_component_ignored">%1$s is ignored: Discord reads only %2$s.</string>
     <string name="discord_check_og_fallback_present">Open Graph fallback present (og:title, og:description, og:image)</string>
     <string name="discord_check_og_fallback_incomplete">Open Graph fallback incomplete: Discord falls back to og:title, og:description and og:image when a component embed can\'t be shown</string>
 

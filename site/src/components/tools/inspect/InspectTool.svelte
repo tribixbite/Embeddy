@@ -64,7 +64,13 @@
   let report = $derived(metadata ? analyzeUnfurl(metadata) : null);
   let active = $derived(report?.activeComponentEmbed);
   /** A component embed exists but Discord can't use it — offer to fix it */
-  let brokenEmbed = $derived(report && !active ? report.componentEmbeds.find((c) => c.element.raw !== undefined) : undefined);
+  // The element Discord would read is the one to fix; fall back to any payload we fetched
+  let brokenEmbed = $derived(
+    report && !active
+      ? (report.componentEmbeds.find((c) => c.chosen && c.element.raw !== undefined) ??
+        report.componentEmbeds.find((c) => c.element.raw !== undefined))
+      : undefined,
+  );
   let hostname = $derived.by(() => {
     try {
       return metadata ? new URL(metadata.url).hostname : "";
@@ -322,8 +328,8 @@
         {/if}
 
         <p class="px-1 text-xs text-white/35">
-          Discord caches previews for about 30 minutes — share the cache-busted URL to see changes now. Layout precedence
-          Discord doesn't document is the inspector's best reading; the Embed Debugger is authoritative.
+          Discord caches previews for about 30 minutes — share the cache-busted URL to see changes now. Precedence Discord
+          doesn't document follows what its Embed Debugger showed in November 2026; the Embed Debugger stays authoritative.
         </p>
       </section>
 

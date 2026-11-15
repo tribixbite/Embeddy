@@ -8,10 +8,11 @@
  * https://docs.discord.com/developers/link-previews/component-embeds.
  *
  * Where Discord's docs leave an order of precedence open (layout tags that
- * disagree, JSON-LD vs Open Graph, several component-embed elements), the
- * choice made here is commented at the point it is made and the UI labels the
- * result as the inspector's reading, pointing to Discord's Embed Debugger for
- * the authoritative answer.
+ * disagree, JSON-LD vs Open Graph, several component-embed elements), the rule
+ * used here was checked in Discord's Embed Debugger on 2026-11-15 and is
+ * commented where it is applied. The few orderings that weren't checked say so
+ * at that point, and the UI still points to the Embed Debugger as the
+ * authoritative answer.
  */
 
 import type { ComponentEmbedSource, MetaTag, MetadataResult } from "./types";
@@ -144,8 +145,12 @@ export interface StandardPreview {
 export interface ComponentEmbedReport {
   element: ComponentEmbedSource;
   validation?: ComponentEmbedValidation;
-  /** Element-level problems (placement, type attribute, fetch) */
+  /** Element-level problems that stop Discord using it (type attribute, host, fetch, size) */
   elementErrors: string[];
+  /** Element-level notes that don't stop it (a script outside <head>) */
+  elementWarnings: string[];
+  /** The element Discord reads; the others are ignored even when they are valid */
+  chosen: boolean;
   /** True when Discord should render this payload */
   usable: boolean;
 }
@@ -267,6 +272,39 @@ function lastNonEmpty(tags: MetaTag[], keys: readonly string[]): MetaTag | undef
   for (let i = tags.length - 1; i >= 0; i--) {
     const t = tags[i]!;
     if (keys.includes(t.property) && t.content.trim() !== "") return t;
+  }
+  return undefined;
+}
+
+/** The layout an og:type / twitter:card value asks for, or undefined when it doesn't change the layout */
+export type LayoutSignal = "rich" | "video" | "photo" | "large-image";
+
+function layoutSignalOf(tag: MetaTag): LayoutSignal | undefined {
+  const value = tag.content.trim();
+  if (tag.property === "og:type") {
+    if (value === "rich") return "rich";
+    if (value === "video" || value.startsWith("video.")) return "video";
+    if (value === "instapp:photo") return "photo";
+  } else if (tag.property === "twitter:card") {
+    if (value === "summary_large_image") return "large-image";
+    if (value === "photo") return "photo";
+    if (value === "player") return "video";
+  }
+  return undefined;
+}
+
+/**
+ * Discord reads a single layout signal: the last og:type or twitter:card in
+ * document order whose value changes the layout. Values that don't (summary,
+ * website, article…) are skipped, so `summary_large_image` followed by
+ * `summary` is still a large image, and `og:type=rich` followed by
+ * `twitter:card=photo` is a photo. Checked in Discord's Embed Debugger
+ * (2026-11-15) for every ordering of rich, video, photo and large-image.
+ */
+function lastLayoutSignal(tags: MetaTag[]): { signal: LayoutSignal; tag: MetaTag } | undefined {
+  for (let i = tags.length - 1; i >= 0; i--) {
+    const signal = layoutSignalOf(tags[i]!);
+    if (signal) return { signal, tag: tags[i]! };
   }
   return undefined;
 }
@@ -398,6 +436,27 @@ export function analyzeUnfurl(result: MetadataResult, now = Date.now()): UnfurlR
     if (o.count > 1) check("oembed", "info", `${o.count} JSON oEmbed links`, "Discord uses only the first.");
   }
 
+  // JSON-LD VideoObject: read before the text fields because its name and description fill them
+  let ldVideo: Record<string, unknown> | undefined;
+  for (const block of result.jsonLd ?? []) {
+    let node: unknown;
+    try {
+      node = JSON.parse(block.raw);
+    } catch {
+      check("media", "warn", "A JSON-LD block isn't valid JSON", block.truncated ? "It was also cut at the inspector's 32 KB cap." : undefined);
+      continue;
+    }
+    if (isVideoObject(node)) {
+      ldVideo ??= node;
+    } else if (
+      (Array.isArray(node) && node.some(isVideoObject)) ||
+      (typeof node === "object" && node !== null && Array.isArray((node as Record<string, unknown>)["@graph"]) &&
+        ((node as Record<string, unknown>)["@graph"] as unknown[]).some(isVideoObject))
+    ) {
+      check("media", "warn", "VideoObject isn't top-level", "Discord reads only a top-level schema.org VideoObject, not one inside an array or @graph.");
+    }
+  }
+
   // ── Text fields (first non-empty wins) ──
   const ogTitle = firstNonEmpty(tags, ["og:title", "twitter:title"]);
   const ogDesc = firstNonEmpty(tags, ["og:description", "twitter:description"]);
@@ -406,7 +465,22 @@ export function analyzeUnfurl(result: MetadataResult, now = Date.now()): UnfurlR
   let descValue = ogDesc?.content.trim();
   let descSource = ogDesc?.property;
 
-  if (!ogTitle && !ogDesc) {
+  // JSON-LD name/description fill what Open Graph/Twitter left empty, and win
+  // over the <title> + meta description pair (Embed Debugger, 2026-11-15: a
+  // page with all three showed the JSON-LD text; with og:title/og:description
+  // too, Open Graph won). Filling field by field is the inspector's reading.
+  const ldName = str(ldVideo?.name)?.trim();
+  const ldDesc = str(ldVideo?.description)?.trim();
+  if (!ogTitle && ldName) {
+    titleValue = ldName;
+    titleSource = "JSON-LD name";
+  }
+  if (!ogDesc && ldDesc) {
+    descValue = ldDesc;
+    descSource = "JSON-LD description";
+  }
+
+  if (!ogTitle && !ogDesc && !ldName && !ldDesc) {
     // <title> + <meta name="description"> are used only as a pair, and only
     // when Open Graph/Twitter supply neither field.
     const htmlTitle = result.title.trim();
@@ -423,13 +497,16 @@ export function analyzeUnfurl(result: MetadataResult, now = Date.now()): UnfurlR
   }
   if (!ogTitle && oembed?.title) {
     // oEmbed fills the title only when Open Graph/Twitter gave none
+    // TODO: whether oEmbed's title or a JSON-LD name wins when both fill the gap is untested
+    // in the Embed Debugger; oEmbed overriding both is kept from before.
     titleValue = oembed.title;
     titleSource = "oEmbed title";
   }
 
   const ogType = lastNonEmpty(tags, ["og:type"])?.content.trim();
   const twitterCard = lastNonEmpty(tags, ["twitter:card"])?.content.trim();
-  const isRich = ogType === "rich";
+  const layoutSignal = lastLayoutSignal(tags);
+  const isRich = layoutSignal?.signal === "rich";
 
   const title = titleValue ? trimForDiscord(titleValue, DISCORD_LIMITS.titleBytes, DISCORD_LIMITS.titleLines) : undefined;
   const description = descValue
@@ -472,12 +549,21 @@ export function analyzeUnfurl(result: MetadataResult, now = Date.now()): UnfurlR
   const author = oembed?.authorName ? { name: oembed.authorName, url: oembed.authorUrl } : undefined;
   if (author) check("oembed", "pass", "Author line from oEmbed", "oEmbed is the only way to put an author on a preview.");
 
-  // Layout tags: last one in the document wins
+  // Layout tags: the last one that changes the layout wins (see lastLayoutSignal)
   if (ogType && !(ogType === "rich" || ogType === "video" || ogType.startsWith("video.") || ogType === "instapp:photo")) {
     check("text", "info", `og:type "${ogType}" doesn't change the layout`, "Only rich, video, video.* and instapp:photo do.");
   }
   if (twitterCard && !["player", "summary_large_image", "photo"].includes(twitterCard)) {
     check("text", "info", `twitter:card "${twitterCard}" doesn't change the layout`, "Only player, summary_large_image and photo do.");
+  }
+  const layoutTags = tags.filter((t) => layoutSignalOf(t));
+  if (layoutSignal && new Set(layoutTags.map((t) => `${t.property}=${t.content.trim()}`)).size > 1) {
+    check(
+      "text",
+      "info",
+      `${layoutTags.length} layout tags — the last one wins`,
+      `${layoutSignal.tag.property}="${layoutSignal.tag.content.trim()}" sets the layout. Discord uses the last og:type or twitter:card that changes the layout and skips values that don't (like summary).`,
+    );
   }
 
   // Accent color (last wins)
@@ -566,26 +652,6 @@ export function analyzeUnfurl(result: MetadataResult, now = Date.now()): UnfurlR
   }
   let allImages = [...byUrl.values()];
 
-  // JSON-LD VideoObject (fills gaps only — precedence vs Open Graph is undocumented)
-  let ldVideo: Record<string, unknown> | undefined;
-  for (const block of result.jsonLd ?? []) {
-    let node: unknown;
-    try {
-      node = JSON.parse(block.raw);
-    } catch {
-      check("media", "warn", "A JSON-LD block isn't valid JSON", block.truncated ? "It was also cut at the inspector's 32 KB cap." : undefined);
-      continue;
-    }
-    if (isVideoObject(node)) {
-      ldVideo ??= node;
-    } else if (
-      (Array.isArray(node) && node.some(isVideoObject)) ||
-      (typeof node === "object" && node !== null && Array.isArray((node as Record<string, unknown>)["@graph"]) &&
-        ((node as Record<string, unknown>)["@graph"] as unknown[]).some(isVideoObject))
-    ) {
-      check("media", "warn", "VideoObject isn't top-level", "Discord reads only a top-level schema.org VideoObject, not one inside an array or @graph.");
-    }
-  }
   if (ldVideo) {
     check("media", "pass", "JSON-LD VideoObject found", "Discord reads name, description, embedUrl, thumbnailUrl and uploadDate.");
     const thumb = Array.isArray(ldVideo.thumbnailUrl) ? ldVideo.thumbnailUrl[0] : ldVideo.thumbnailUrl;
@@ -663,9 +729,10 @@ export function analyzeUnfurl(result: MetadataResult, now = Date.now()): UnfurlR
     check("media", "info", "twitter:player is a player page, not a video file", "Discord plays a file from og:video or twitter:player:stream.");
   }
 
-  const wantsVideo =
-    ogType === "video" || !!ogType?.startsWith("video.") || twitterCard === "player" ||
-    (!ogType && !twitterCard && oembed?.type === "video");
+  // og:type rich plays an og:video too (Embed Debugger, 2026-11-15: rich + og:video drew a
+  // player); summary_large_image keeps the video in the embed but draws only the still.
+  const videoSignal = layoutSignal?.signal === "video" || (!ogType && !twitterCard && oembed?.type === "video");
+  const wantsVideo = videoSignal || isRich;
   let videoOk = false;
   /** og:video pointing at an HTML player page (YouTube-style), not a file */
   const playerPage = !!video && (video.type?.toLowerCase() === "text/html" || video.type?.toLowerCase() === "application/x-shockwave-flash");
@@ -678,7 +745,13 @@ export function analyzeUnfurl(result: MetadataResult, now = Date.now()): UnfurlR
     );
   } else if (video) {
     const problems: string[] = [];
-    if (!wantsVideo) problems.push('set og:type to "video.other" (or video) or twitter:card to "player"');
+    if (!wantsVideo) {
+      problems.push(
+        layoutSignal
+          ? `the last layout tag is ${layoutSignal.tag.property}="${layoutSignal.tag.content.trim()}" — make og:type "video.other" or twitter:card "player" the last one`
+          : 'set og:type to "video.other" (or video) or twitter:card to "player"',
+      );
+    }
     if (!video.url.startsWith("https://")) problems.push("serve the file over https");
     if (!allImages.length) problems.push("add og:image — it is required and becomes the preview frame");
     if (video.type && !VIDEO_MIME_TYPES.includes(video.type.toLowerCase())) {
@@ -698,7 +771,7 @@ export function analyzeUnfurl(result: MetadataResult, now = Date.now()): UnfurlR
       videoOk ? "Inline video" : "Video won't play inline",
       videoOk ? `${video.url}${video.width && video.height ? "" : " — no declared size, so Discord must be able to measure the file or the video is dropped."}` : `To fix: ${problems.join("; ")}.`,
     );
-  } else if (wantsVideo) {
+  } else if (videoSignal) {
     check("media", "warn", "Video layout requested but no video file", "Point og:video at an .mp4, .webm or .mov file.");
   }
 
@@ -713,16 +786,20 @@ export function analyzeUnfurl(result: MetadataResult, now = Date.now()): UnfurlR
     }
   }
 
-  // ── Layout (precedence between conflicting layout tags is the inspector's reading) ──
-  const isPhoto =
-    twitterCard === "photo" || ogType === "instapp:photo" || (!ogType && !twitterCard && oembed?.type === "photo");
+  // ── Layout ──
+  // One layout signal (lastLayoutSignal), checked in Discord's Embed Debugger. Two or more
+  // og:image tags come back as a gallery even with a photo card, so the gallery goes first.
+  // TODO: a playable video plus a second og:image comes back as a video embed followed by an
+  // image embed; the Embed Debugger's preview draws only the first, so whether the client shows
+  // the video, a gallery or both is unconfirmed. The video is kept here.
+  const isPhoto = layoutSignal?.signal === "photo" || (!ogType && !twitterCard && oembed?.type === "photo");
   const oembedRich = !ogType && !twitterCard && oembed?.type === "rich";
   let layout: PreviewLayout;
   if (videoOk) layout = "video";
-  else if (isPhoto && allImages.length) layout = "photo";
   else if (isGallery) layout = "gallery";
+  else if (isPhoto && allImages.length) layout = "photo";
   else if (isRich || oembedRich) layout = "rich";
-  else if (twitterCard === "summary_large_image" && allImages.length) layout = "large-image";
+  else if (layoutSignal?.signal === "large-image" && allImages.length) layout = "large-image";
   else if (allImages.length) layout = "thumbnail";
   else if (title || description) layout = "text";
   else layout = "none";
@@ -745,13 +822,29 @@ export function analyzeUnfurl(result: MetadataResult, now = Date.now()): UnfurlR
   // ── Component embeds ──
   const ogFallback = !!(firstNonEmpty(tags, ["og:title"]) && firstNonEmpty(tags, ["og:description"]) && firstNonEmpty(tags, ["og:image"]));
   const componentEmbeds = (result.componentEmbeds ?? []).map((element) => assessComponentEmbed(element));
-  const activeComponentEmbed = componentEmbeds.find((c) => c.usable);
+  // Discord reads one element: the first inline <script> with an accepted type, else the
+  // first such <link>, wherever they sit in the page. If that one fails, it shows the Open
+  // Graph preview rather than trying the next (Embed Debugger, 2026-11-15).
+  const chosenEmbed =
+    componentEmbeds.find((c) => c.element.source === "inline" && hasEmbedType(c.element)) ??
+    componentEmbeds.find((c) => c.element.source === "linked" && hasEmbedType(c.element));
+  if (chosenEmbed) chosenEmbed.chosen = true;
+  const activeComponentEmbed = chosenEmbed?.usable ? chosenEmbed : undefined;
 
   if (componentEmbeds.length) {
+    const describe = (r: ComponentEmbedReport) =>
+      r.element.source === "inline" ? "Inline <script>" : `Linked JSON (${r.element.href || "no href"})`;
     for (const report of componentEmbeds) {
-      const where = report.element.source === "inline" ? "Inline <script>" : `Linked JSON (${report.element.href || "no href"})`;
+      const where = describe(report);
+      if (chosenEmbed && !report.chosen) {
+        check("component", "info", `${where} is ignored`, `Discord reads only one element: ${describe(chosenEmbed)}.`);
+        continue;
+      }
       if (report.elementErrors.length) {
         check("component", "fail", `${where} can't be used`, report.elementErrors.join(" "));
+      }
+      if (report.elementWarnings.length) {
+        check("component", "warn", where, report.elementWarnings.join(" "));
       }
       const v = report.validation;
       if (v) {
@@ -771,7 +864,12 @@ export function analyzeUnfurl(result: MetadataResult, now = Date.now()): UnfurlR
       }
     }
     if (componentEmbeds.length > 1) {
-      check("component", "info", `${componentEmbeds.length} component-embed elements`, "Discord doesn't document which one wins; the preview uses the first usable one.");
+      check(
+        "component",
+        "info",
+        `${componentEmbeds.length} component-embed elements`,
+        "Discord reads the first inline <script> with an accepted type, otherwise the first <link>. If that one fails it shows the Open Graph preview; it doesn't try the next.",
+      );
     }
     check(
       "component",
@@ -814,8 +912,10 @@ export function assessComponentEmbed(element: ComponentEmbedSource): ComponentEm
   if (!(COMPONENT_EMBED_MIME_TYPES as readonly string[]).includes(type)) {
     elementErrors.push(`type="${element.type ?? ""}" — use application/json or application/vnd.discord.component-embed+json.`);
   }
+  const elementWarnings: string[] = [];
   if (element.source === "inline" && element.inHead === false) {
-    elementErrors.push("The script must be inside <head>.");
+    // Discord's docs say <head>, but the Embed Debugger (2026-11-15) used a script in <body>
+    elementWarnings.push("Discord's docs ask for the script inside <head>; Discord currently reads it from <body> too.");
   }
   if (element.source === "linked") {
     if (!element.href) elementErrors.push("The link has no href.");
@@ -833,6 +933,13 @@ export function assessComponentEmbed(element: ComponentEmbedSource): ComponentEm
     element,
     validation,
     elementErrors,
+    elementWarnings,
+    chosen: false,
     usable: elementErrors.length === 0 && !!validation?.ok,
   };
+}
+
+/** Only elements with an accepted type attribute are candidates; Discord passes over the rest */
+function hasEmbedType(element: ComponentEmbedSource): boolean {
+  return (COMPONENT_EMBED_MIME_TYPES as readonly string[]).includes(element.type?.trim().toLowerCase() ?? "");
 }

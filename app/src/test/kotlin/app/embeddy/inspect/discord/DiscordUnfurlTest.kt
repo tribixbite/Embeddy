@@ -138,4 +138,94 @@ class DiscordUnfurlTest {
         assertFalse(isLinkedEmbedHostAllowed("/e.json", url))
         assertFalse(isLinkedEmbedHostAllowed("https://a.example.com/e.json", "https://b.example.com/"))
     }
+
+    // ── Precedence checked in Discord's Embed Debugger (2026-11-15), mirroring the web tests ──
+
+    private val ogBase = arrayOf(
+        og("og:title", "t"),
+        og("og:description", "d"),
+        og("og:image", "https://example.com/0.webp"),
+    )
+    private val videoTags = arrayOf(
+        og("og:video", "https://example.com/v.mp4"),
+        og("og:video:type", "video/mp4"),
+        og("og:video:width", "640"),
+        og("og:video:height", "360"),
+    )
+    private fun layoutOf(vararg extra: MetaTag) = analyze(*ogBase, *extra).preview.layout
+    private fun card(value: String) = name("twitter:card", value)
+    private fun type(value: String) = og("og:type", value)
+
+    @Test
+    fun `the last layout-changing og type or twitter card wins across both keys`() {
+        assertEquals(PreviewLayout.LARGE_IMAGE, layoutOf(card("summary_large_image"), card("summary")))
+        assertEquals(PreviewLayout.PHOTO, layoutOf(card("summary_large_image"), card("photo")))
+        assertEquals(PreviewLayout.LARGE_IMAGE, layoutOf(card("photo"), card("summary_large_image")))
+        assertEquals(PreviewLayout.LARGE_IMAGE, layoutOf(type("rich"), card("summary_large_image")))
+        assertEquals(PreviewLayout.RICH, layoutOf(card("summary_large_image"), type("rich")))
+        assertEquals(PreviewLayout.PHOTO, layoutOf(type("rich"), card("photo")))
+        assertEquals(PreviewLayout.RICH, layoutOf(card("photo"), type("rich")))
+        assertEquals(PreviewLayout.RICH, layoutOf(type("rich"), type("website")))
+        val conflict = analyze(*ogBase, type("rich"), card("summary_large_image"))
+        val note = conflict.checks.single { it.kind == CheckKind.LAYOUT_TAGS_CONFLICT }
+        assertEquals(listOf("2", "twitter:card=\"summary_large_image\""), note.args)
+    }
+
+    @Test
+    fun `video plays only when a video or rich signal is the last layout tag`() {
+        assertEquals(PreviewLayout.LARGE_IMAGE, layoutOf(*videoTags, type("video.other"), card("summary_large_image")))
+        assertEquals(PreviewLayout.VIDEO, layoutOf(*videoTags, card("summary_large_image"), type("video.other")))
+        assertEquals(PreviewLayout.VIDEO, layoutOf(*videoTags, card("player")))
+        assertEquals(PreviewLayout.VIDEO, layoutOf(*videoTags, type("rich")))
+        assertEquals(PreviewLayout.THUMBNAIL, layoutOf(*videoTags, card("summary")))
+        val photo = analyze(*ogBase, *videoTags, type("video.other"), card("photo"))
+        assertEquals(PreviewLayout.PHOTO, photo.preview.layout)
+        assertTrue(CheckKind.VIDEO_LAYOUT_OVERRIDDEN in photo.kinds())
+        assertFalse(CheckKind.VIDEO_LAYOUT_NO_FILE in analyze(*ogBase, type("rich")).kinds())
+    }
+
+    @Test
+    fun `two og images are a gallery even with a photo card`() {
+        assertEquals(PreviewLayout.GALLERY, layoutOf(og("og:image", "https://example.com/1.webp"), card("photo")))
+    }
+
+    private fun payload(text: String) = """{"component":{"type":17,"components":[{"type":10,"content":"$text"}]}}"""
+    private fun inline(text: String, type: String = "application/json", inHead: Boolean = true) =
+        ComponentEmbedSource(EmbedSourceKind.INLINE, type, payload(text), utf8Length(payload(text)), inHead = inHead)
+    private fun linked(text: String) = ComponentEmbedSource(
+        EmbedSourceKind.LINKED, "application/json", payload(text), utf8Length(payload(text)),
+        href = "https://example.com/e.json", hostAllowed = true,
+    )
+    private fun activeOf(vararg embeds: ComponentEmbedSource) = analyze(*ogBase, embeds = embeds.toList()).activeComponentEmbed?.element
+
+    @Test
+    fun `an inline script beats a linked one in either order`() {
+        val i = inline("INLINE")
+        val l = linked("LINKED")
+        assertEquals(i, activeOf(i, l))
+        assertEquals(i, activeOf(l, i))
+    }
+
+    @Test
+    fun `the first inline script wins and a failing first one is not skipped`() {
+        val first = inline("FIRST")
+        assertEquals(first, activeOf(first, inline("SECOND")))
+        val badRaw = """{"component":{"type":17,"components":[{"type":99}]}}"""
+        val bad = ComponentEmbedSource(EmbedSourceKind.INLINE, "application/json", badRaw, utf8Length(badRaw), inHead = true)
+        val r = analyze(*ogBase, embeds = listOf(bad, inline("VALID")))
+        assertNull(r.activeComponentEmbed)
+        assertEquals(bad, r.chosenComponentEmbed?.element)
+        assertEquals(PreviewLayout.THUMBNAIL, r.preview.layout)
+        assertTrue(CheckKind.COMPONENT_IGNORED in r.kinds())
+    }
+
+    @Test
+    fun `a script with another type is not a candidate, and a script in body still renders`() {
+        val l = linked("LINKED")
+        assertEquals(l, activeOf(inline("BADTYPE", type = "text/plain"), l))
+        val body = inline("BODY", inHead = false)
+        val r = analyze(*ogBase, embeds = listOf(body))
+        assertEquals(body, r.activeComponentEmbed?.element)
+        assertEquals(CheckStatus.WARN, r.checks.single { it.kind == CheckKind.ELEMENT_NOT_IN_HEAD }.status)
+    }
 }
