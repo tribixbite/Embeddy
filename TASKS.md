@@ -273,7 +273,13 @@ MASTER-TODO. Ordered by severity: M1-M10 high, M11-M40 med, M41-M79 low.
 - [x] **8.2** app: stitching reliability — zero-length segments dropped, segments sorted; edge cases pinned by tests
 - [x] **8.3** app: video output formats MP4 + Original (openh264/aac, libvpx/opus; quality→bitrate mapping; WebP command pinned unchanged)
 - [x] **8.4** app: per-segment volume control (TrimSegment.volume, atrim+volume+concat graph, audio-less handling, 0-200% slider)
-- [ ] **8.5** on-device: verify MP4/Original encodes (A/V sync, volume steps), no-audio inputs, container mapping, share/save mime — see feat-app-stitch report checklist
+- [x] **8.5** on-device (Saga, Android 14, debug 0.1.63, 2026-11-25), test clips with a white flash + 2 kHz click
+  every second over a 440 Hz tone: MP4 stitch 0.0–3.2 s at 0% + 4.2–8.2 s at 200% → H.264/AAC 7.25 s, first
+  segment silent, second +6.0 dB (exactly 2x), clicks within 20 ms of their flashes; WebM → Original = VP8/Opus
+  .webm in sync at unchanged level; MOV → Original = H.264/AAC .mp4; no-audio MP4 → no volume controls,
+  video-only stitch (no audio stream); overlapping segments merge without duplicate frames, first segment's
+  volume wins (volume=0.458 for 46%). Saved rows: video/mp4 and video/webm in Download/, a second save is
+  named "(1)". Share uses the same extension mapping. Found and fixed two slider bugs (12.13).
 - [x] **8.6** site: percent + ETA on convert progress (per-phase clock, per-attempt reset); dead wasm-webp dep removed
 - [x] **8.7** app: ETA on conversion card; per-attempt elapsed baseline fix
 
@@ -402,7 +408,8 @@ RSA 4096, valid to 2053); all 4 CI secrets set; v0.1.55 APKs and `.aab` both sig
   topics updated; F-Droid README signing section marked done.
 - [ ] **11.7** Dependency upgrades lint reports (Compose BOM 2024.12→2026.09, Kotlin 2.0→2.4, AGP 8.13→9.5,
   Media3 1.5→1.11, lifecycle, navigation, work…). Deliberately deferred past the first Play
-  submission: large surface, gradle.lockfile + F-Droid reproducibility churn.
+  submission: large surface, gradle.lockfile + F-Droid reproducibility churn. When Material 3 moves past
+  1.3, drop `ScrollSafeRangeSlider` (12.13) if its RangeSlider checks drag direction.
 - [ ] **11.8** Separate Play upload key (TODO in `release.yml`) — optional, owner decision.
 - [x] **11.9** F-Droid recipe points at v0.1.56 (100561–3), the first release with per-split changelogs; verified its APKs carry those codes and the pinned signer.
 - [x] **11.11** Crop editor closes on every new input (share intents and Start over too), keyed on the
@@ -500,8 +507,26 @@ Discord published link-preview docs and component embeds on 2026-10-05
     - Comparison through the live worker: 47/48 fixtures match Discord.
   - [ ] Video + a second og:image comes back as a video embed followed by an image embed; the Debugger
     preview draws only the first, so the client's rendering is unconfirmed (TODO in both inspectors).
-  - [ ] Untested orderings: oEmbed title vs JSON-LD name; og:pubdate vs JSON-LD uploadDate; JSON-LD
-    filling only one of title/description.
+  - [x] Rounds 5–7 (2026-11-25, same Pixel setup, 18 more fixtures from the same script). Applied in both
+    inspectors, with tests:
+    - A VideoObject is read only with `"@context": "https://schema.org"` exactly; `http://schema.org`,
+      `https://schema.org/` and a missing @context are ignored (new warning). No other property is required
+      (embedUrl/contentUrl are not).
+    - Its name, description, thumbnailUrl and uploadDate fill field by field; without a name the title stays
+      empty (the `<title>` pair does not come back).
+    - JSON-LD uploadDate beats og:pubdate (og:pubdate alone is used).
+    - A JSON-LD name beats a fetched oEmbed title.
+    - Comparison through the live worker, now also on description, timestamp and image: 62/63 fixtures
+      match (the video + second image case above).
+- [x] **12.13** Stitch/trim sliders (found on the Saga, 2026-11-25): a page scroll that started on a
+  RangeSlider track moved the nearest handle to the touch point (Material 3 1.3.1 captures the thumb when
+  its horizontal-slop wait is cancelled), and the change could stay on screen without reaching the export
+  (screen 4.5 s, FFmpeg trim 5.000). `ScrollSafeRangeSlider` watches each gesture in the Initial pass and
+  drops callbacks for one that turns vertical; used by trim, stitch and join sliders (TODO: remove with
+  11.7's Material 3 upgrade, which has the direction check). Also a tap on a stitch slider (handle or
+  volume) was lost: both callbacks fire in one frame and the finish handler committed the stale list.
+  Verified on the Saga: scrolls from either track at 2 s/6 s leave segments unchanged and scroll normally
+  (422 px vs 427 px off-slider), taps and drags commit and the FFmpeg command matches the screen.
 - [x] **12.12** Release race (2026-11-14): a site push during the v0.1.61 build made the version-pin push
   fail, so nothing was released. The pin step now rebases onto main when the new commits leave the APK
   alone, and stops with an error when they don't (that push's own run releases them). Simulated both cases.
@@ -512,9 +537,15 @@ Discord published link-preview docs and component embeds on 2026-10-05
   - [x] On-device visual check (2026-11-14, S25U): showcase component embed, OG fallback, meters, checks and
     a plain OG site (github.com) render. Fixed two issues found there: markdown blocks inherited the 24sp
     body line height (double-spaced subtext), and metadata values were cut at 3 lines with no ellipsis.
-  - [ ] Inline `||spoiler||` text is drawn hidden but cannot be tapped to reveal (spoilered media can).
-  - [ ] JSON-LD VideoObject and fetch-level checks (redirects, timing, Content-Disposition) are web-only
-    (TODO in `inspect/discord/DiscordUnfurl.kt`).
+  - [x] Inline `||spoiler||` text reveals on tap (one tap opens every styled span of that spoiler); checked
+    on the Saga with the showcase's "and love".
+  - [x] JSON-LD VideoObject ported (collected by `MetadataEngine`, same rules and checks as the web);
+    checked on the Saga against tunnel fixtures.
+  - [ ] Fetch-level checks (redirects, timing, Content-Disposition) are web-only: Jsoup follows redirects
+    internally (TODO in `inspect/discord/DiscordUnfurl.kt`).
+  - [ ] List numbering: Discord mobile numbered " - c" under "1./2." as 3. Discord's web markdown library
+    would nest it, so the clients may differ; needs a desktop Discord check before modelling (TODO in both
+    markdown parsers).
 - [x] **12.10** Named HTML entities: full WHATWG table (2,125 semicolon names) vendored as
   `worker/src/html-entities-table.ts`, regenerated by `worker/scripts/generate-html-entities.ts`; numeric
   references in 0x80–0x9F follow the spec's Windows-1252 mapping.

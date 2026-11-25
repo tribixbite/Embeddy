@@ -73,7 +73,9 @@ Every push to `main` triggers a CI build that produces split-ABI APKs:
 ### Inspect — Social embed metadata viewer
 
 - Fetches and parses Open Graph, Twitter Card, and general `<meta>` tags
-- Discord/Slack-style live embed preview card
+- Discord preview with the same rules as the web inspector below (layout precedence, oEmbed,
+  JSON-LD `VideoObject`, component embeds with validation, spoilers that reveal on tap);
+  only the redirect/timing/`Content-Disposition` checks are web-only
 - Expandable tag sections with one-tap copy
 - Extracts favicon, canonical URL, charset, theme-color, robots, generator
 - Powered by Jsoup for robust HTML parsing
@@ -82,7 +84,9 @@ On the web ([embeddy.link/tools/inspect](https://embeddy.link/tools/inspect/)) t
 inspector follows Discord's [link-preview rules](https://docs.discord.com/developers/link-previews/overview):
 
 - Fetches as Discordbot (or as Embeddy) and reads tags the way Discord does — `name`
-  before `property`, first-wins text, last-wins layout/color/date tags
+  before `property`, first-wins text, last-wins color/date tags, and the last tag that
+  changes the layout wins; precedence Discord doesn't document was checked in its Embed
+  Debugger with `scripts/discord-precedence-fixtures.py` (results in TASKS.md 12.8)
 - Draws the layout Discord picks: small or large image, image only, inline video,
   4-image gallery, or rich markdown; with oEmbed author/provider and JSON-LD `VideoObject`
 - Renders [component embeds](https://docs.discord.com/developers/link-previews/component-embeds)
