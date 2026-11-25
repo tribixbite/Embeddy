@@ -18,8 +18,9 @@ import java.time.format.DateTimeParseException
  * Debugger on 2026-11-15 and is commented where it is applied.
  *
  * Not ported from the web version: fetch-level checks (redirect count, timing,
- * Content-Disposition — Jsoup doesn't expose them) and JSON-LD VideoObject.
- * TODO: read top-level JSON-LD VideoObject (thumbnailUrl/embedUrl/uploadDate) here too.
+ * Content-Disposition). The app fetches through Jsoup, which follows redirects
+ * internally and doesn't report the chain or the headers per hop.
+ * TODO: fetch with a client that exposes the redirect chain to port those checks.
  */
 object DiscordLimits {
     const val TITLE_BYTES = 70
@@ -73,6 +74,8 @@ data class PageFacts(
     val tags: List<MetaTag>,
     val componentEmbeds: List<ComponentEmbedSource> = emptyList(),
     val oembed: OEmbedSource? = null,
+    /** Raw text of the page's `application/ld+json` scripts, in document order */
+    val jsonLd: List<String> = emptyList(),
 )
 
 enum class PreviewLayout { NONE, TEXT, THUMBNAIL, LARGE_IMAGE, PHOTO, VIDEO, GALLERY, RICH }
@@ -141,6 +144,10 @@ enum class CheckKind {
     DATE_IGNORED, // key, value
     PUBLISHED_TIME_NOT_READ,
     OEMBED_THUMBNAIL_IGNORED,
+    JSONLD_INVALID,
+    JSONLD_NOT_TOP_LEVEL,
+    JSONLD_CONTEXT_IGNORED, // @context as written, or empty when missing
+    JSONLD_VIDEO_OBJECT,
     RELATIVE_IMAGE, // key: value
     ORPHAN_IMAGE_META,
     VARIANT_IMAGE_META,
@@ -347,6 +354,18 @@ private fun Json.Obj.dim(key: String): Int? = when (val v = this[key]) {
     else -> null
 }
 
+/**
+ * The only @context Discord accepts on a VideoObject (Embed Debugger, 2026-11-25:
+ * "http://schema.org", "https://schema.org/" and a missing @context were all ignored).
+ */
+private const val JSONLD_CONTEXT = "https://schema.org"
+
+/** True when a JSON-LD node's @type is (or includes) VideoObject */
+private fun isVideoObject(node: Json?): Boolean {
+    val type = node.objOrNull?.get("@type") ?: return false
+    return type.stringOrNull == "VideoObject" || type.arrOrNull?.items?.any { it.stringOrNull == "VideoObject" } == true
+}
+
 // ── Main analysis ───────────────────────────────────────────────────────────
 
 /** Work out the Discord preview for an inspected page, and the checks behind it. */
@@ -392,6 +411,32 @@ fun analyzeUnfurl(page: PageFacts): DiscordReport {
     }
     val oe = oembed
 
+    // JSON-LD VideoObject: read before the text fields because its name and description fill them.
+    // Discord reads only a top-level object, so one inside an array or @graph gets a warning.
+    var ldVideo: Json.Obj? = null
+    for (raw in page.jsonLd) {
+        val node = runCatching { parseJson(raw) }.getOrNull()
+        if (node == null) {
+            check(CheckGroup.MEDIA, CheckStatus.WARN, CheckKind.JSONLD_INVALID)
+            continue
+        }
+        if (isVideoObject(node)) {
+            val obj = node.objOrNull ?: continue
+            val context = obj["@context"]
+            if (context.stringOrNull == JSONLD_CONTEXT) {
+                if (ldVideo == null) ldVideo = obj
+            } else {
+                check(CheckGroup.MEDIA, CheckStatus.WARN, CheckKind.JSONLD_CONTEXT_IGNORED, context.stringOrNull.orEmpty())
+            }
+        } else if (
+            node.arrOrNull?.items?.any(::isVideoObject) == true ||
+            node.objOrNull?.get("@graph").arrOrNull?.items?.any(::isVideoObject) == true
+        ) {
+            check(CheckGroup.MEDIA, CheckStatus.WARN, CheckKind.JSONLD_NOT_TOP_LEVEL)
+        }
+    }
+    val ld = ldVideo
+
     // ── Text fields (first non-empty wins) ──
     val ogTitle = tags.firstNonEmpty("og:title", "twitter:title")
     val ogDesc = tags.firstNonEmpty("og:description", "twitter:description")
@@ -399,7 +444,22 @@ fun analyzeUnfurl(page: PageFacts): DiscordReport {
     var titleSource = ogTitle?.key
     var descValue = ogDesc?.value?.trim()
     var descSource = ogDesc?.key
-    if (ogTitle == null && ogDesc == null) {
+
+    // JSON-LD name/description fill what Open Graph/Twitter left empty, and win over the
+    // <title> + meta description pair (Embed Debugger, 2026-11-15: a page with all three
+    // showed the JSON-LD text; with og:title/og:description too, Open Graph won). They fill
+    // field by field (2026-11-25: a VideoObject without a name left the title empty).
+    val ldName = ld?.str("name")
+    val ldDesc = ld?.str("description")
+    if (ogTitle == null && ldName != null) {
+        titleValue = ldName
+        titleSource = "JSON-LD name"
+    }
+    if (ogDesc == null && ldDesc != null) {
+        descValue = ldDesc
+        descSource = "JSON-LD description"
+    }
+    if (ogTitle == null && ogDesc == null && ldName == null && ldDesc == null) {
         // <title> + <meta name="description"> are used only as a pair, and only
         // when Open Graph/Twitter supply neither field
         val htmlTitle = page.htmlTitle.trim()
@@ -414,8 +474,9 @@ fun analyzeUnfurl(page: PageFacts): DiscordReport {
             check(CheckGroup.TEXT, CheckStatus.WARN, CheckKind.TITLE_DESCRIPTION_PAIR_INCOMPLETE)
         }
     }
-    if (ogTitle == null && oe?.title != null) {
-        // oEmbed fills the title only when Open Graph/Twitter gave none
+    if (ogTitle == null && ldName == null && oe?.title != null) {
+        // oEmbed fills the title only when Open Graph/Twitter and JSON-LD gave none
+        // (Embed Debugger, 2026-11-25: a JSON-LD name beat a fetched oEmbed title)
         titleValue = oe.title
         titleSource = "oEmbed title"
     }
@@ -480,10 +541,16 @@ fun analyzeUnfurl(page: PageFacts): DiscordReport {
         }
     }
 
-    // Publish date (last wins)
+    // Publish date: a JSON-LD uploadDate beats the meta tags (Embed Debugger, 2026-11-25:
+    // og:pubdate alone was used, but lost to uploadDate on the same page); among the
+    // tags the last one wins
     var timestamp: String? = null
     val dateTag = tags.lastNonEmpty("og:pubdate", "pubdate", "iso-8601-publish-date")
-    if (dateTag != null) {
+    val uploadDate = ld?.str("uploadDate")?.takeIf(::isRfc3339)
+    if (uploadDate != null) {
+        timestamp = uploadDate
+        check(CheckGroup.TEXT, CheckStatus.PASS, CheckKind.TIMESTAMP, "JSON-LD uploadDate")
+    } else if (dateTag != null) {
         if (isRfc3339(dateTag.value)) {
             timestamp = dateTag.value.trim()
             check(CheckGroup.TEXT, CheckStatus.PASS, CheckKind.TIMESTAMP, dateTag.key)
@@ -549,6 +616,13 @@ fun analyzeUnfurl(page: PageFacts): DiscordReport {
     }
     var allImages = byUrl.values.toList()
 
+    if (ld != null) {
+        check(CheckGroup.MEDIA, CheckStatus.PASS, CheckKind.JSONLD_VIDEO_OBJECT)
+        val thumb = ld["thumbnailUrl"].let { it.arrOrNull?.items?.firstOrNull() ?: it }.stringOrNull
+        val thumbUrl = thumb?.let { resolveDiscordUrl(it, pageUrl) }
+        if (allImages.isEmpty() && thumbUrl != null) allImages = listOf(PreviewImage(thumbUrl, "JSON-LD thumbnailUrl"))
+    }
+
     // oEmbed thumbnail fills the image only when Open Graph gave none, and only with both dimensions
     oe?.thumbnailUrl?.let { thumb ->
         if (oe.thumbnailWidth == null || oe.thumbnailHeight == null) {
@@ -594,18 +668,19 @@ fun analyzeUnfurl(page: PageFacts): DiscordReport {
     // ── Video ──
     val videoTag = tags.firstNonEmpty("og:video", "og:video:url", "og:video:secure_url", "twitter:player:stream")
     var video: PreviewVideo? = null
-    if (videoTag != null) {
-        val url = resolveDiscordUrl(videoTag.value, pageUrl)
+    val videoUrlRaw = videoTag?.value ?: ld?.str("embedUrl")
+    if (videoUrlRaw != null) {
+        val url = resolveDiscordUrl(videoUrlRaw, pageUrl)
         if (url != null) {
             video = PreviewVideo(
                 url = url,
-                key = videoTag.key,
+                key = videoTag?.key ?: "JSON-LD embedUrl",
                 type = tags.firstNonEmpty("og:video:type", "twitter:player:stream:content_type")?.value?.trim(),
                 width = toDimension(tags.firstNonEmpty("og:video:width", "twitter:player:width", "og:width")?.value),
                 height = toDimension(tags.firstNonEmpty("og:video:height", "twitter:player:height", "og:height")?.value),
             )
         } else {
-            check(CheckGroup.MEDIA, CheckStatus.FAIL, CheckKind.RELATIVE_VIDEO, videoTag.value.trim())
+            check(CheckGroup.MEDIA, CheckStatus.FAIL, CheckKind.RELATIVE_VIDEO, videoUrlRaw.trim())
         }
     } else if (tags.any { it.key == "twitter:player" }) {
         check(CheckGroup.MEDIA, CheckStatus.INFO, CheckKind.TWITTER_PLAYER_PAGE)

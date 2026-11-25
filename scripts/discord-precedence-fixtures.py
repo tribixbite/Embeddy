@@ -11,7 +11,7 @@ Discord must be able to fetch them, so serve the directory publicly, e.g.:
 
 then paste each https://<tunnel-host>/<name>.html into Discord's Embed Debugger
 (https://discord.com/developers/embeds, signed in) and compare its embed JSON with
-/tools/inspect. The 2026-11-15 results are summarised in TASKS.md (12.8) and
+/tools/inspect. The 2026-11-15 and 2026-11-25 results are summarised in TASKS.md (12.8) and
 encoded as tests in discord-unfurl.test.ts / DiscordUnfurlTest.kt.
 
 Usage: discord-precedence-fixtures.py OUT_DIR BASE_URL
@@ -97,4 +97,33 @@ page("gallery-large", og("gallery large") + f'<meta property="og:image" content=
 page("ce-badtype-then-linked", og("ce badtype,linked") + f'<script id="discord:component-embed" type="text/plain">{ce("BADTYPE inline")}</script>' + linked)
 page("photo-gallery", og("photo gallery") + f'<meta property="og:image" content="{base}/1.webp"><meta name="twitter:card" content="photo">')
 page("video-gallery", og("video gallery") + f'<meta property="og:image" content="{base}/1.webp">' + vid + '<meta property="og:type" content="video.other">')
+# ── Round 5: orderings left open after round 4 ──
+# oEmbed title vs JSON-LD name when neither Open Graph nor Twitter gives a title
+(out / "oembed.json").write_text(json.dumps({"version": "1.0", "type": "link", "title": "OEMBED title"}))
+oembed_link = f'<link rel="alternate" type="application/json+oembed" href="{base}/oembed.json">'
+page("jsonld-vs-oembed", oembed_link + f'<script type="application/ld+json">{ld}</script>')
+# og:pubdate vs JSON-LD uploadDate (ld carries 2026-01-02T03:04:05Z)
+page("pubdate-vs-upload", og("pubdate vs upload") + '<meta property="og:pubdate" content="2025-05-06T07:08:09Z">' + f'<script type="application/ld+json">{ld}</script>')
+# JSON-LD with only a name, or only a description, next to the <title> pair
+ld_name = json.dumps({"@type": "VideoObject", "name": "LD name", "thumbnailUrl": f"{base}/1.webp"})
+ld_desc = json.dumps({"@type": "VideoObject", "description": "LD description", "thumbnailUrl": f"{base}/1.webp"})
+for name, block in (("jsonld-name-only-pair", ld_name), ("jsonld-desc-only-pair", ld_desc)):
+    (out / f"{name}.html").write_text(f'<!doctype html><html><head><title>PAIR title</title><meta name="description" content="PAIR description"><script type="application/ld+json">{block}</script></head><body></body></html>')
+# ── Round 6: which VideoObject properties Discord needs before it reads one at all ──
+page("pubdate-only", og("pubdate only") + '<meta property="og:pubdate" content="2025-05-06T07:08:09Z">')
+full = {"@context": "https://schema.org", "@type": "VideoObject", "name": "LD name", "description": "LD description",
+        "thumbnailUrl": f"{base}/1.webp", "uploadDate": "2026-01-02T03:04:05Z"}
+for missing in ("@context", "name", "description", "thumbnailUrl", "uploadDate", "nothing"):
+    block = json.dumps({k: v for k, v in full.items() if k != missing})
+    (out / f"ld-no-{missing.lower().lstrip('@')}-pair.html").write_text(f'<!doctype html><html><head><title>PAIR title</title><meta name="description" content="PAIR description"><script type="application/ld+json">{block}</script></head><body></body></html>')
+# ── Round 7: @context forms, and whether a video URL can stand in for it ──
+variants = {
+    "http-context": {"@context": "http://schema.org"},
+    "slash-context": {"@context": "https://schema.org/"},
+    "embedurl": {"embedUrl": f"{base}/9.mp4"},
+}
+for suffix, extra in variants.items():
+    base_obj = {k: v for k, v in full.items() if k != "@context"}
+    block = json.dumps({**base_obj, **extra})
+    (out / f"ld-four-{suffix}-pair.html").write_text(f'<!doctype html><html><head><title>PAIR title</title><meta name="description" content="PAIR description"><script type="application/ld+json">{block}</script></head><body></body></html>')
 print("\n".join(sorted(p.name for p in out.glob("*.html"))))

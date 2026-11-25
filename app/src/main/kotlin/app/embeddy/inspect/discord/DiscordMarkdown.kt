@@ -23,6 +23,11 @@ data class MdSpan(
     val strike: Boolean = false,
     val code: Boolean = false,
     val spoiler: Boolean = false,
+    /**
+     * Which `||…||` a spoiler span belongs to, so the screen can reveal one spoiler
+     * (all of its styled spans) on tap without revealing the others in the block.
+     */
+    val spoilerGroup: Int? = null,
     /** http(s) target when the span is a link */
     val link: String? = null,
     /** ANSI foreground / background as 0xRRGGBB (```ansi blocks) */
@@ -188,7 +193,8 @@ private fun inline(text: String, style: MdSpan, out: MutableList<MdSpan>) {
             Rule.UNDERLINE -> inline(inner, style.copy(underline = true), out)
             Rule.ITALIC_STAR, Rule.ITALIC_UNDER -> inline(inner, style.copy(italic = true), out)
             Rule.STRIKE -> inline(inner, style.copy(strike = true), out)
-            Rule.SPOILER -> inline(inner, style.copy(spoiler = true), out)
+            // out.size is where this spoiler's spans start, so it is unique within the block
+            Rule.SPOILER -> inline(inner, style.copy(spoiler = true, spoilerGroup = out.size), out)
         }
         rest = rest.substring(m.range.last + 1)
     }

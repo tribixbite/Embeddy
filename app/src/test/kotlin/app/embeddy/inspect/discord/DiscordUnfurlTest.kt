@@ -11,8 +11,94 @@ class DiscordUnfurlTest {
     private val url = "https://example.com/post"
     private fun og(key: String, value: String) = MetaTag(key, value, "property")
     private fun name(key: String, value: String) = MetaTag(key, value, "name")
-    private fun analyze(vararg tags: MetaTag, title: String = "", embeds: List<ComponentEmbedSource> = emptyList(), oembed: OEmbedSource? = null) =
-        analyzeUnfurl(PageFacts(url, title, tags.toList(), embeds, oembed))
+    private fun analyze(
+        vararg tags: MetaTag,
+        title: String = "",
+        embeds: List<ComponentEmbedSource> = emptyList(),
+        oembed: OEmbedSource? = null,
+        jsonLd: List<String> = emptyList(),
+    ) = analyzeUnfurl(PageFacts(url, title, tags.toList(), embeds, oembed, jsonLd))
+
+    /** A top-level VideoObject; [extra] is spliced in as raw JSON members */
+    private fun ld(extra: String = "", context: String? = "https://schema.org", name: Boolean = true) =
+        "{" + (context?.let { "\"@context\":\"$it\"," } ?: "") +
+            """"@type":"VideoObject",""" + (if (name) """"name":"LD name",""" else "") +
+            """"description":"LD description","thumbnailUrl":"https://e.com/1.webp","uploadDate":"2026-01-02T03:04:05Z"$extra}"""
+
+    @Test
+    fun `a VideoObject is read only with @context https schema org exactly`() {
+        for (context in listOf("http://schema.org", "https://schema.org/", null)) {
+            val r = analyze(name("description", "PAIR description"), title = "PAIR title", jsonLd = listOf(ld(context = context)))
+            assertEquals("PAIR title", r.preview.title?.text)
+            assertNull(r.preview.timestamp)
+            assertTrue(CheckKind.JSONLD_CONTEXT_IGNORED in r.kinds())
+        }
+    }
+
+    @Test
+    fun `JSON-LD uploadDate beats og pubdate`() {
+        val r = analyze(og("og:title", "t"), og("og:pubdate", "2025-05-06T07:08:09Z"), jsonLd = listOf(ld()))
+        assertEquals("2026-01-02T03:04:05Z", r.preview.timestamp)
+        assertEquals(listOf("JSON-LD uploadDate"), r.checks.single { it.kind == CheckKind.TIMESTAMP }.args)
+    }
+
+    @Test
+    fun `a JSON-LD name beats the oEmbed title`() {
+        val oembed = OEmbedSource("https://e.com/oembed", """{"type":"link","title":"OEMBED title"}""", null, 1)
+        val r = analyze(oembed = oembed, jsonLd = listOf(ld()))
+        assertEquals("LD name", r.preview.title?.text)
+    }
+
+    @Test
+    fun `a VideoObject without a name leaves the title empty instead of using title`() {
+        val r = analyze(name("description", "PAIR description"), title = "PAIR title", jsonLd = listOf(ld(name = false)))
+        assertNull(r.preview.title)
+        assertEquals("LD description", r.preview.description?.text)
+    }
+
+    @Test
+    fun `JSON-LD name and description fill empty text and beat the title pair`() {
+        val r = analyze(name("description", "PAIR description"), title = "PAIR title", jsonLd = listOf(ld()))
+        assertEquals("LD name", r.preview.title?.text)
+        assertEquals("LD description", r.preview.description?.text)
+        assertEquals("https://e.com/1.webp", r.preview.images.first().url)
+        assertEquals("2026-01-02T03:04:05Z", r.preview.timestamp)
+        assertTrue(CheckKind.JSONLD_VIDEO_OBJECT in r.kinds())
+        assertFalse(CheckKind.TITLE_DESCRIPTION_PAIR_USED in r.kinds())
+    }
+
+    @Test
+    fun `Open Graph text and image beat JSON-LD, the upload date still applies`() {
+        val r = analyze(
+            og("og:title", "t"), og("og:description", "d"), og("og:image", "https://e.com/0.webp"),
+            jsonLd = listOf(ld()),
+        )
+        assertEquals("t", r.preview.title?.text)
+        assertEquals("d", r.preview.description?.text)
+        assertEquals("https://e.com/0.webp", r.preview.images.first().url)
+        assertEquals("2026-01-02T03:04:05Z", r.preview.timestamp)
+    }
+
+    @Test
+    fun `a top-level JSON-LD VideoObject supplies the video`() {
+        val r = analyze(
+            og("og:type", "video"), og("og:title", "t"),
+            jsonLd = listOf(ld(""","embedUrl":"https://e.com/v.webm","thumbnailUrl":["https://e.com/t.jpg"]""")),
+        )
+        assertEquals(PreviewLayout.VIDEO, r.preview.layout)
+        assertEquals("https://e.com/v.webm", r.preview.video?.url)
+        assertEquals("JSON-LD embedUrl", r.preview.video?.key)
+        assertEquals("https://e.com/t.jpg", r.preview.images.first().url)
+    }
+
+    @Test
+    fun `JSON-LD in an array or graph is flagged and not read, bad JSON is flagged`() {
+        val r = analyze(jsonLd = listOf("[${ld()}]", """{"@graph":[${ld()}]}""", "{nope"))
+        assertNull(r.preview.title)
+        assertEquals(2, r.kinds().count { it == CheckKind.JSONLD_NOT_TOP_LEVEL })
+        assertTrue(CheckKind.JSONLD_INVALID in r.kinds())
+        assertFalse(CheckKind.JSONLD_VIDEO_OBJECT in r.kinds())
+    }
 
     private fun DiscordReport.kinds() = checks.map { it.kind }
 

@@ -319,6 +319,10 @@ class MetadataEngine {
                 tags = metaTags,
                 componentEmbeds = collectComponentEmbeds(url, doc),
                 oembed = fetchOEmbed(doc),
+                jsonLd = doc.select("script")
+                    .filter { it.attr("type").trim().equals("application/ld+json", ignoreCase = true) }
+                    .take(MAX_JSONLD_BLOCKS)
+                    .map { it.data() },
             ),
         )
 
@@ -597,6 +601,8 @@ class MetadataEngine {
         private const val MAX_EMBED_JSON_BYTES = 16 * 1024
         private const val MAX_OEMBED_BYTES = 32 * 1024
         private const val MAX_LINKED_EMBEDS = 3
+        /** Same block cap as the worker's MAX_JSONLD_BLOCKS */
+        private const val MAX_JSONLD_BLOCKS = 5
         private const val SUBFETCH_TIMEOUT_MS = 5_000
 
         private val GENERAL_META_KEYS = setOf("description", "author", "theme-color", "robots", "generator")

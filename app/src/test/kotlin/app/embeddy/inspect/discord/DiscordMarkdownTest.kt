@@ -37,6 +37,18 @@ class DiscordMarkdownTest {
     }
 
     @Test
+    fun `each spoiler gets one group shared by its styled spans`() {
+        val spans = parseInline("a ||one **bold**|| b ||two||")
+        val one = spans.first { it.text == "one " }
+        val bold = spans.first { it.text == "bold" }
+        val two = spans.first { it.text == "two" }
+        assertTrue(bold.bold && bold.spoiler)
+        assertEquals(one.spoilerGroup, bold.spoilerGroup)
+        assertTrue(one.spoilerGroup != null && one.spoilerGroup != two.spoilerGroup)
+        assertNull(spans.first { it.text == "a " }.spoilerGroup)
+    }
+
+    @Test
     fun `escapes and timestamps`() {
         val spans = parseInline("\\*not italic\\* <t:1700000000:R>")
         assertEquals("*not italic* ", spans.first().text)

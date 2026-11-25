@@ -214,6 +214,7 @@ describe("analyzeUnfurl — video", () => {
         jsonLd: [
           {
             raw: JSON.stringify({
+              "@context": "https://schema.org",
               "@type": "VideoObject",
               embedUrl: "https://e.com/v.webm",
               thumbnailUrl: ["https://e.com/t.jpg"],
@@ -423,6 +424,7 @@ describe("analyzeUnfurl — precedence checked in Discord's Embed Debugger", () 
 
   const ld = (extra: Record<string, unknown> = {}) => ({
     raw: JSON.stringify({
+      "@context": "https://schema.org",
       "@type": "VideoObject",
       name: "LD name",
       description: "LD description",
@@ -448,6 +450,37 @@ describe("analyzeUnfurl — precedence checked in Discord's Embed Debugger", () 
     expect(r.preview.description?.text).toBe("d");
     expect(r.preview.images[0]?.url).toBe("https://e.com/0.webp");
     expect(r.preview.timestamp).toBe("2026-01-02T03:04:05.000Z");
+  });
+
+  test("a VideoObject is read only with @context https://schema.org exactly", () => {
+    for (const context of ["http://schema.org", "https://schema.org/", undefined]) {
+      const r = analyzeUnfurl({ ...page([["description", "PAIR description"]], { jsonLd: [ld({ "@context": context })] }), title: "PAIR title" });
+      expect(r.preview.title?.text).toBe("PAIR title");
+      expect(r.preview.timestamp).toBeUndefined();
+      expect(r.checks.some((c) => c.title.startsWith("VideoObject ignored"))).toBe(true);
+    }
+  });
+
+  test("JSON-LD uploadDate beats og:pubdate", () => {
+    const r = analyzeUnfurl(page([...og, ["og:pubdate", "2025-05-06T07:08:09Z"]], { jsonLd: [ld()] }));
+    expect(r.preview.timestamp).toBe("2026-01-02T03:04:05.000Z");
+    expect(r.checks.find((c) => c.title === "Timestamp from JSON-LD uploadDate")?.detail).toContain("og:pubdate");
+  });
+
+  test("a JSON-LD name beats the oEmbed title", () => {
+    const r = analyzeUnfurl(
+      page([], {
+        jsonLd: [ld()],
+        oembed: { href: "https://e.com/oembed", count: 1, status: 200, ms: 50, raw: JSON.stringify({ type: "link", title: "OEMBED title" }), bytes: 0, truncated: false },
+      }),
+    );
+    expect(r.preview.title?.text).toBe("LD name");
+  });
+
+  test("a VideoObject without a name leaves the title empty instead of using <title>", () => {
+    const r = analyzeUnfurl({ ...page([["description", "PAIR description"]], { jsonLd: [ld({ name: undefined })] }), title: "PAIR title" });
+    expect(r.preview.title).toBeUndefined();
+    expect(r.preview.description?.text).toBe("LD description");
   });
 
   const payload = (text: string) => JSON.stringify({ component: { type: 17, components: [{ type: 10, content: text }] } });

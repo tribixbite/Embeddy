@@ -64,6 +64,10 @@
     <string name="discord_check_timestamp">Timestamp from %1$s</string>
     <string name="discord_check_date_ignored">%1$s \"%2$s\" is ignored. Use a full RFC 3339 timestamp with a time and an offset.</string>
     <string name="discord_check_published_time">article:published_time isn\'t read. Discord reads og:pubdate, pubdate or iso-8601-publish-date.</string>
+    <string name="discord_check_jsonld_invalid">A JSON-LD block isn\'t valid JSON</string>
+    <string name="discord_check_jsonld_not_top_level">VideoObject isn\'t top-level: Discord reads only a top-level schema.org VideoObject, not one inside an array or @graph</string>
+    <string name="discord_check_jsonld_context_ignored">VideoObject ignored: Discord reads one only with \"@context\": \"https://schema.org\" exactly (this one has \"%1$s\")</string>
+    <string name="discord_check_jsonld_video_object">JSON-LD VideoObject found: Discord reads name, description, embedUrl, thumbnailUrl and uploadDate</string>
     <string name="discord_check_oembed_thumbnail_ignored">oEmbed thumbnail ignored: thumbnail_url needs thumbnail_width and thumbnail_height</string>
     <string name="discord_check_relative_image">Relative image URL not read (%1$s). Relative URLs must start with \"/\".</string>
     <string name="discord_check_orphan_image_meta">An image size/type/alt tag comes before any og:image, so it attaches to nothing</string>

@@ -329,6 +329,12 @@ function isVideoObject(node: unknown): node is Record<string, unknown> {
   return type === "VideoObject" || (Array.isArray(type) && type.includes("VideoObject"));
 }
 
+/**
+ * The only @context Discord accepts on a VideoObject (Embed Debugger, 2026-11-25:
+ * "http://schema.org", "https://schema.org/" and a missing @context were all ignored).
+ */
+const JSONLD_CONTEXT = "https://schema.org";
+
 // ── Main analysis ───────────────────────────────────────────────────────────
 
 /**
@@ -447,7 +453,12 @@ export function analyzeUnfurl(result: MetadataResult, now = Date.now()): UnfurlR
       continue;
     }
     if (isVideoObject(node)) {
-      ldVideo ??= node;
+      if (node["@context"] === JSONLD_CONTEXT) {
+        ldVideo ??= node;
+      } else {
+        const context = typeof node["@context"] === "string" ? `"${node["@context"]}"` : "missing";
+        check("media", "warn", "VideoObject ignored: @context isn't https://schema.org", `@context is ${context}; Discord reads a VideoObject only with "@context": "https://schema.org" exactly.`);
+      }
     } else if (
       (Array.isArray(node) && node.some(isVideoObject)) ||
       (typeof node === "object" && node !== null && Array.isArray((node as Record<string, unknown>)["@graph"]) &&
@@ -468,7 +479,8 @@ export function analyzeUnfurl(result: MetadataResult, now = Date.now()): UnfurlR
   // JSON-LD name/description fill what Open Graph/Twitter left empty, and win
   // over the <title> + meta description pair (Embed Debugger, 2026-11-15: a
   // page with all three showed the JSON-LD text; with og:title/og:description
-  // too, Open Graph won). Filling field by field is the inspector's reading.
+  // too, Open Graph won). They fill field by field (2026-11-25: a VideoObject
+  // without a name left the title empty and did not bring back <title>).
   const ldName = str(ldVideo?.name)?.trim();
   const ldDesc = str(ldVideo?.description)?.trim();
   if (!ogTitle && ldName) {
@@ -495,10 +507,9 @@ export function analyzeUnfurl(result: MetadataResult, now = Date.now()): UnfurlR
       check("text", "warn", "<title> / meta description fallback not used", "Discord reads them only as a pair — this page has just one of the two.");
     }
   }
-  if (!ogTitle && oembed?.title) {
-    // oEmbed fills the title only when Open Graph/Twitter gave none
-    // TODO: whether oEmbed's title or a JSON-LD name wins when both fill the gap is untested
-    // in the Embed Debugger; oEmbed overriding both is kept from before.
+  if (!ogTitle && !ldName && oembed?.title) {
+    // oEmbed fills the title only when Open Graph/Twitter and JSON-LD gave none
+    // (Embed Debugger, 2026-11-25: a JSON-LD name beat a fetched oEmbed title)
     titleValue = oembed.title;
     titleSource = "oEmbed title";
   }
@@ -579,10 +590,16 @@ export function analyzeUnfurl(result: MetadataResult, now = Date.now()): UnfurlR
     }
   }
 
-  // Publish date (last wins)
+  // Publish date: a JSON-LD uploadDate beats the meta tags (Embed Debugger, 2026-11-25:
+  // og:pubdate alone was used, but lost to uploadDate on the same page); among the tags
+  // the last one wins
   const dateTag = lastNonEmpty(tags, ["og:pubdate", "pubdate", "iso-8601-publish-date"]);
+  const uploadDate = str(ldVideo?.uploadDate);
   let timestamp: string | undefined;
-  if (dateTag) {
+  if (uploadDate && isRfc3339(uploadDate)) {
+    timestamp = new Date(uploadDate).toISOString();
+    check("text", "pass", "Timestamp from JSON-LD uploadDate", dateTag ? `It wins over ${dateTag.property}.` : undefined);
+  } else if (dateTag) {
     if (isRfc3339(dateTag.content)) {
       timestamp = new Date(dateTag.content.trim()).toISOString();
       check("text", "pass", `Timestamp from ${dateTag.property}`);
@@ -657,8 +674,6 @@ export function analyzeUnfurl(result: MetadataResult, now = Date.now()): UnfurlR
     const thumb = Array.isArray(ldVideo.thumbnailUrl) ? ldVideo.thumbnailUrl[0] : ldVideo.thumbnailUrl;
     const thumbUrl = typeof thumb === "string" ? resolveDiscordUrl(thumb, pageUrl) : null;
     if (!allImages.length && thumbUrl) allImages = [{ url: thumbUrl, key: "JSON-LD thumbnailUrl" }];
-    const uploadDate = str(ldVideo.uploadDate);
-    if (!timestamp && uploadDate && isRfc3339(uploadDate)) timestamp = new Date(uploadDate).toISOString();
   }
 
   // oEmbed thumbnail fills the image only when Open Graph gave none, and only with both dimensions

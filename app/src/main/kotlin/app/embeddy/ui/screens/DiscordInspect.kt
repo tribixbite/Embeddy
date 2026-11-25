@@ -107,6 +107,8 @@ private object DiscordColors {
     val button = Color(0xFF4E5058)
     val code = Color(0xFF1E1F22)
     val spoiler = Color(0xFF1E1F22)
+    /** Discord's backdrop behind a revealed inline spoiler */
+    val spoilerRevealed = Color(0x1AFFFFFF)
     val pass = Color(0xFF23A55A)
     val warn = Color(0xFFF0B232)
     val fail = Color(0xFFF23F43)
@@ -475,7 +477,9 @@ private fun MarkdownText(source: String) {
 
 @Composable
 private fun MarkdownBlock(block: MdBlock) {
-    val text = markdownString(block.spans)
+    // Spoilers the viewer has tapped open in this block; like Discord they stay open
+    var revealed by remember(block) { mutableStateOf(emptySet<Int>()) }
+    val text = markdownString(block.spans, revealed) { group -> revealed = revealed + group }
     val (size: TextUnit, weight: FontWeight, color: Color) = when (block.kind) {
         MdBlockKind.H1 -> Triple(22.sp, FontWeight.Bold, DiscordColors.heading)
         MdBlockKind.H2 -> Triple(19.sp, FontWeight.Bold, DiscordColors.heading)
@@ -518,12 +522,22 @@ private fun MarkdownBlock(block: MdBlock) {
     }
 }
 
-/** Spans → AnnotatedString; timestamps are formatted for the viewer's locale and zone */
+/**
+ * Spans → AnnotatedString; timestamps are formatted for the viewer's locale and zone.
+ * A hidden spoiler is a clickable annotation that calls [onReveal] with its group, which
+ * reveals every span of that `||…||` at once. A link inside a hidden spoiler is not
+ * followable until revealed, as in Discord.
+ */
 @Composable
-private fun markdownString(spans: List<MdSpan>): AnnotatedString {
+private fun markdownString(
+    spans: List<MdSpan>,
+    revealed: Set<Int>,
+    onReveal: (Int) -> Unit,
+): AnnotatedString {
     val context = LocalContext.current
     return buildAnnotatedString {
         for (span in spans) {
+            val hidden = span.spoiler && span.spoilerGroup !in revealed
             val style = SpanStyle(
                 fontWeight = if (span.bold) FontWeight.Bold else null,
                 fontStyle = if (span.italic) FontStyle.Italic else null,
@@ -535,21 +549,30 @@ private fun markdownString(spans: List<MdSpan>): AnnotatedString {
                 },
                 fontFamily = if (span.code) FontFamily.Monospace else null,
                 color = when {
-                    span.spoiler -> DiscordColors.spoiler
+                    hidden -> DiscordColors.spoiler
                     span.color != null -> Color(0xFF000000 or span.color.toLong())
                     span.link != null -> DiscordColors.link
                     else -> Color.Unspecified
                 },
                 background = when {
-                    span.spoiler -> DiscordColors.spoiler
+                    hidden -> DiscordColors.spoiler
                     span.background != null -> Color(0xFF000000 or span.background.toLong())
                     span.code && span.color == null -> DiscordColors.code
                     span.timestamp != null -> DiscordColors.code
+                    span.spoiler -> DiscordColors.spoilerRevealed
                     else -> Color.Unspecified
                 },
             )
             val text = span.timestamp?.let { formatTimestamp(context, it) } ?: span.text
-            if (span.link != null) {
+            val group = span.spoilerGroup
+            if (hidden && group != null) {
+                val reveal = LinkAnnotation.Clickable(
+                    tag = "spoiler:$group",
+                    styles = TextLinkStyles(style),
+                    linkInteractionListener = { onReveal(group) },
+                )
+                withLink(reveal) { append(text) }
+            } else if (span.link != null) {
                 withLink(LinkAnnotation.Url(span.link, TextLinkStyles(style))) { append(text) }
             } else {
                 withStyle(style) { append(text) }
@@ -707,6 +730,10 @@ private fun CheckKind.res(): Int = when (this) {
     CheckKind.DATE_IGNORED -> R.string.discord_check_date_ignored
     CheckKind.PUBLISHED_TIME_NOT_READ -> R.string.discord_check_published_time
     CheckKind.OEMBED_THUMBNAIL_IGNORED -> R.string.discord_check_oembed_thumbnail_ignored
+    CheckKind.JSONLD_INVALID -> R.string.discord_check_jsonld_invalid
+    CheckKind.JSONLD_NOT_TOP_LEVEL -> R.string.discord_check_jsonld_not_top_level
+    CheckKind.JSONLD_CONTEXT_IGNORED -> R.string.discord_check_jsonld_context_ignored
+    CheckKind.JSONLD_VIDEO_OBJECT -> R.string.discord_check_jsonld_video_object
     CheckKind.RELATIVE_IMAGE -> R.string.discord_check_relative_image
     CheckKind.ORPHAN_IMAGE_META -> R.string.discord_check_orphan_image_meta
     CheckKind.VARIANT_IMAGE_META -> R.string.discord_check_variant_image_meta
