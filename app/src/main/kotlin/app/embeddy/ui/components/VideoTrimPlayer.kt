@@ -32,7 +32,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
@@ -380,7 +379,7 @@ fun VideoTrimPlayer(
                 )
             } else {
                 var draggedHandleMs by remember(uri) { mutableLongStateOf(-1L) }
-                RangeSlider(
+                ScrollSafeRangeSlider(
                     value = trimStart.toFloat()..trimEnd.toFloat(),
                     onValueChange = { range ->
                         val previous = dragTrim ?: (trimStart.toFloat()..trimEnd.toFloat())
@@ -457,8 +456,18 @@ private fun StitchSegments(
     onCommit: (List<TrimSegment>, seekMs: Long?) -> Unit,
 ) {
     val sliderRange = 0f..durationMs.toFloat()
-    // The latest drag result, read by onValueChangeFinished.
-    val latest by rememberUpdatedState(segments)
+    // The list from the latest onValueChange, read by onValueChangeFinished. A tap on a
+    // track fires both callbacks in the same frame, before a recomposition could refresh
+    // [segments], so committing the parameter there dropped the tapped value.
+    var pending by remember { mutableStateOf<List<TrimSegment>?>(null) }
+    fun drag(updated: List<TrimSegment>, seekMs: Long?) {
+        pending = updated
+        onDrag(updated, seekMs)
+    }
+    fun commit(seekMs: Long?) {
+        onCommit(pending ?: segments, seekMs)
+        pending = null
+    }
     var lastSeekMs by remember { mutableLongStateOf(-1L) }
 
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -484,7 +493,7 @@ private fun StitchSegments(
                 }
             }
 
-            RangeSlider(
+            ScrollSafeRangeSlider(
                 value = segment.startMs.toFloat()..segment.endMs.toFloat(),
                 onValueChange = { range ->
                     val newStart = range.start.toLong()
@@ -492,9 +501,9 @@ private fun StitchSegments(
                     val seek = if (newStart != segment.startMs) newStart else newEnd
                     lastSeekMs = seek
                     // copy() so the segment's volume survives a handle drag
-                    onDrag(segments.toMutableList().apply { set(index, segment.copy(startMs = newStart, endMs = newEnd)) }, seek)
+                    drag(segments.toMutableList().apply { set(index, segment.copy(startMs = newStart, endMs = newEnd)) }, seek)
                 },
-                onValueChangeFinished = { onCommit(latest, lastSeekMs.takeIf { it >= 0 }) },
+                onValueChangeFinished = { commit(lastSeekMs.takeIf { it >= 0 }) },
                 valueRange = sliderRange,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -532,9 +541,9 @@ private fun StitchSegments(
                     Slider(
                         value = segment.volume,
                         onValueChange = { v ->
-                            onDrag(segments.toMutableList().apply { set(index, segment.copy(volume = v)) }, null)
+                            drag(segments.toMutableList().apply { set(index, segment.copy(volume = v)) }, null)
                         },
-                        onValueChangeFinished = { onCommit(latest, null) },
+                        onValueChangeFinished = { commit(null) },
                         valueRange = 0f..2f,
                         modifier = Modifier.weight(1f),
                         colors = SliderDefaults.colors(

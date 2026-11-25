@@ -23,7 +23,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -88,7 +87,7 @@ fun JoinClipsCard(
                 // Local drag state; committed once on release.
                 var drag by remember(clip.uri) { mutableStateOf<ClosedFloatingPointRange<Float>?>(null) }
                 val shown = drag ?: (range.startMs.toFloat()..range.endMs.toFloat())
-                RangeSlider(
+                ScrollSafeRangeSlider(
                     value = shown,
                     onValueChange = { drag = it },
                     onValueChangeFinished = {
