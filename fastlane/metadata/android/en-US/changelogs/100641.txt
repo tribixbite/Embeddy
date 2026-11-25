@@ -1,0 +1,2 @@
+- JSON-LD rules from the Embed Debugger, on web and Android
+- keep trim and stitch ranges from moving on page scrolls
